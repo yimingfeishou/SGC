@@ -16,7 +16,6 @@ SGC 是一个 Gallt 语言编译器前端。后端复用 LLVM 的 clang/lld，�
 - `SGC/include/gallt/codegen`：LLVM IR 生成
 - `SGC/include/gallt/driver`：命令行驱动
 - `SGC/include/gallt/...`：源码注释为中英双语
-- `SGC/SGC.vcxproj`：Visual Studio 工程
 
 ### 构建
 
@@ -62,7 +61,6 @@ Current version: `0.2.0 Preview`.
 - `SGC/include/gallt/codegen`: LLVM IR generation
 - `SGC/include/gallt/driver`: command-line driver
 - `SGC/include/gallt/...`: all source comments are bilingual, Chinese and English
-- `SGC/SGC.vcxproj`: Visual Studio project
 
 ### Build
 
