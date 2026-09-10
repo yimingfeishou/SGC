@@ -19,8 +19,6 @@ SGC 是一个 Gallt 语言编译器前端。后端复用 LLVM 的 clang/lld，�
 
 ### 构建
 
-用 Visual Studio 打开 `SGC.slnx`，选择 x64 后编译；或使用 CMake。
-
 编译生成的 `sgc` 需要通过 `SGC_LLVM_BIN` 或 `LLVM_BIN` 找到 `clang.exe`。若未设置环境变量，还会探测常见 LLVM 构建目录，例如：
 
 - `C:/LLVM/build/Release/bin`
@@ -63,8 +61,6 @@ Current version: `0.2.0 Preview`.
 - `SGC/include/gallt/...`: all source comments are bilingual, Chinese and English
 
 ### Build
-
-Open `SGC.slnx` in Visual Studio, select x64, and build. Alternatively, use CMake.
 
 The built `sgc` locates `clang.exe` through `SGC_LLVM_BIN` or `LLVM_BIN`. If neither is set, it also probes common LLVM build directories such as:
 
