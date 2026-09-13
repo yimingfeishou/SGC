@@ -30,10 +30,11 @@ SGC 是一个 Gallt 语言编译器前端。后端复用 LLVM 的 clang/lld，�
 ### 用法
 
 ```text
-sgc --compile --input file.glt --output file.exe
+sgc --compile --input "file.glt" --output "program.exe"
+sgc --compile --input "file.glt" --output "program.exe" --optimization-level <0-4>
+sgc --compile --input "file.glt" --output "program.exe" -OL <0-4>
 sgc --help
 sgc --version
-sgc -OL <optimization level>
 ```
 
 ### 注意事项
@@ -74,10 +75,11 @@ Running `sgc` also requires LLVM's `clang.exe` and `lld`.
 ### Usage
 
 ```text
-sgc --compile --input file.glt --output file.exe
+sgc --compile --input "file.glt" --output "program.exe"
+sgc --compile --input "file.glt" --output "program.exe" --optimization-level <0-4>
+sgc --compile --input "file.glt" --output "program.exe" -OL <0-4>
 sgc --help
 sgc --version
-sgc -OL <optimization level>
 ```
 
 ### Notes
