@@ -12,6 +12,7 @@
 #include <vector>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace gallt {
 
@@ -53,6 +54,16 @@ namespace gallt {
             return expression_types_;
         }
 
+        // 函数名解析结果（第 18 章）：标识符 → 具体函数 / extern 声明。
+        // 代码生成阶段据此取“当前”名字，避免重载集之后被命名修饰而使调用点失效。
+        // Function-name resolutions (§18): identifier -> concrete function/extern. Codegen
+        // reads the current name through these, so later mangling cannot invalidate a call
+        // site that was resolved earlier.
+        const std::unordered_map<const AST::PrimaryExpression*, const AST::FunctionDefinition*>&
+            resolved_functions() const { return resolved_functions_; }
+        const std::unordered_map<const AST::PrimaryExpression*, const AST::ExternDeclaration*>&
+            resolved_externs() const { return resolved_externs_; }
+
     private:
         // ---- 成员变量 ----
         DiagnosticEngine& diag_;
@@ -76,6 +87,19 @@ namespace gallt {
         // Cache of the final type of every checked expression
         std::unordered_map<const AST::Expression*, AST::Type> expression_types_;
 
+        // 函数名解析与命名修饰缓存（键为 AST 节点指针，避免容器重分配导致失效）
+        // Function-name resolutions and mangling caches (keyed by AST node pointers)
+        std::unordered_map<const AST::PrimaryExpression*, const AST::FunctionDefinition*>
+            resolved_functions_;
+        std::unordered_map<const AST::PrimaryExpression*, const AST::ExternDeclaration*>
+            resolved_externs_;
+        std::unordered_map<const AST::FunctionDefinition*, std::string> mangled_functions_;
+        std::unordered_map<const AST::ExternDeclaration*, std::string> mangled_externs_;
+        std::unordered_set<std::string> used_mangled_names_;
+        // 当前表达式所期望的目标类型（按函数指针类型选择重载时使用）
+        // Expected target type of the expression currently being checked
+        const AST::Type* expected_type_ = nullptr;
+
         // ---- 顶层检查 ----
         void check_top_level(AST::TopLevel* node);
         void check_guide_statement(AST::GuideStatement* node);
@@ -88,6 +112,14 @@ namespace gallt {
         void check_statement(AST::Statement* stmt);
         void check_block(AST::Block* block);
         void check_variable_declaration(AST::VariableDeclaration* decl);
+        // 逐维校验（多维）数组的花括号初始化列表（第 7 章 / ER 0015 / ER 0016）
+        // Validate the brace initializer of a (multi-dimensional) array dimension by dimension
+        void check_array_initializer(AST::ArrayInitializer* init, const AST::Type& array_type,
+            SourceLocation loc);
+        // 校验结构体花括号初始化列表（成员顺序、嵌套结构体/数组成员，第 14 章）
+        // Validate a struct brace initializer (member order, nested struct/array members, §14)
+        void check_struct_initializer(AST::ArrayInitializer* init, const AST::Type& struct_type,
+            SourceLocation loc);
         void check_if_statement(AST::IfStatement* if_stmt);
         void check_for_statement(AST::ForStatement* for_stmt);
         void check_while_statement(AST::WhileStatement* while_stmt);
@@ -170,6 +202,43 @@ namespace gallt {
         void report_error(SourceLocation loc, ErrorCode code, const std::string& msg);
         void report_error(ErrorCode code, const std::string& msg);  // 使用当前位置（通常是 current token）
         void report_warning(SourceLocation loc, ErrorCode code, const std::string& msg);
+
+        // ---- 0.3 §18 重载决议 ----
+        // ---- 0.3 §18 overload resolution ----
+        // 为当前作用域的重载集分配唯一名字（命名修饰）
+        void mangle_overload_set(const std::string& name);
+        // 重载调用决议：返回选中符号（失败返回 nullptr 并报错）
+        Symbol* resolve_overload_call(const std::string& name, AST::PostfixExpression* call,
+            AST::PrimaryExpression* callee);
+        // 某个实参到形参的转换等级：0 精确匹配，1 隐式转换，-1 不可转换
+        int conversion_rank(const AST::Type& from, const AST::Type& to);
+        // 重载命名修饰使用的完整参数签名（第 18 章）
+        // Full parameter-type signature used for overload name mangling (§18)
+        std::string overload_signature(const std::vector<AST::Type>& params) const;
+        std::string unique_mangled_name(const std::string& base);
+        // 记录一次函数名解析（供代码生成取当前名字）
+        // Record a function-name resolution so codegen can read the current name
+        void record_function_resolution(AST::PrimaryExpression* callee, const Symbol& symbol);
+        // 按目标函数指针类型在重载集中选择（第 18 章 / 第 13 章）
+        // Select an overload by the expected function-pointer type (§18/§13)
+        Symbol* select_overload_by_target_type(std::vector<Symbol>& set, const AST::Type& target,
+            const std::string& name, SourceLocation loc);
+        // 定义阶段检查：两个重载是否因默认参数而在某次调用上必然二义
+        // Definition-stage check: do two overloads inevitably become ambiguous for some call?
+        bool overloads_ambiguous_by_defaults(const Symbol& a, const Symbol& b) const;
+        // ---- 第 20 章：特殊成员重载决议与生命周期检查 ----
+        // ---- §20: special-member overload resolution and lifetime checks ----
+        // 按实参类型解析构造函数重载集（二义性报 ER 0096）
+        Symbol* resolve_constructor_overload(const std::string& struct_name,
+            const std::vector<AST::Type>& arg_types, const std::vector<bool>& arg_is_null,
+            SourceLocation loc);
+        // 类型大小/对齐（与代码生成一致；用于 Placement 构造检查）
+        bool type_layout(const AST::Type& type, std::size_t& size, std::size_t& align) const;
+        // 类型的默认拷贝/移动特殊成员是否可用（[nocopy]/[nomove] 与成员递归，第 20 章）
+        bool type_is_copyable(const AST::Type& type) const;
+        bool type_is_movable(const AST::Type& type) const;
+        // 判断表达式是否为 move(...)（第 20 章移动语义）
+        static bool is_move_expression(const AST::Expression* expr);
 
         // ---- 主函数验证 ----
         void verify_main_function();

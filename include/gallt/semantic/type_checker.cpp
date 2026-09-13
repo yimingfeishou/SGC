@@ -16,6 +16,13 @@ using namespace gallt::AST;
 namespace gallt {
 
     namespace {
+        // 判断表达式是否为 null 字面量（用于 file 与 null 的比较/赋值）
+        // Whether the expression is the null literal (file vs null handling)
+        bool is_null_literal_expr(const AST::Expression* expr) {
+            auto* prim = dynamic_cast<const AST::PrimaryExpression*>(expr);
+            return prim != nullptr && prim->kind == AST::PrimaryExpression::Kind::Null;
+        }
+
         // ========================================================================
         // 文件操作内置函数签名表（Gallt 0.2.txt §17）
         // File-operation builtin signature table (Gallt 0.2.txt §17)
@@ -153,6 +160,14 @@ namespace gallt {
             check_top_level(top.get());
         }
 
+        // 全局对象的构造调用（Gallt 0.3.txt §20）：在全局作用域内检查，
+        // 此时所有函数与全局变量都已声明
+        // Constructor calls for global objects: checked in the global scope after every
+        // function and global variable has been declared
+        for (auto& stmt : program->global_initializers) {
+            check_statement(stmt.get());
+        }
+
         // 验证主函数
         verify_main_function();
 
@@ -221,27 +236,46 @@ namespace gallt {
                     "incomplete parameter type in extern declaration");
             }
         }
-        if (auto* existing = sym_table_.lookup(node->name)) {
-            if (existing->kind == SymbolKind::Function) {
-                report_error(node->location, ErrorCode::RedefinedFunction,
-                    "function '" + node->name + "' already defined");
-            }
-            else {
-                report_error(node->location, ErrorCode::RedefinedIdentifier,
-                    "identifier '" + node->name + "' already declared");
-            }
-            return;
-        }
+        // 0.3 §18：同一作用域内允许函数重载（参数列表不同）；完全相同视为重复定义
+        // 0.3 §18: same-scope overloads allowed; identical parameter lists are redefinitions
         Symbol sym = Symbol::make_function(
             node->name, node->return_type,
             node->parameters, node->param_names,
-            node->location, nullptr
-        );
-        sym.function_node = nullptr;
+            node->location, nullptr);
+        sym.extern_node = node;
+        Symbol* existing = sym_table_.lookup_current(node->name);
+        if (existing != nullptr) {
+            if (existing->kind != SymbolKind::Function) {
+                report_error(node->location, ErrorCode::RedefinedIdentifier,
+                    "identifier '" + node->name + "' already declared");
+                return;
+            }
+            // extern 与用户函数、多个 extern 之间构成重载集（第 18 章）
+            // An extern shares an overload set with user functions and other externs (§18)
+            if (!sym_table_.declare_overload(sym)) {
+                report_error(node->location, ErrorCode::RedefinedFunction,
+                    "function '" + node->name +
+                    "' already declared with the same parameter list");
+                return;
+            }
+            if (std::vector<Symbol>* set = sym_table_.lookup_overloads(node->name)) {
+                for (const Symbol& other : *set) {
+                    if (&other == &(*set).back()) continue;
+                    if (overloads_ambiguous_by_defaults(other, (*set).back())) {
+                        report_error(node->location, ErrorCode::OverloadAmbiguous, { node->name });
+                        break;
+                    }
+                }
+            }
+            mangle_overload_set(node->name);
+            return;
+        }
         if (!sym_table_.declare(sym)) {
             report_error(node->location, ErrorCode::RedefinedFunction,
                 "function '" + node->name + "' already declared");
+            return;
         }
+        sym_table_.declare_overload(sym);
     }
 
     void TypeChecker::check_function_definition(AST::FunctionDefinition* node) {
@@ -274,23 +308,70 @@ namespace gallt {
             if (existing->kind == SymbolKind::Function) {
                 if (existing->function_node == nullptr) {
                     // extern 声明，现在定义
-                    if (!(existing->type == node->return_type &&
-                        existing->param_types.size() == node->parameters.size() &&
+                    bool same_signature = existing->param_types.size() == node->parameters.size() &&
                         std::equal(existing->param_types.begin(), existing->param_types.end(),
-                            node->parameters.begin()))) {
-                        report_error(node->location, ErrorCode::FunctionReturnTypeMismatch,
-                            "function '" + node->name + "' extern declaration signature mismatch");
+                            node->parameters.begin());
+                    if (same_signature) {
+                        if (existing->type != node->return_type) {
+                            report_error(node->location, ErrorCode::FunctionReturnTypeMismatch,
+                                "function '" + node->name +
+                                "' does not match its extern declaration return type");
+                        }
+                        existing->function_node = node;
+                        if (existing->param_names.empty() && !node->param_names.empty()) {
+                            existing->param_names = node->param_names;
+                        }
                     }
-                    existing->function_node = node;
-                    if (existing->param_names.empty() && !node->param_names.empty()) {
-                        existing->param_names = node->param_names;
+                    else {
+                        // 与 extern 同名但签名不同 → 作为重载参与决议（第 18 章）
+                        // Same extern name with a different signature becomes an overload
+                        Symbol overload_sym = Symbol::make_function(node->name, node->return_type,
+                            node->parameters, node->param_names, node->location, node);
+                        if (!sym_table_.declare_overload(overload_sym)) {
+                            report_error(node->location, ErrorCode::RedefinedFunction,
+                                "function '" + node->name +
+                                "' already defined with the same parameter list");
+                            return;
+                        }
+                        if (std::vector<Symbol>* set = sym_table_.lookup_overloads(node->name)) {
+                            for (const Symbol& other : *set) {
+                                if (&other == &(*set).back()) continue;
+                                if (overloads_ambiguous_by_defaults(other, (*set).back())) {
+                                    report_error(node->location, ErrorCode::OverloadAmbiguous,
+                                        { node->name });
+                                    break;
+                                }
+                            }
+                        }
+                        mangle_overload_set(node->name);
                     }
                 }
                 else {
-                    report_error(node->location, ErrorCode::RedefinedFunction,
-                        "function '" + node->name + "' already defined");
+                    // 0.3 §18：同名但参数列表不同 → 重载
+                    Symbol overload_sym = Symbol::make_function(
+                        node->name, node->return_type, node->parameters, node->param_names,
+                        node->location, node);
+                    if (!sym_table_.declare_overload(overload_sym)) {
+                        report_error(node->location, ErrorCode::RedefinedFunction,
+                            "function '" + node->name +
+                            "' already defined with the same parameter list");
+                        return;
+                    }
+                    // 第 18 章：定义阶段检查默认参数导致的必然二义性
+                    // §18: definition-stage check for inevitable ambiguity caused by defaults
+                    if (std::vector<Symbol>* set = sym_table_.lookup_overloads(node->name)) {
+                        for (const Symbol& other : *set) {
+                            if (&other == &(*set).back()) continue;
+                            if (overloads_ambiguous_by_defaults(other, (*set).back())) {
+                                report_error(node->location, ErrorCode::OverloadAmbiguous,
+                                    { node->name });
+                                break;
+                            }
+                        }
+                    }
+                    // 重载集需要唯一名字供代码生成使用
+                    mangle_overload_set(node->name);
                 }
-                return;
             }
             else {
                 report_error(node->location, ErrorCode::RedefinedIdentifier,
@@ -298,18 +379,21 @@ namespace gallt {
                 return;
             }
         }
-        Symbol sym = Symbol::make_function(
-            node->name, node->return_type,
-            node->parameters, node->param_names,
-            node->location, node
-        );
-        if (!sym_table_.declare(sym)) {
-            report_error(node->location, ErrorCode::RedefinedFunction,
-                "function '" + node->name + "' already declared");
-            return;
+        else {
+            Symbol sym = Symbol::make_function(
+                node->name, node->return_type,
+                node->parameters, node->param_names,
+                node->location, node
+            );
+            if (!sym_table_.declare(sym)) {
+                report_error(node->location, ErrorCode::RedefinedFunction,
+                    "function '" + node->name + "' already declared");
+                return;
+            }
+            sym_table_.declare_overload(sym);
         }
-        sym_table_.enter_scope();
-        for (size_t i = 0; i < node->parameters.size(); ++i) {
+       sym_table_.enter_scope();
+       for (size_t i = 0; i < node->parameters.size(); ++i) {
             std::string pname = (i < node->param_names.size() && !node->param_names[i].empty())
                 ? node->param_names[i]
                 : "_param" + std::to_string(i);
@@ -322,8 +406,23 @@ namespace gallt {
                     "parameter '" + pname + "' already declared");
             }
         }
-        current_function_ = node;
-        if (node->body) {
+       current_function_ = node;
+        // 默认参数在函数自身作用域内做类型检查（Gallt 0.3.txt §8）
+        // 默认参数在函数自身作用域内做类型检查（Gallt 0.3.txt §8）
+        // Default arguments are type-checked inside the function's own scope
+        for (size_t i = 0; i < node->param_defaults.size() && i < node->parameters.size(); ++i) {
+            if (node->param_defaults[i] == nullptr) continue;
+            AST::Type default_type = check_expression(node->param_defaults[i].get());
+            if (!can_implicit_convert(default_type, node->parameters[i])) {
+                report_error(node->param_defaults[i]->location,
+                    ErrorCode::FunctionArgTypeMismatch,
+                    "default argument " + std::to_string(i + 1) + " of function '" +
+                    node->name + "' has type '" + default_type.to_string() +
+                    "' which does not match parameter type '" +
+                    node->parameters[i].to_string() + "'");
+            }
+        }
+       if (node->body) {
             check_statement(node->body.get());
         }
         if (node->return_type.kind != TypeKind::Void) {
@@ -487,8 +586,24 @@ namespace gallt {
         else if (auto* expr = dynamic_cast<AST::ExpressionStatement*>(stmt)) {
             check_expression_statement(expr);
         }
-        else if (auto* empty = dynamic_cast<AST::EmptyStatement*>(stmt)) {
-            // 空语句
+       else if (auto* empty = dynamic_cast<AST::EmptyStatement*>(stmt)) {
+           // 空语句
+       }
+        else if (auto* destruct_stmt = dynamic_cast<AST::DestructStatement*>(stmt)) {
+            // destruct [指针]（Gallt 0.3.txt §20）
+            // destruct [pointer] (Gallt 0.3.txt §20)
+            AST::Type target_type = check_expression(destruct_stmt->target.get());
+            if (target_type.kind != TypeKind::Pointer) {
+                report_error(destruct_stmt->location, ErrorCode::FreeNonPointer,
+                    "destruct requires a pointer, got '" + target_type.to_string() + "'");
+            }
+           else if (!target_type.pointee_type ||
+               target_type.pointee_type->kind != TypeKind::Struct) {
+                // ER 0092：destruct 只能作用于 construct 分配的对象
+                // ER 0092: destruct only applies to objects allocated by construct
+                diag_.report_error_template(destruct_stmt->location,
+                    ErrorCode::DestructNonConstructed, std::vector<std::string>{});
+           }
         }
         else if (auto* struct_def = dynamic_cast<AST::StructDefinition*>(stmt)) {
             if (struct_defs_.find(struct_def->name) != struct_defs_.end()) {
@@ -592,107 +707,63 @@ namespace gallt {
         }
         if (decl->initializer) {
             if (auto* expr_init = dynamic_cast<AST::ExpressionInitializer*>(decl->initializer.get())) {
+                // 目标类型：变量类型（用于函数指针上下文中的重载选择，第 18 章）
+                // Expected type: the declared type (function-pointer overload selection, §18)
+                const AST::Type* saved_expected = expected_type_;
+                expected_type_ = &decl->type;
                 AST::Type init_type = check_expression(expr_init->expr.get());
+                expected_type_ = saved_expected;
+                // 第 20 章：[nocopy] / [nomove] 在**所有**拷贝/移动上下文都生效
+                // §20: [nocopy]/[nomove] apply in every copy/move context
+                if (decl->type.kind == TypeKind::Struct && init_type.kind == TypeKind::Struct &&
+                    init_type.struct_name == decl->type.struct_name) {
+                    if (is_move_expression(expr_init->expr.get())) {
+                        if (!type_is_movable(decl->type)) {
+                            diag_.report_error_template(decl->location,
+                                ErrorCode::NoMoveViolation, { decl->type.struct_name });
+                        }
+                    }
+                    else if (!type_is_copyable(decl->type)) {
+                        diag_.report_error_template(decl->location,
+                            ErrorCode::NoCopyViolation, { decl->type.struct_name });
+                    }
+                }
                 bool is_null = false;
                 if (auto* primary = dynamic_cast<AST::PrimaryExpression*>(expr_init->expr.get())) {
                     if (primary->kind == AST::PrimaryExpression::Kind::Null) {
                         is_null = true;
                     }
                 }
-                if (!is_null || decl->type.kind != TypeKind::Pointer) {
-                    if (!can_implicit_convert(init_type, decl->type)) {
-                        report_error(decl->location, ErrorCode::AssignmentTypeMismatch,
-                            "cannot initialize variable '" + decl->name +
-                            "' with type '" + init_type.to_string() +
-                            "' (expected '" + decl->type.to_string() + "')");
-                    }
-                }
+               if (!is_null || decl->type.kind != TypeKind::Pointer) {
+                   if (!can_implicit_convert(init_type, decl->type)) {
+                       // file 句柄可用 null 初始化（Gallt 0.3.txt §2/§17）
+                       // A `file` handle may be initialized with null
+                       if (is_null && decl->type.kind == TypeKind::File) {
+                           // 允许
+                       }
+                       else {
+                       report_error(decl->location, ErrorCode::AssignmentTypeMismatch,
+                           "cannot initialize variable '" + decl->name +
+                           "' with type '" + init_type.to_string() +
+                           "' (expected '" + decl->type.to_string() + "')");
+                       }
+                   }
+               }
             }
             else if (auto* arr_init = dynamic_cast<AST::ArrayInitializer*>(decl->initializer.get())) {
                 if (decl->type.kind == TypeKind::Struct) {
-                    // 结构体使用花括号初始化，顺序与成员声明顺序一致
-                    // Structs are brace-initialized in member declaration order
-                    AST::StructDefinition* struct_def = get_struct_definition(decl->type.struct_name);
-                    if (struct_def == nullptr) {
-                        report_error(decl->location, ErrorCode::ExpressionSyntaxError,
-                            "unknown struct type '" + decl->type.struct_name + "'");
-                    }
-                    else if (arr_init->elements.size() > struct_def->members.size()) {
-                        report_error(decl->location, ErrorCode::StructInitLengthMismatch,
-                            "struct initializer has too many elements; expected at most " +
-                            std::to_string(struct_def->members.size()) + ", got " +
-                            std::to_string(arr_init->elements.size()));
-                    }
-                    else {
-                        for (size_t i = 0; i < arr_init->elements.size(); ++i) {
-                            const auto& member = struct_def->members[i];
-                            AST::Initializer* element = arr_init->elements[i].get();
-                            if (member.type.kind == TypeKind::Struct) {
-                                if (auto* nested = dynamic_cast<AST::ArrayInitializer*>(element)) {
-                                    AST::StructDefinition* nested_def =
-                                        get_struct_definition(member.type.struct_name);
-                                    if (nested_def && nested->elements.size() > nested_def->members.size()) {
-                                        report_error(decl->location, ErrorCode::StructInitLengthMismatch,
-                                            "nested struct initializer has too many elements");
-                                    }
-                                    for (size_t j = 0; j < nested->elements.size(); ++j) {
-                                        if (auto* e = dynamic_cast<AST::ExpressionInitializer*>(nested->elements[j].get())) {
-                                            AST::Type elem_type = check_expression(e->expr.get());
-                                            if (!can_implicit_convert(elem_type, nested_def->members[j].type)) {
-                                                report_error(e->location, ErrorCode::StructMemberTypeMismatch,
-                                                    "initializer for member '" + nested_def->members[j].name +
-                                                    "' does not match its type");
-                                            }
-                                        }
-                                    }
-                                }
-                                else if (auto* e = dynamic_cast<AST::ExpressionInitializer*>(element)) {
-                                    AST::Type init_type = check_expression(e->expr.get());
-                                    if (!can_implicit_convert(init_type, member.type)) {
-                                        report_error(e->location, ErrorCode::StructMemberTypeMismatch,
-                                            "initializer for member '" + member.name +
-                                            "' does not match its type");
-                                    }
-                                }
-                            }
-                            else if (auto* e = dynamic_cast<AST::ExpressionInitializer*>(element)) {
-                                AST::Type init_type = check_expression(e->expr.get());
-                                if (!can_implicit_convert(init_type, member.type)) {
-                                    report_error(e->location, ErrorCode::StructMemberTypeMismatch,
-                                        "initializer for member '" + member.name +
-                                        "' does not match its type");
-                                }
-                            }
-                            else {
-                                report_error(decl->location, ErrorCode::ExpressionSyntaxError,
-                                    "struct member requires an expression initializer");
-                            }
-                        }
-                    }
+                    // 结构体使用花括号初始化，顺序与成员声明顺序一致（第 14 章）
+                    // Structs are brace-initialized in member declaration order (§14)
+                    check_struct_initializer(arr_init, decl->type, decl->location);
                 }
                 else if (decl->type.kind != TypeKind::Array) {
                     report_error(decl->location, ErrorCode::AssignmentTypeMismatch,
                         "array initializer for non-array variable");
                 }
                 else {
-                    size_t provided = arr_init->elements.size();
-                    if (decl->array_size.has_value()) {
-                        if (provided != decl->array_size.value()) {
-                            report_error(decl->location, ErrorCode::ArrayLengthMismatch,
-                                "initializer length " + std::to_string(provided) +
-                                " does not match array size " + std::to_string(decl->array_size.value()));
-                        }
-                    }
-                    auto elem_type = decl->type.element_type;
-                    for (auto& elem : arr_init->elements) {
-                        if (auto* e = dynamic_cast<AST::ExpressionInitializer*>(elem.get())) {
-                            AST::Type etype = check_expression(e->expr.get());
-                            if (!can_implicit_convert(etype, *elem_type)) {
-                                report_error(decl->location, ErrorCode::AssignmentTypeMismatch,
-                                    "array element type mismatch");
-                            }
-                        }
-                    }
+                    // （多维）数组初始化：逐维校验形状与长度（第 7 章 / ER 0015 / ER 0016）
+                    // (Multi-dimensional) array initialization validates every dimension
+                    check_array_initializer(arr_init, decl->type, decl->location);
                 }
             }
         }
@@ -701,6 +772,134 @@ namespace gallt {
         if (!sym_table_.declare(sym)) {
             report_error(decl->location, ErrorCode::RedefinedIdentifier,
                 "variable '" + decl->name + "' already declared");
+        }
+    }
+
+    void TypeChecker::check_struct_initializer(AST::ArrayInitializer* init,
+        const AST::Type& struct_type, SourceLocation loc) {
+        // 第 14 章：结构体花括号初始化按成员声明顺序逐项校验；嵌套结构体与数组成员
+        // 使用各自的内层花括号，并递归校验其成员 / 元素
+        // §14: struct brace initialization follows member declaration order; nested structs
+        // and array members use their own braces and are validated recursively
+        if (init == nullptr) return;
+        AST::StructDefinition* def = get_struct_definition(struct_type.struct_name);
+        if (def == nullptr) {
+            report_error(loc, ErrorCode::ExpressionSyntaxError,
+                "unknown struct type '" + struct_type.struct_name + "'");
+            return;
+        }
+        if (init->elements.size() > def->members.size()) {
+            report_error(loc, ErrorCode::StructInitLengthMismatch,
+                "struct initializer has too many elements; expected at most " +
+                std::to_string(def->members.size()) + ", got " +
+                std::to_string(init->elements.size()));
+            return;
+        }
+        // 成员的目标类型：用于函数指针成员初始化时的重载选择（第 18 章）
+        // Member target type: overload selection for function-pointer members (§18)
+        auto check_member_expression = [&](AST::Expression* e, const AST::Type& target) {
+            const AST::Type* saved = expected_type_;
+            expected_type_ = &target;
+            AST::Type result = check_expression(e);
+            expected_type_ = saved;
+            return result;
+        };
+        for (std::size_t i = 0; i < init->elements.size(); ++i) {
+            const auto& member = def->members[i];
+            AST::Initializer* element = init->elements[i].get();
+            if (auto* nested = dynamic_cast<AST::ArrayInitializer*>(element)) {
+                if (member.type.kind == TypeKind::Struct) {
+                    check_struct_initializer(nested, member.type, loc);
+                }
+                else if (member.type.kind == TypeKind::Array) {
+                    // 逐维校验（含多维数组成员）
+                    // Validate every dimension (multi-dimensional members too)
+                    check_array_initializer(nested, member.type, loc);
+                }
+                else {
+                    report_error(element->location, ErrorCode::ExpressionSyntaxError,
+                        "struct member requires an expression initializer");
+                }
+                continue;
+            }
+            auto* e = dynamic_cast<AST::ExpressionInitializer*>(element);
+            if (e == nullptr) continue;
+            if (member.type.kind == TypeKind::Array) {
+                // 第 7/14 章：数组成员必须用花括号逐元素初始化；
+                // 数组不能由数组值整体初始化（与“数组不能整体赋值”一致）
+                // §7/§14: an array member requires a braced element list; an array value
+                // cannot initialize an array member as a whole
+                report_error(e->location, ErrorCode::StructMemberTypeMismatch,
+                    "array member '" + member.name + "' requires a braced initializer");
+                check_member_expression(e->expr.get(), member.type);
+                continue;
+            }
+            AST::Type init_type = check_member_expression(e->expr.get(), member.type);
+            if (!can_implicit_convert(init_type, member.type)) {
+                report_error(e->location, ErrorCode::StructMemberTypeMismatch,
+                    "initializer for member '" + member.name + "' does not match its type");
+            }
+        }
+    }
+
+    void TypeChecker::check_array_initializer(AST::ArrayInitializer* init,
+        const AST::Type& array_type, SourceLocation loc) {
+        // 第 7 章 / ER 0015 / ER 0016：数组（含多维）的花括号初始化逐维校验——
+        // 每一维的元素个数必须与声明长度一致（长度由初始化列表推断的维度除外），
+        // 数组元素是数组时必须使用内层花括号，其它元素的类型必须可隐式转换。
+        // §7 / ER 0015 / ER 0016: validate every dimension of a brace initializer; each
+        // dimension must provide exactly the declared number of elements (unless the size
+        // was inferred), array elements require their own braces, and element types must
+        // be implicitly convertible.
+        if (init == nullptr || array_type.kind != TypeKind::Array) return;
+        AST::Type element = array_type.element_type ? *array_type.element_type
+            : AST::Type::make_void();
+        const std::size_t provided = init->elements.size();
+        if (array_type.array_size.has_value()) {
+            if (provided != array_type.array_size.value()) {
+                report_error(loc, ErrorCode::ArrayLengthMismatch,
+                    "initializer length " + std::to_string(provided) +
+                    " does not match array size " +
+                    std::to_string(array_type.array_size.value()));
+            }
+        }
+        else if (provided == 0) {
+            report_error(loc, ErrorCode::EmptyArrayInitializer,
+                "cannot infer array size from empty initializer");
+        }
+        for (auto& item : init->elements) {
+            if (auto* nested = dynamic_cast<AST::ArrayInitializer*>(item.get())) {
+                if (element.kind == TypeKind::Struct) {
+                    // 结构体元素用内层花括号提供成员值（第 14 章，见 gen_033/ct_033）
+                    // A struct element uses its own braces for member values (§14)
+                    check_struct_initializer(nested, element, item->location);
+                }
+                else if (element.kind == TypeKind::Array) {
+                    check_array_initializer(nested, element, item->location);
+                }
+                else {
+                    report_error(item->location, ErrorCode::AssignmentTypeMismatch,
+                        "nested braced initializer for a non-aggregate element");
+                }
+                continue;
+            }
+            auto* e = dynamic_cast<AST::ExpressionInitializer*>(item.get());
+            if (e == nullptr) continue;
+            // 元素的目标类型用于按目标函数指针类型选择重载（第 18 章）
+            // The element target type drives overload selection by target type (§18)
+            const AST::Type* saved_expected = expected_type_;
+            expected_type_ = &element;
+            AST::Type value_type = check_expression(e->expr.get());
+            expected_type_ = saved_expected;
+            if (element.kind == TypeKind::Array) {
+                report_error(e->location, ErrorCode::AssignmentTypeMismatch,
+                    "array element requires a braced initializer");
+                continue;
+            }
+            if (!can_implicit_convert(value_type, element)) {
+                report_error(e->location, ErrorCode::AssignmentTypeMismatch,
+                    "array element type mismatch");
+            }
         }
     }
 
@@ -779,7 +978,27 @@ namespace gallt {
         }
         AST::Type expected = current_function_->return_type;
         if (return_stmt->value) {
+            // 目标类型：函数返回类型（返回函数指针时按类型选择重载，第 18 章）
+            // Expected type: the function return type (§18)
+            const AST::Type* saved_expected = expected_type_;
+            expected_type_ = &expected;
             AST::Type actual = check_expression(return_stmt->value.get());
+            expected_type_ = saved_expected;
+            // 第 20 章：返回结构体时按拷贝/移动构造语义检查 [nocopy]/[nomove]
+            // §20: returning a struct copy/move-constructs it, so [nocopy]/[nomove] apply
+            if (expected.kind == TypeKind::Struct && actual.kind == TypeKind::Struct &&
+                actual.struct_name == expected.struct_name) {
+                if (is_move_expression(return_stmt->value.get())) {
+                    if (!type_is_movable(expected)) {
+                        diag_.report_error_template(return_stmt->location,
+                            ErrorCode::NoMoveViolation, { expected.struct_name });
+                    }
+                }
+                else if (!type_is_copyable(expected)) {
+                    diag_.report_error_template(return_stmt->location,
+                        ErrorCode::NoCopyViolation, { expected.struct_name });
+                }
+            }
             if (expected.kind == TypeKind::Void) {
                 report_error(return_stmt->location, ErrorCode::VoidFunctionReturnsValue,
                     "void function cannot return a value");
@@ -863,11 +1082,46 @@ namespace gallt {
                 "left-hand side of assignment must be an lvalue");
         }
         AST::Type left_type = check_expression(expr->left.get());
+        // 目标类型：左值类型（函数指针赋值时按目标类型选择重载，第 18 章）
+        // Expected type: the left-hand type (§18 function-pointer overload selection)
+        const AST::Type* saved_expected = expected_type_;
+        expected_type_ = &left_type;
         AST::Type right_type = check_expression(expr->right.get());
-        bool ok = false;
-        if (expr->op == AST::AssignmentExpression::Operator::Assign) {
-            ok = can_implicit_convert(right_type, left_type);
+        expected_type_ = saved_expected;
+        // 第 20 章：[nocopy]/[nomove] 同样约束赋值（含嵌套上下文）
+        // §20: [nocopy]/[nomove] also constrain assignment, including nested contexts
+        if (expr->op == AST::AssignmentExpression::Operator::Assign &&
+            left_type.kind == TypeKind::Struct && right_type.kind == TypeKind::Struct &&
+            left_type.struct_name == right_type.struct_name) {
+            if (is_move_expression(expr->right.get())) {
+                if (!type_is_movable(left_type)) {
+                    diag_.report_error_template(expr->location, ErrorCode::NoMoveViolation,
+                        { left_type.struct_name });
+                }
+            }
+            else if (!type_is_copyable(left_type)) {
+                diag_.report_error_template(expr->location, ErrorCode::NoCopyViolation,
+                    { left_type.struct_name });
+            }
         }
+        // Gallt 0.3.txt §20：数组本身不能整体赋值（ER 0030）
+        // Gallt 0.3.txt §20: an array as a whole cannot be assigned (ER 0030)
+        if (left_type.kind == TypeKind::Array) {
+            report_error(expr->location, ErrorCode::ArrayOperatorNotSupported,
+                "array type does not support assignment");
+            return left_type;
+        }
+       bool ok = false;
+       if (expr->op == AST::AssignmentExpression::Operator::Assign) {
+           ok = can_implicit_convert(right_type, left_type);
+            // Gallt 0.3.txt §2/§17：file 为不透明类型，允许用 null 置空句柄
+            // Gallt 0.3.txt §2/§17: a `file` handle may be cleared with null
+            if (!ok && left_type.kind == TypeKind::File) {
+                if (auto* prim = dynamic_cast<AST::PrimaryExpression*>(expr->right.get())) {
+                    if (prim->kind == AST::PrimaryExpression::Kind::Null) ok = true;
+                }
+            }
+       }
         else if (expr->op == AST::AssignmentExpression::Operator::PlusAssign ||
             expr->op == AST::AssignmentExpression::Operator::MinusAssign) {
             if (is_numeric_type(left_type) && is_numeric_type(right_type)) {
@@ -925,6 +1179,7 @@ namespace gallt {
         AST::Type left = check_expression(expr->left.get());
         AST::Type right = check_expression(expr->right.get());
         bool ok = false;
+        bool reported = false;   // 已给出更精确的诊断（ER 0043 / 关系比较）
         if (is_numeric_type(left) && is_numeric_type(right)) {
             ok = true;
         }
@@ -941,10 +1196,81 @@ namespace gallt {
         else if (left.kind == TypeKind::Pointer && right.is_integer()) {
             ok = true;
         }
-        else if (left.is_integer() && right.kind == TypeKind::Pointer) {
+       else if (left.is_integer() && right.kind == TypeKind::Pointer) {
+           ok = true;
+       }
+       // Gallt 0.3.txt §2/§17：file 是不透明类型，可与 null 比较
+       // Gallt 0.3.txt §2/§17: `file` is opaque and may be compared with null
+       else if (left.kind == TypeKind::File && right.kind == TypeKind::File) {
+           ok = true;
+       }
+        else if ((left.kind == TypeKind::File || is_file_pointer_type(left)) &&
+            is_null_literal_expr(expr->right.get())) {
             ok = true;
         }
-        if (!ok) {
+       else if ((right.kind == TypeKind::File || is_file_pointer_type(right)) &&
+            is_null_literal_expr(expr->left.get())) {
+            ok = true;
+        }
+        // Gallt 0.4.txt §13：函数指针的比较规则
+        //   - `fptr == null` / `fptr != null` 合法（结果 bool）
+        //   - 同签名函数指针之间的 `==` / `!=` 合法
+        //   - 关系比较（> < >= <=）不适用于函数指针 → ER 0004
+        //   - 不同签名的函数指针比较 → ER 0043
+        // Gallt 0.4.txt §13: comparison rules for function pointers
+        //   - equality/inequality with null is valid (yields bool)
+        //   - equality/inequality between same-signature function pointers is valid
+        //   - relational operators do not apply to function pointers (ER 0004)
+        //   - comparing different signatures is ER 0043
+        else if (left.kind == TypeKind::Function || right.kind == TypeKind::Function) {
+            bool is_equal_op = (expr->op == AST::ComparisonExpression::Operator::Equal ||
+                expr->op == AST::ComparisonExpression::Operator::NotEqual);
+            const AST::Type& fn_side = (left.kind == TypeKind::Function) ? left : right;
+            const AST::Type& other_side = (left.kind == TypeKind::Function) ? right : left;
+            bool other_is_null = is_null_literal_expr(left.kind == TypeKind::Function
+                ? expr->right.get() : expr->left.get());
+            if (!is_equal_op) {
+                report_error(expr->location, ErrorCode::BinaryOperatorTypeMismatch,
+                    "relational comparison is not allowed for function pointers");
+                reported = true;
+            }
+            else if (other_is_null) {
+                ok = true;
+            }
+            else if (other_side.kind == TypeKind::Function) {
+                bool same_signature = fn_side.parameter_types.size() ==
+                    other_side.parameter_types.size();
+                if (same_signature) {
+                    for (std::size_t i = 0; i < fn_side.parameter_types.size(); ++i) {
+                        if (!(fn_side.parameter_types[i] == other_side.parameter_types[i])) {
+                            same_signature = false;
+                            break;
+                        }
+                    }
+                }
+                if (same_signature) {
+                    same_signature = fn_side.return_type && other_side.return_type &&
+                        (*fn_side.return_type == *other_side.return_type);
+                }
+                if (same_signature) {
+                    ok = true;
+                }
+                else {
+                    // ER 0043：函数指针类型不匹配
+                    // ER 0043: function pointer signature mismatch
+                    report_error(expr->location, ErrorCode::FuncPtrTypeMismatch,
+                        "function pointer signature mismatch in comparison");
+                    reported = true;
+                }
+            }
+            else {
+                report_error(expr->location, ErrorCode::BinaryOperatorTypeMismatch,
+                    "comparison operands must be compatible function pointers, got '" +
+                    left.to_string() + "' and '" + right.to_string() + "'");
+                reported = true;
+            }
+        }
+       if (!ok && !reported) {
             report_error(expr->location, ErrorCode::BinaryOperatorTypeMismatch,
                 "comparison operands must be arithmetic types or compatible pointers, got '" +
                 left.to_string() + "' and '" + right.to_string() + "'");
@@ -955,19 +1281,25 @@ namespace gallt {
     AST::Type TypeChecker::check_additive(AST::AdditiveExpression* expr) {
         AST::Type left = check_expression(expr->left.get());
         AST::Type right = check_expression(expr->right.get());
-        if (expr->op == AST::AdditiveExpression::Operator::Plus) {
-            // 文档示例使用 string + 数值进行拼接；字符串连接返回 string
-            // String concatenation with values is shown in §16 and returns string
+       if (expr->op == AST::AdditiveExpression::Operator::Plus) {
+            // Gallt 0.3.txt §7：字符串 + 字符串 = 拼接；数字 + 数字 = 算术；
+            // 字符串与数字混合 → 类型不匹配（ER 0004）
+            // Gallt 0.3.txt §7: string+string concatenates, number+number computes, and a
+            // mixed string/number pair is a type mismatch
             if (left.kind == TypeKind::String || right.kind == TypeKind::String) {
-                bool left_ok = left.kind == TypeKind::String || is_numeric_type(left);
-                bool right_ok = right.kind == TypeKind::String || is_numeric_type(right);
-                if (!left_ok || !right_ok) {
+                if (left.kind == TypeKind::String && right.kind == TypeKind::String) {
+                    return AST::Type::make_string();
+                }
+                if (is_numeric_type(left) && is_numeric_type(right)) {
+                    // 两侧均非字符串：交由下方算术分支处理
+                    // Neither side is a string: fall through to the arithmetic branch
+                }
+                else {
                     report_error(expr->location, ErrorCode::BinaryOperatorTypeMismatch,
-                        "operator '+' string concatenation requires string or arithmetic operands, got '" +
+                        "operator '+' cannot mix string and numeric operands, got '" +
                         left.to_string() + "' and '" + right.to_string() + "'");
                     return AST::Type::make_void();
                 }
-                return AST::Type::make_string();
             }
             if (left.kind == TypeKind::Pointer && right.is_integer()) {
                 return left;
@@ -1056,6 +1388,33 @@ namespace gallt {
     }
 
     AST::Type TypeChecker::check_unary(AST::UnaryExpression* expr) {
+        // 第 18 章 / 第 13 章：&重载函数名 时按目标函数指针类型选择重载
+        // §18/§13: &overloaded-name selects the overload matching the target function pointer
+        if (expr->op == AST::UnaryExpression::Operator::AddressOf) {
+            if (auto* prim = dynamic_cast<AST::PrimaryExpression*>(expr->operand.get())) {
+                if (prim->kind == AST::PrimaryExpression::Kind::Identifier) {
+                    std::vector<Symbol>* set = sym_table_.lookup_overloads(prim->identifier);
+                    if (set != nullptr && !set->empty()) {
+                        Symbol* chosen = nullptr;
+                        if (set->size() == 1) {
+                            chosen = &(*set)[0];
+                        }
+                        else if (expected_type_ != nullptr) {
+                            chosen = select_overload_by_target_type(*set, *expected_type_,
+                                prim->identifier, expr->location);
+                        }
+                        else {
+                            report_error(expr->location, ErrorCode::OverloadAmbiguous,
+                                { prim->identifier });
+                        }
+                        if (chosen == nullptr) return AST::Type::make_void();
+                        record_function_resolution(prim, *chosen);
+                        return AST::Type::make_function(
+                            std::make_shared<AST::Type>(chosen->type), chosen->param_types);
+                    }
+                }
+            }
+        }
         AST::Type operand = check_expression(expr->operand.get());
         switch (expr->op) {
         case AST::UnaryExpression::Operator::Increment:
@@ -1168,7 +1527,17 @@ namespace gallt {
                 }
             }
 
-            // ---- 内置函数特殊处理 ----
+          // ---- 内置函数特殊处理 ----
+            // 0.3 §18：同名重载集先做重载决议，再检查类型
+            // 0.3 §18: resolve the same-scope overload set before type checking
+            if (direct_primary != nullptr && !func_name.empty()) {
+                std::vector<Symbol>* set = sym_table_.lookup_overloads(func_name);
+                if (set != nullptr && set->size() > 1) {
+                    Symbol* chosen = resolve_overload_call(func_name, expr, direct_primary);
+                    if (chosen == nullptr) return AST::Type::make_void();
+                    return chosen->type;
+                }
+            }
             // 参照 Gallt 0.2.txt §8: input, output, heap, free, size, align
             // 以及标准文档§14: size, align
             // 参照 Gallt 0.2.txt §17: fileopen, fileclose, ... 文件操作函数
@@ -1259,10 +1628,52 @@ namespace gallt {
                 }
                 return AST::Type::make_int();
             }
-            // ---- 内置函数处理结束 ----
+           // ---- 内置函数处理结束 ----
 
             // 否则为普通函数调用；区分直接命名函数与函数指针
             // Ordinary calls: direct named functions versus function pointers
+            // T(args) 作为表达式：构造一个值临时对象（Gallt 0.3.txt §20）
+            // T(args) as an expression constructs a value temporary (Gallt 0.3.txt §20)
+            if (direct_primary != nullptr && struct_defs_.find(func_name) != struct_defs_.end()) {
+                // T(args) 值临时对象：按实参类型解析构造函数重载（第 20 章，ER 0096）
+                // T(args) value temporary: resolve the constructor overload set by argument
+                // type (§20, ambiguity -> ER 0096)
+                std::vector<AST::Type> arg_types;
+                std::vector<bool> arg_is_null;
+                for (auto& arg : expr->arguments) {
+                    arg_types.push_back(check_expression(arg.get()));
+                    bool is_null = false;
+                    if (auto* prim = dynamic_cast<AST::PrimaryExpression*>(arg.get())) {
+                        if (prim->kind == AST::PrimaryExpression::Kind::Null) is_null = true;
+                    }
+                    arg_is_null.push_back(is_null);
+                }
+                Symbol* ctor = resolve_constructor_overload(func_name, arg_types, arg_is_null,
+                    expr->location);
+                if (ctor != nullptr && ctor->function_node != nullptr) {
+                    resolved_functions_[direct_primary] = ctor->function_node;
+                    for (std::size_t i = 0; i < arg_types.size() &&
+                        i + 1 < ctor->param_types.size(); ++i) {
+                        // 第 0 个形参是 this 指针，实参从第 1 个形参开始对应
+                        // Parameter 0 is `this`; arguments start at parameter 1
+                        bool compatible = can_implicit_convert(arg_types[i],
+                            ctor->param_types[i + 1]);
+                        if (!compatible && arg_is_null[i] &&
+                            ctor->param_types[i + 1].kind == TypeKind::Pointer) {
+                            compatible = true;
+                        }
+                        if (!compatible) {
+                            report_error(expr->arguments[i]->location,
+                                ErrorCode::FunctionArgTypeMismatch,
+                                "constructor argument " + std::to_string(i + 1) +
+                                " type '" + arg_types[i].to_string() +
+                                "' does not match parameter type '" +
+                                ctor->param_types[i + 1].to_string() + "'");
+                        }
+                    }
+                }
+                return AST::Type::make_struct(func_name);
+            }
             AST::Type func_type;
             bool is_direct_function = false;
             if (direct_primary != nullptr) {
@@ -1287,17 +1698,64 @@ namespace gallt {
                     base_type.to_string() + "'");
                 return AST::Type::make_void();
             }
-            size_t expected = func_type.parameter_types.size();
-            size_t provided = expr->arguments.size();
-            if (expected != provided) {
+           size_t expected = func_type.parameter_types.size();
+           size_t provided = expr->arguments.size();
+            // 默认参数（Gallt 0.3.txt §8）：缺少的实参由被调函数定义补齐
+            // Default arguments (Gallt 0.3.txt §8): missing arguments come from the callee
+            std::vector<AST::Expression*> defaults;
+            if (direct_primary != nullptr) {
+                Symbol* callee_sym = sym_table_.lookup(direct_primary->identifier);
+                if (callee_sym != nullptr && callee_sym->function_node != nullptr) {
+                    for (auto& d : callee_sym->function_node->param_defaults) {
+                        defaults.push_back(d.get());
+                    }
+                }
+            }
+            size_t required = expected;
+            for (size_t i = defaults.size(); i > 0; --i) {
+                if (defaults[i - 1] != nullptr) required = i - 1;
+                else break;
+            }
+            if (provided > expected || provided < required) {
                 report_error(expr->location, ErrorCode::FunctionArgCountMismatch,
                     "function expects " + std::to_string(expected) +
                     " arguments, but " + std::to_string(provided) + " provided");
                 return AST::Type::make_void();
             }
+            if (provided < expected) {
+                for (size_t i = provided; i < expected; ++i) {
+                    if (i < defaults.size() && defaults[i] != nullptr) {
+                        expr->appended_defaults.push_back(defaults[i]);
+                    }
+                }
+            }
             for (size_t i = 0; i < expected; ++i) {
                 if (i < expr->arguments.size()) {
+                    // 目标类型：形参类型（回调/函数指针实参的按类型选择重载，第 18 章）
+                    // Expected type: the parameter type (§18 callback overload selection)
+                    const AST::Type* saved_expected = expected_type_;
+                    expected_type_ = &func_type.parameter_types[i];
                     AST::Type arg_type = check_expression(expr->arguments[i].get());
+                    expected_type_ = saved_expected;
+                    // 第 20 章：按值传递结构体形参要拷贝构造实参（[nocopy]/[nomove] 生效）
+                    // §20: passing a struct by value copy-constructs it, so [nocopy]/[nomove]
+                    // apply to by-value struct arguments
+                    if (func_type.parameter_types[i].kind == TypeKind::Struct &&
+                        arg_type.kind == TypeKind::Struct &&
+                        arg_type.struct_name == func_type.parameter_types[i].struct_name) {
+                        if (is_move_expression(expr->arguments[i].get())) {
+                            if (!type_is_movable(func_type.parameter_types[i])) {
+                                diag_.report_error_template(expr->arguments[i]->location,
+                                    ErrorCode::NoMoveViolation,
+                                    { func_type.parameter_types[i].struct_name });
+                            }
+                        }
+                        else if (!type_is_copyable(func_type.parameter_types[i])) {
+                            diag_.report_error_template(expr->arguments[i]->location,
+                                ErrorCode::NoCopyViolation,
+                                { func_type.parameter_types[i].struct_name });
+                        }
+                    }
                     bool compatible = can_implicit_convert(arg_type, func_type.parameter_types[i]);
                     // null 常量可赋给任意指针
                     // The null constant is assignable to every pointer type
@@ -1376,27 +1834,39 @@ namespace gallt {
                     "dot operator requires struct type, got '" + base_type.to_string() + "'");
                 return AST::Type::make_void();
             }
-            const auto* member = get_struct_member(base_type, expr->member_name);
-            if (!member) {
-                report_error(expr->location, ErrorCode::StructMemberNotFound,
-                    "struct has no member named '" + expr->member_name + "'");
+           const auto* member = get_struct_member(base_type, expr->member_name);
+            if (expr->member_name == "destructor") {
+                return AST::Type::make_function(
+                    std::make_shared<AST::Type>(AST::Type::make_void()),
+                    std::vector<AST::Type>{});
+            }
+           if (!member) {
+               report_error(expr->location, ErrorCode::StructMemberNotFound,
+                   "struct has no member named '" + expr->member_name + "'");
                 return AST::Type::make_void();
             }
             return member->type;
         }
-        case AST::PostfixExpression::Operator::Arrow: {
-            if (base_type.kind != TypeKind::Pointer) {
-                report_error(expr->location, ErrorCode::ArrowOnNonStructPtr,
-                    "arrow operator requires pointer to struct, got '" + base_type.to_string() + "'");
-                return AST::Type::make_void();
+       case AST::PostfixExpression::Operator::Arrow: {
+           if (base_type.kind != TypeKind::Pointer) {
+               report_error(expr->location, ErrorCode::ArrowOnNonStructPtr,
+                   "arrow operator requires pointer to struct, got '" + base_type.to_string() + "'");
+               return AST::Type::make_void();
+           }
+           auto pointee = base_type.pointee_type;
+           if (!pointee || pointee->kind != TypeKind::Struct) {
+               report_error(expr->location, ErrorCode::ArrowOnNonStructPtr,
+                   "arrow operator requires pointer to struct, got '" + base_type.to_string() + "'");
+               return AST::Type::make_void();
+           }
+            // 显式析构调用 [指针]->destructor()（Gallt 0.3.txt §20）
+            // Explicit destructor invocation [ptr]->destructor() (Gallt 0.3.txt §20)
+            if (expr->member_name == "destructor") {
+                return AST::Type::make_function(
+                    std::make_shared<AST::Type>(AST::Type::make_void()),
+                    std::vector<AST::Type>{});
             }
-            auto pointee = base_type.pointee_type;
-            if (!pointee || pointee->kind != TypeKind::Struct) {
-                report_error(expr->location, ErrorCode::ArrowOnNonStructPtr,
-                    "arrow operator requires pointer to struct, got '" + base_type.to_string() + "'");
-                return AST::Type::make_void();
-            }
-            const auto* member = get_struct_member(*pointee, expr->member_name);
+           const auto* member = get_struct_member(*pointee, expr->member_name);
             if (!member) {
                 report_error(expr->location, ErrorCode::StructMemberNotFound,
                     "struct has no member named '" + expr->member_name + "'");
@@ -1585,6 +2055,21 @@ namespace gallt {
             }
         }
         case AST::PrimaryExpression::Kind::Identifier: {
+            // 第 18 章 / 第 13 章：函数名作为值出现在需要函数指针的上下文时，
+            // 按目标类型选择重载版本
+            // §18/§13: a function name used as a value in a function-pointer context selects
+            // the overload matching the expected target type
+            if (std::vector<Symbol>* set = sym_table_.lookup_overloads(expr->identifier)) {
+                if (set->size() > 1 && expected_type_ != nullptr) {
+                    Symbol* chosen = select_overload_by_target_type(*set, *expected_type_,
+                        expr->identifier, expr->location);
+                    if (chosen != nullptr) {
+                        record_function_resolution(expr, *chosen);
+                        return AST::Type::make_function(
+                            std::make_shared<AST::Type>(chosen->type), chosen->param_types);
+                    }
+                }
+            }
             // 首先检查是否为内置函数名（仅用于检查，不在此处处理）
             // 但为了符号表查找，先看符号表
             auto* sym = sym_table_.lookup(expr->identifier);
@@ -1592,6 +2077,7 @@ namespace gallt {
                 if (sym->kind == SymbolKind::Function) {
                     // 函数名的表达式类型是完整函数类型，调用/取地址时使用
                     // A function-name expression has full function type
+                    record_function_resolution(expr, *sym);
                     return AST::Type::make_function(
                         std::make_shared<AST::Type>(sym->type),
                         sym->param_types);
@@ -1613,7 +2099,7 @@ namespace gallt {
         case AST::PrimaryExpression::Kind::Null: {
             return AST::Type::make_pointer(std::make_shared<AST::Type>(AST::Type::make_void()));
         }
-        case AST::PrimaryExpression::Kind::Heap: {
+       case AST::PrimaryExpression::Kind::Heap: {
             if (!is_complete_type(expr->heap_type) && expr->heap_type.kind != TypeKind::Void) {
                 report_error(expr->location, ErrorCode::HeapFirstArgNotType,
                     "heap() first argument must be a complete type");
@@ -1630,6 +2116,111 @@ namespace gallt {
             else {
                 return AST::Type::make_pointer(std::make_shared<AST::Type>(expr->heap_type));
             }
+        }
+        case AST::PrimaryExpression::Kind::Construct:
+        case AST::PrimaryExpression::Kind::PlacementConstruct: {
+            // construct [类型]([实参]) [at [指针]]（Gallt 0.3.txt §20）
+            // construct [type]([args]) [at [pointer]] (Gallt 0.3.txt §20)
+           if (expr->construct_type.kind != TypeKind::Struct) {
+                diag_.report_error_template(expr->location, ErrorCode::SpecialMemberOnNonStruct,
+                    { expr->construct_type.to_string() });
+                return AST::Type::make_void();
+            }
+            if (!is_complete_type(expr->construct_type)) {
+                report_error(expr->location, ErrorCode::ExpressionSyntaxError,
+                    "construct target type is incomplete");
+                return AST::Type::make_void();
+            }
+            for (auto& arg : expr->construct_args) {
+                check_expression(arg.get());
+            }
+            // 第 20 章：按实参类型解析构造函数重载（含默认参数；二义性 ER 0096），
+            // 并把结果记录下来供代码生成使用
+            // §20: resolve the constructor overload set by argument type (defaults included,
+            // ambiguity -> ER 0096) and record it for codegen
+            {
+                std::vector<AST::Type> arg_types;
+                std::vector<bool> arg_is_null;
+                for (auto& arg : expr->construct_args) {
+                    const AST::Type* cached = nullptr;
+                    auto found = expression_types_.find(arg.get());
+                    if (found != expression_types_.end()) cached = &found->second;
+                    arg_types.push_back(cached != nullptr ? *cached : AST::Type::make_void());
+                    bool is_null = false;
+                    if (auto* prim = dynamic_cast<AST::PrimaryExpression*>(arg.get())) {
+                        if (prim->kind == AST::PrimaryExpression::Kind::Null) is_null = true;
+                    }
+                    arg_is_null.push_back(is_null);
+                }
+                Symbol* ctor = resolve_constructor_overload(expr->construct_type.struct_name,
+                    arg_types, arg_is_null, expr->location);
+                if (ctor != nullptr && ctor->function_node != nullptr) {
+                    resolved_functions_[expr] = ctor->function_node;
+                    // 实参类型检查（ER 0012）
+                    for (std::size_t i = 0; i < arg_types.size() &&
+                        i + 1 < ctor->param_types.size(); ++i) {
+                        // 第 0 个形参是 this 指针，实参从第 1 个形参开始对应
+                        // Parameter 0 is `this`; arguments start at parameter 1
+                        bool compatible = can_implicit_convert(arg_types[i],
+                            ctor->param_types[i + 1]);
+                        if (!compatible && arg_is_null[i] &&
+                            ctor->param_types[i + 1].kind == TypeKind::Pointer) {
+                            compatible = true;
+                        }
+                        if (!compatible) {
+                            report_error(expr->construct_args[i]->location,
+                                ErrorCode::FunctionArgTypeMismatch,
+                                "constructor argument " + std::to_string(i + 1) +
+                                " type '" + arg_types[i].to_string() +
+                                "' does not match parameter type '" +
+                                ctor->param_types[i + 1].to_string() + "'");
+                        }
+                    }
+                }
+            }
+            if (expr->kind == AST::PrimaryExpression::Kind::PlacementConstruct) {
+                AST::Type target_type = check_expression(expr->placement_target.get());
+                bool invalid = false;
+                if (target_type.kind != TypeKind::Pointer) {
+                    invalid = true;
+                }
+                else if (auto* target_prim =
+                    dynamic_cast<AST::PrimaryExpression*>(expr->placement_target.get())) {
+                    if (target_prim->kind == AST::PrimaryExpression::Kind::Null) invalid = true;
+                }
+                // 第 20 章：目标内存必须足够大且对齐（ER 0094）；void* 无法静态判定时接受
+                // §20: the target memory must be large enough and aligned (ER 0094); void*
+                // cannot be checked statically and is accepted
+                if (!invalid && target_type.pointee_type &&
+                    target_type.pointee_type->kind != TypeKind::Void) {
+                    std::size_t target_size = 0;
+                    std::size_t target_align = 1;
+                    std::size_t needed_size = 0;
+                    std::size_t needed_align = 1;
+                    if (type_layout(*target_type.pointee_type, target_size, target_align) &&
+                        type_layout(expr->construct_type, needed_size, needed_align)) {
+                        if (target_size < needed_size || target_align < needed_align) {
+                            invalid = true;
+                        }
+                    }
+                }
+                if (invalid) {
+                    diag_.report_error_template(expr->location,
+                        ErrorCode::PlacementTargetInvalid, std::vector<std::string>{});
+                }
+            }
+            return AST::Type::make_pointer(
+                std::make_shared<AST::Type>(expr->construct_type));
+        }
+        case AST::PrimaryExpression::Kind::CopyMove: {
+            // copy/move/deep_copy/shallow_copy（Gallt 0.3.txt §20）
+            AST::Type operand = check_expression(expr->paren_expr.get());
+            return operand;
+        }
+        case AST::PrimaryExpression::Kind::QualifiedName: {
+           report_error(expr->location, ErrorCode::GenericUndefined,
+                expr->generic_ref ? expr->generic_ref->generic_name : std::string());
+            return AST::Type::make_void();
         }
         default:
             report_error(expr->location, ErrorCode::ExpressionSyntaxError,
@@ -1653,6 +2244,16 @@ namespace gallt {
             if (from.pointee_type && from.pointee_type->kind == TypeKind::Void) return true;
             if (to.pointee_type && to.pointee_type->kind == TypeKind::Void) return true;
             return from == to;
+        }
+        // Gallt 0.4.txt §13/§14：null（void*）可初始化/赋值给函数指针类型
+        // Gallt 0.4.txt §13/§14: null (void*) initializes/assigns function pointers
+        // `fptr == null` / `fptr != null` 的比较在 check_comparison 中处理
+        // Comparing a function pointer with null is handled in check_comparison
+        if (from.kind == TypeKind::Pointer && to.kind == TypeKind::Function) {
+            if (from.pointee_type && from.pointee_type->kind == TypeKind::Void) return true;
+        }
+        if (from.kind == TypeKind::Function && to.kind == TypeKind::Pointer) {
+            if (to.pointee_type && to.pointee_type->kind == TypeKind::Void) return true;
         }
         if (to.kind == TypeKind::Bool && from.is_integer()) return true;
         if (from.kind == TypeKind::Array && to.kind == TypeKind::Pointer) {
@@ -1961,12 +2562,546 @@ namespace gallt {
         return std::nullopt;
     }
 
-    bool TypeChecker::is_constant_integer_expression(AST::Expression* expr, size_t* out_value) {
+   bool TypeChecker::is_constant_integer_expression(AST::Expression* expr, size_t* out_value) {
         if (auto val = evaluate_const_expression(expr)) {
             if (out_value) *out_value = *val;
             return true;
         }
         return false;
+    }
+
+    // ============================================================================
+    // 0.3 §18：函数重载决议
+    // 0.3 §18: function overload resolution
+    // ============================================================================
+
+    void TypeChecker::mangle_overload_set(const std::string& name) {
+        // 第 18 章：命名修饰至少包含参数类型签名，且跨作用域、泛型实例化与外部链接唯一
+        // §18: mangling carries the full parameter-type signature and is unique across
+        // scopes, generic instantiations and external linkage
+        std::vector<Symbol>* set = sym_table_.lookup_overloads(name);
+        if (set == nullptr) return;
+        for (Symbol& sym : *set) {
+            const std::string base = name + "$" + overload_signature(sym.param_types);
+            if (sym.function_node != nullptr) {
+                auto it = mangled_functions_.find(sym.function_node);
+                if (it == mangled_functions_.end()) {
+                    it = mangled_functions_
+                        .emplace(sym.function_node, unique_mangled_name(base)).first;
+                }
+                sym.function_node->name = it->second;
+            }
+            else if (sym.extern_node != nullptr) {
+                auto it = mangled_externs_.find(sym.extern_node);
+                if (it == mangled_externs_.end()) {
+                    it = mangled_externs_
+                        .emplace(sym.extern_node, unique_mangled_name(base)).first;
+                }
+                sym.extern_node->name = it->second;
+            }
+        }
+    }
+
+    namespace {
+        // 把类型名/文本转换为 LLVM 标识符安全的字符序列
+        // Turn a type name / text into LLVM-identifier-safe characters
+        std::string sanitize_identifier(std::string_view text) {
+            std::string out;
+            out.reserve(text.size());
+            for (char c : text) {
+                switch (c) {
+                case '<': out += 'L'; break;
+                case '>': out += 'G'; break;
+                case '*': out += 'P'; break;
+                case '[': out += 'A'; break;
+                case ']': out += 'Z'; break;
+                case ',': out += 'C'; break;
+                case '.': out += 'D'; break;
+                case ' ': break;
+                default: out += c; break;
+                }
+            }
+            return out;
+        }
+    }
+
+    std::string TypeChecker::overload_signature(const std::vector<AST::Type>& params) const {
+        // 参数类型签名：结构性编码，保证“相同类型列表 → 相同签名”
+        // Structural encoding of the parameter list: identical lists map to identical text
+        std::function<std::string(const AST::Type&)> encode = [&](const AST::Type& t) -> std::string {
+            switch (t.kind) {
+            case TypeKind::Int: return "i";
+            case TypeKind::Float: return "f";
+            case TypeKind::Double: return "d";
+            case TypeKind::Char: return "c";
+            case TypeKind::Bool: return "b";
+            case TypeKind::String: return "s";
+            case TypeKind::File: return "F";
+            case TypeKind::Void: return "v";
+            case TypeKind::Pointer:
+                return "P" + (t.pointee_type ? encode(*t.pointee_type) : std::string("v"));
+            case TypeKind::Array:
+                return "A" + (t.array_size.has_value() ? std::to_string(*t.array_size) : "u") +
+                    (t.element_type ? encode(*t.element_type) : std::string("v"));
+            case TypeKind::Struct: return "S" + sanitize_identifier(t.struct_name);
+            case TypeKind::Function: {
+                std::string out = "R" + (t.return_type ? encode(*t.return_type) : std::string("v"));
+                for (const AST::Type& p : t.parameter_types) out += "_" + encode(p);
+                return out;
+            }
+            }
+            return "x";
+        };
+        if (params.empty()) return "void";
+        std::string out;
+        for (const AST::Type& p : params) {
+            if (!out.empty()) out += "_";
+            out += encode(p);
+        }
+        return out;
+    }
+
+    std::string TypeChecker::unique_mangled_name(const std::string& base) {
+        // 冲突时追加序号，保证整个程序内唯一（跨作用域/泛型实例化）
+        // Append an index on collision so the name is unique program-wide
+        std::string candidate = base;
+        int suffix = 2;
+        while (!used_mangled_names_.insert(candidate).second) {
+            candidate = base + "$" + std::to_string(suffix++);
+        }
+        return candidate;
+    }
+
+    void TypeChecker::record_function_resolution(AST::PrimaryExpression* callee,
+        const Symbol& symbol) {
+        if (callee == nullptr) return;
+        if (symbol.function_node != nullptr) {
+            resolved_functions_[callee] = symbol.function_node;
+        }
+        else if (symbol.extern_node != nullptr) {
+            resolved_externs_[callee] = symbol.extern_node;
+        }
+    }
+
+    Symbol* TypeChecker::select_overload_by_target_type(std::vector<Symbol>& set,
+        const AST::Type& target, const std::string& name, SourceLocation loc) {
+        // 目标类型可能是函数类型或函数指针类型（第 13 章）
+        // The target may be a function type or a pointer to a function type (§13)
+        AST::Type target_function = target;
+        if (target.kind == TypeKind::Pointer && target.pointee_type &&
+            target.pointee_type->kind == TypeKind::Function) {
+            target_function = *target.pointee_type;
+        }
+        if (target_function.kind != TypeKind::Function) return nullptr;
+        Symbol* best = nullptr;
+        for (Symbol& sym : set) {
+            if (sym.param_types.size() != target_function.parameter_types.size()) continue;
+            if (!(sym.type == *target_function.return_type)) continue;
+            bool same = true;
+            for (std::size_t i = 0; i < sym.param_types.size(); ++i) {
+                if (!(sym.param_types[i] == target_function.parameter_types[i])) {
+                    same = false;
+                    break;
+                }
+            }
+            if (!same) continue;
+            if (best != nullptr) {
+                report_error(loc, ErrorCode::OverloadAmbiguous, { name });
+                return nullptr;
+            }
+            best = &sym;
+        }
+        if (best == nullptr) {
+            // 没有签名完全一致的重载 → 函数指针类型不匹配（ER 0043）
+            // No overload matches the target signature → function-pointer mismatch
+            report_error(loc, ErrorCode::FuncPtrTypeMismatch,
+                "no overload of '" + name + "' matches the target function pointer type '" +
+                target_function.to_string() + "'");
+        }
+        return best;
+    }
+
+    bool TypeChecker::overloads_ambiguous_by_defaults(const Symbol& a, const Symbol& b) const {
+        // 两个重载在某实参个数上都被调用（含默认参数），且该个数范围内所有已提供位置的
+        // 形参类型完全相同 → 该调用必然二义（第 18 章）
+        // When both overloads accept some argument count (through defaults) and every
+        // provided position has identical parameter types, that call is inevitably ambiguous
+        auto required_arity = [](const Symbol& sym) -> std::size_t {
+            std::size_t required = sym.param_types.size();
+            if (sym.function_node != nullptr) {
+                const auto& defaults = sym.function_node->param_defaults;
+                for (std::size_t i = defaults.size(); i > 0; --i) {
+                    if (defaults[i - 1] != nullptr) required = i - 1;
+                    else break;
+                }
+            }
+            return required;
+        };
+        const std::size_t a_min = required_arity(a);
+        const std::size_t b_min = required_arity(b);
+        const std::size_t a_max = a.param_types.size();
+        const std::size_t b_max = b.param_types.size();
+        const std::size_t lo = std::max(a_min, b_min);
+        const std::size_t hi = std::min(a_max, b_max);
+        for (std::size_t arity = lo; arity <= hi; ++arity) {
+            bool identical = true;
+            for (std::size_t i = 0; i < arity; ++i) {
+                if (!(a.param_types[i] == b.param_types[i])) {
+                    identical = false;
+                    break;
+                }
+            }
+            if (identical) return true;
+        }
+        return false;
+    }
+
+    Symbol* TypeChecker::resolve_constructor_overload(const std::string& struct_name,
+        const std::vector<AST::Type>& arg_types, const std::vector<bool>& arg_is_null,
+        SourceLocation loc) {
+        // 第 20 章：构造函数降低为同名重载集，这里按实参类型做重载决议；
+        // 与普通重载一致地使用转换等级偏序与默认参数，二义性报 ER 0096
+        // §20: constructors form an overload set; resolve by argument type with the same
+        // conversion ordering and default arguments; ambiguity is ER 0096
+        std::vector<Symbol>* set = sym_table_.lookup_overloads("__sgc_ctor$" + struct_name);
+        if (set == nullptr || set->empty()) {
+            if (!arg_types.empty()) {
+                report_error(loc, ErrorCode::FunctionArgCountMismatch,
+                    "type '" + struct_name + "' has no constructor taking " +
+                    std::to_string(arg_types.size()) + " argument(s)");
+            }
+            return nullptr;
+        }
+        struct Candidate {
+            Symbol* symbol = nullptr;
+            std::vector<int> ranks;
+        };
+        std::vector<Candidate> viable;
+        for (Symbol& sym : *set) {
+            // 降低后的构造函数第一个形参是 `this` 指针，不参与实参匹配（第 20 章）
+            // The lowered constructor's first parameter is the hidden `this` pointer and does
+            // not take part in argument matching (§20)
+            if (sym.param_types.empty()) continue;
+            const std::size_t max_params = sym.param_types.size() - 1;
+            std::size_t required = max_params;
+            if (sym.function_node != nullptr) {
+                const auto& defaults = sym.function_node->param_defaults;
+                for (std::size_t i = defaults.size(); i > 1; --i) {
+                    if (defaults[i - 1] != nullptr) required = (i - 1) - 1;
+                    else break;
+                }
+            }
+            if (arg_types.size() > max_params || arg_types.size() < required) continue;
+            Candidate candidate;
+            candidate.symbol = &sym;
+            bool ok = true;
+            for (std::size_t i = 0; i < arg_types.size(); ++i) {
+                int rank = conversion_rank(arg_types[i], sym.param_types[i + 1]);
+                if (rank < 0 && i < arg_is_null.size() && arg_is_null[i] &&
+                    sym.param_types[i + 1].kind == TypeKind::Pointer) {
+                    rank = 0;
+                }
+                if (rank < 0) {
+                    ok = false;
+                    break;
+                }
+                candidate.ranks.push_back(rank);
+            }
+            if (ok) viable.push_back(std::move(candidate));
+        }
+        if (viable.empty()) {
+            report_error(loc, ErrorCode::FunctionArgTypeMismatch,
+                "no constructor of '" + struct_name + "' matches the given arguments");
+            return nullptr;
+        }
+        int best = -1;
+        bool ambiguous = false;
+        for (std::size_t i = 0; i < viable.size(); ++i) {
+            bool is_best = true;
+            for (std::size_t j = 0; j < viable.size(); ++j) {
+                if (i == j) continue;
+                const std::vector<int>& a = viable[i].ranks;
+                const std::vector<int>& b = viable[j].ranks;
+                bool i_better = false;
+                bool j_better = false;
+                for (std::size_t k = 0; k < a.size() && k < b.size(); ++k) {
+                    if (a[k] < b[k]) i_better = true;
+                    if (a[k] > b[k]) j_better = true;
+                }
+                if (!(i_better && !j_better)) {
+                    is_best = false;
+                    break;
+                }
+            }
+            if (is_best) {
+                if (best != -1) ambiguous = true;
+                else best = static_cast<int>(i);
+            }
+        }
+        if (ambiguous || best < 0) {
+            // 第 20 章：特殊成员重载决议二义性 → ER 0096
+            // §20: special-member overload ambiguity is ER 0096
+            report_error(loc, ErrorCode::SpecialMemberAmbiguous, { struct_name });
+            return nullptr;
+        }
+        return viable[static_cast<std::size_t>(best)].symbol;
+    }
+
+    bool TypeChecker::type_layout(const AST::Type& type, std::size_t& size,
+        std::size_t& align) const {
+        // 与代码生成一致的大小/对齐计算（第 14 章；用于 Placement 构造检查）
+        // Size/alignment identical to codegen (§14; used by the placement check)
+        auto round_up = [](std::size_t value, std::size_t alignment) {
+            if (alignment <= 1) return value;
+            return (value + alignment - 1) / alignment * alignment;
+        };
+        switch (type.kind) {
+        case TypeKind::Int: case TypeKind::Float: size = 4; align = 4; return true;
+        case TypeKind::Double: size = 8; align = 8; return true;
+        case TypeKind::Char: case TypeKind::Bool: size = 1; align = 1; return true;
+        case TypeKind::String: size = 32; align = 8; return true;
+        case TypeKind::File: size = 8; align = 8; return true;
+        case TypeKind::Pointer:
+        case TypeKind::Function: size = 8; align = 8; return true;
+        case TypeKind::Array: {
+            std::size_t element_size = 0;
+            std::size_t element_align = 1;
+            if (!type.element_type || !type_layout(*type.element_type, element_size, element_align)) {
+                return false;
+            }
+            size = element_size * type.array_size.value_or(0);
+            align = element_align;
+            return true;
+        }
+        case TypeKind::Struct: {
+            auto def = struct_defs_.find(type.struct_name);
+            if (def == struct_defs_.end() || def->second == nullptr) return false;
+            std::size_t offset = 0;
+            std::size_t max_align = 1;
+            for (const auto& member : def->second->members) {
+                std::size_t member_size = 0;
+                std::size_t member_align = 1;
+                if (!type_layout(member.type, member_size, member_align)) return false;
+                max_align = std::max(max_align, member_align);
+                offset = round_up(offset, member_align);
+                offset += member_size;
+            }
+            size = round_up(offset, max_align);
+            align = max_align;
+            return true;
+        }
+        default:
+            return false;
+        }
+    }
+
+    bool TypeChecker::type_is_copyable(const AST::Type& type) const {
+        // 第 20 章：未标记 [nocopy] 且所有成员可拷贝时，默认拷贝构造/拷贝赋值才生成
+        // §20: the default copy members exist unless [nocopy] or a member is not copyable
+        switch (type.kind) {
+        case TypeKind::Array:
+            return type.element_type ? type_is_copyable(*type.element_type) : true;
+        case TypeKind::Struct: {
+            auto def = struct_defs_.find(type.struct_name);
+            if (def == struct_defs_.end() || def->second == nullptr) return true;
+            if (def->second->no_copy) return false;
+            for (const auto& member : def->second->members) {
+                if (!type_is_copyable(member.type)) return false;
+            }
+            return true;
+        }
+        default:
+            return true;
+        }
+    }
+
+    bool TypeChecker::type_is_movable(const AST::Type& type) const {
+        switch (type.kind) {
+        case TypeKind::Array:
+            return type.element_type ? type_is_movable(*type.element_type) : true;
+        case TypeKind::Struct: {
+            auto def = struct_defs_.find(type.struct_name);
+            if (def == struct_defs_.end() || def->second == nullptr) return true;
+            if (def->second->no_move) return false;
+            for (const auto& member : def->second->members) {
+                if (!type_is_movable(member.type)) return false;
+            }
+            return true;
+        }
+        default:
+            return true;
+        }
+    }
+
+    bool TypeChecker::is_move_expression(const AST::Expression* expr) {
+        auto* cm = dynamic_cast<const AST::PrimaryExpression*>(expr);
+        return cm != nullptr && cm->kind == AST::PrimaryExpression::Kind::CopyMove &&
+            cm->copy_move_kind == AST::PrimaryExpression::CopyMoveKind::Move;
+    }
+
+    int TypeChecker::conversion_rank(const AST::Type& from, const AST::Type& to) {
+        // 第 18 章：精确匹配优于隐式转换；转换后更接近形参类型者更优。
+        // 采用两级排序：等级（0 精确 / 1 提升 / 2 转换）× 100 + 转换距离，
+        // 值越小越优，因此既满足“精确优先”，也满足“更接近形参类型者更优”。
+        // §18: exact matches beat implicit conversions, and a conversion landing closer to
+        // the parameter type wins. The rank is (class * 100 + distance), smaller is better.
+        constexpr int kExact = 0;
+        constexpr int kPromotion = 100;
+        constexpr int kConversion = 200;
+        // 算术链位置：char/bool 与 int 视为同一档，int < float < double
+        // Position on the arithmetic ladder: char/bool share int's slot; int < float < double
+        auto arithmetic_position = [](const AST::Type& t) -> int {
+            switch (t.kind) {
+            case TypeKind::Char:
+            case TypeKind::Bool:
+            case TypeKind::Int: return 0;
+            case TypeKind::Float: return 1;
+            case TypeKind::Double: return 2;
+            default: return -1;
+            }
+        };
+        if (from == to) return 0;
+        if (from.kind == TypeKind::Pointer && to.kind == TypeKind::Pointer) {
+            if (from.pointee_type && to.pointee_type && *from.pointee_type == *to.pointee_type) {
+                return kExact;
+            }
+            // 指针转换：void* 视为一次转换，其它同为一档
+            // Pointer conversions: void* is one conversion; others share the same class
+            return kConversion;
+        }
+        const int from_pos = arithmetic_position(from);
+        const int to_pos = arithmetic_position(to);
+        if (from_pos >= 0 && to_pos >= 0) {
+            // char/bool → int 属于整数提升；float → double 属于浮点提升
+            // char/bool -> int is an integral promotion; float -> double is a floating one
+            bool promotion = (from_pos == 0 && to_pos == 0 && from != to) ||
+                (from_pos == 1 && to_pos == 2);
+            int distance = std::abs(to_pos - from_pos);
+            if (distance == 0) distance = 1;   // char ↔ bool 等同档不同类型
+            return (promotion ? kPromotion : kConversion) + distance;
+        }
+        if (can_implicit_convert(from, to)) return kConversion;
+        return -1;
+    }
+
+    Symbol* TypeChecker::resolve_overload_call(const std::string& name,
+        AST::PostfixExpression* call, AST::PrimaryExpression* callee) {
+        std::vector<Symbol>* set = sym_table_.lookup_overloads(name);
+        if (set == nullptr || set->empty()) return nullptr;
+
+        // 实参类型只求值一次，避免重复诊断
+        // Argument types are computed once, avoiding duplicate diagnostics
+        std::vector<AST::Type> arg_types;
+        std::vector<bool> arg_is_null;
+        for (auto& arg : call->arguments) {
+            arg_types.push_back(check_expression(arg.get()));
+            bool is_null = false;
+            if (auto* prim = dynamic_cast<AST::PrimaryExpression*>(arg.get())) {
+                if (prim->kind == AST::PrimaryExpression::Kind::Null) is_null = true;
+            }
+            arg_is_null.push_back(is_null);
+        }
+        const std::size_t provided = call->arguments.size();
+
+        struct Candidate {
+            Symbol* sym = nullptr;
+            std::vector<int> ranks;
+        };
+        std::vector<Candidate> viable;
+        for (Symbol& sym : *set) {
+            const std::size_t max_params = sym.param_types.size();
+            std::size_t required = max_params;
+            if (sym.function_node != nullptr) {
+                const auto& defaults = sym.function_node->param_defaults;
+                for (std::size_t i = defaults.size(); i > 0; --i) {
+                    if (defaults[i - 1]) {
+                        required = i - 1;
+                    }
+                    else {
+                        break;
+                    }
+                }
+            }
+            if (provided > max_params || provided < required) continue;
+            Candidate candidate;
+            candidate.sym = &sym;
+            bool ok = true;
+            for (std::size_t i = 0; i < provided; ++i) {
+                int rank = conversion_rank(arg_types[i], sym.param_types[i]);
+                if (rank < 0 && arg_is_null[i] && sym.param_types[i].kind == TypeKind::Pointer) {
+                    rank = 0;
+                }
+                if (rank < 0) {
+                    ok = false;
+                    break;
+                }
+                candidate.ranks.push_back(rank);
+            }
+            if (ok) viable.push_back(std::move(candidate));
+        }
+
+        if (viable.empty()) {
+            report_error(call->location, ErrorCode::FunctionArgTypeMismatch,
+                "no viable overload of '" + name + "' for the given arguments");
+            return nullptr;
+        }
+
+        int best = -1;
+        bool ambiguous = false;
+        for (std::size_t i = 0; i < viable.size(); ++i) {
+            bool is_best = true;
+            for (std::size_t j = 0; j < viable.size(); ++j) {
+                if (i == j) continue;
+                const std::vector<int>& a = viable[i].ranks;
+                const std::vector<int>& b = viable[j].ranks;
+                bool i_better = false;
+                bool j_better = false;
+                for (std::size_t k = 0; k < a.size() && k < b.size(); ++k) {
+                    if (a[k] < b[k]) i_better = true;
+                    if (a[k] > b[k]) j_better = true;
+                }
+                if (!(i_better && !j_better)) {
+                    is_best = false;
+                    break;
+                }
+            }
+            if (is_best) {
+                if (best != -1) ambiguous = true;
+                else best = static_cast<int>(i);
+            }
+        }
+        if (ambiguous || best < 0) {
+            report_error(call->location, ErrorCode::OverloadAmbiguous, { name });
+            return nullptr;
+        }
+
+        Symbol* chosen = viable[static_cast<std::size_t>(best)].sym;
+        if (callee != nullptr) {
+            // 第 18 章：extern 与用户函数共用重载集，命名修饰后的名字分别取自
+            // ExternDeclaration::name / FunctionDefinition::name
+            // §18: externs and user functions share overload sets; the mangled name comes
+            // from ExternDeclaration::name or FunctionDefinition::name respectively
+            std::string resolved_name;
+            if (chosen->function_node != nullptr) {
+                resolved_name = chosen->function_node->name;
+            }
+            else if (chosen->extern_node != nullptr) {
+                resolved_name = chosen->extern_node->name;
+            }
+            if (!resolved_name.empty()) callee->identifier = resolved_name;
+            record_function_resolution(callee, *chosen);
+        }
+        // 默认参数补齐（记录指向被调函数定义中默认值表达式的非拥有指针）
+        // Fill in default arguments (non-owning pointers into the callee's defaults)
+        if (chosen->function_node != nullptr && provided < chosen->param_types.size()) {
+            const auto& defaults = chosen->function_node->param_defaults;
+            for (std::size_t i = provided; i < chosen->param_types.size(); ++i) {
+                if (i < defaults.size() && defaults[i]) {
+                    call->appended_defaults.push_back(defaults[i].get());
+                }
+            }
+        }
+        return chosen;
     }
 
 } // namespace gallt

@@ -45,6 +45,15 @@ namespace gallt {
             // 指针与内存 (Pointers & memory)
             {"null", TokenType::Keyword_Null},
             {"heap", TokenType::Keyword_Heap},
+            // 0.3 新增：编译期泛型块 (Gallt 0.3.txt §19)
+            // Added in 0.3: compile-time generics blocks (Gallt 0.3.txt §19)
+            {"generics", TokenType::Keyword_Generics},
+            // 0.4 新增：命名空间与编译期代码生成 (Gallt 0.4.txt §19/§21)
+            // Added in 0.4: namespaces and compile-time code generation
+            {"namespace", TokenType::Keyword_Namespace},
+            {"access", TokenType::Keyword_Access},
+            {"addition", TokenType::Keyword_Addition},
+            {"emit", TokenType::Keyword_Emit},
         };
 
         // 检查字符是否为标识符的合法起始字符 (字母或下划线)
@@ -56,7 +65,13 @@ namespace gallt {
         // 检查字符是否为标识符的合法续接字符 (字母、数字或下划线)
         // Check if character is a valid identifier continuation (letter, digit, or underscore)
         bool is_identifier_continuation(char c) noexcept {
-            return std::isalnum(static_cast<unsigned char>(c)) || c == '_';
+            // '$' 只作为续接字符出现：命名空间/泛型实例的命名修饰会生成
+            // `ns$member`、`Box$int$Member` 这类内部名，Emit 生成的源码可能
+            // 需要引用它们（Gallt 0.4.txt §19）。
+            // '$' is accepted only as a continuation character: name mangling for
+            // namespaces/generic instances produces internal names such as
+            // `ns$member` or `Box$int$Member`, and emitted source may reference them.
+            return std::isalnum(static_cast<unsigned char>(c)) || c == '_' || c == '$';
         }
 
         // 检查字符是否为空白 (空格、制表符、换行符)
@@ -716,8 +731,9 @@ namespace gallt {
                 advance();
                 return Token{ TokenType::LogicalOr, start_loc, "||" };
             }
-            // 单个 | 不是有效运算符，但作为未知处理
-            [[fallthrough]];
+            // Gallt 0.3.txt §19：单个 '|' 用于泛型类型参数约束的联合类型
+            // Gallt 0.3.txt §19: a single '|' separates union members in generic constraints
+            return Token{ TokenType::Pipe, start_loc, "|" };
 
             // 分隔符 (Delimiters)
         case '(':
@@ -736,6 +752,16 @@ namespace gallt {
             return Token{ TokenType::Comma, start_loc, "," };
         case ';':
             return Token{ TokenType::Semicolon, start_loc, ";" };
+        case ':':
+            // Gallt 0.4.txt §3：`::` 是访问运算符，必须先于单字符 ':' 识别
+            // Gallt 0.4.txt §3: '::' is an access operator and must win over ':'
+            if (!is_at_end() && peek() == ':') {
+                advance();
+                return Token{ TokenType::ColonColon, start_loc, "::" };
+            }
+            // Gallt 0.3.txt §19：类型参数约束分隔符 `T: constraint`
+            // Gallt 0.3.txt §19: type-parameter constraint separator
+            return Token{ TokenType::Colon, start_loc, ":" };
         case '.':
             return Token{ TokenType::Dot, start_loc, "." };
 

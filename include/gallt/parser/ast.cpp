@@ -89,7 +89,13 @@ namespace gallt {
                 out << '*';
                 break;
             case TypeKind::Struct:
-                out << "struct " << struct_name;
+                if (generic_ref) {
+                    // 泛型实例成员按限定名显示，例如 Box<int>.Example
+                    // Instantiated generic members print with their qualified name
+                    out << generic_ref->to_string();
+                } else {
+                    out << "struct " << struct_name;
+                }
                 break;
             case TypeKind::Function:
                 if (return_type) {

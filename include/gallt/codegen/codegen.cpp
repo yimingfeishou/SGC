@@ -154,8 +154,13 @@ namespace {
 
     CodeGenerator::CodeGenerator(
         AST::Program* program,
-        const std::unordered_map<const AST::Expression*, AST::Type>& expression_types)
-        : program_(program), expression_types_(expression_types) {
+        const std::unordered_map<const AST::Expression*, AST::Type>& expression_types,
+        const std::unordered_map<const AST::PrimaryExpression*,
+            const AST::FunctionDefinition*>& resolved_functions,
+        const std::unordered_map<const AST::PrimaryExpression*,
+            const AST::ExternDeclaration*>& resolved_externs)
+        : program_(program), expression_types_(expression_types),
+        resolved_functions_(resolved_functions), resolved_externs_(resolved_externs) {
     }
 
     std::string CodeGenerator::new_temp(const char* hint) {
@@ -338,6 +343,9 @@ namespace {
         emit_global_variables();
         emit_functions();
         emit_global_initializer();
+        // 用户 main 之后析构全局对象（Gallt 0.3.txt §20）
+        // Destroy global objects right after the user main returns (Gallt 0.3.txt §20)
+        emit_main_wrapper();
         // 字符串常量可定义在函数之后；LLVM 支持前向引用模块级全局量
         // String globals may follow functions; LLVM supports forward references
         emit_string_constants();
@@ -419,6 +427,9 @@ namespace {
         emit_line("declare ptr @gallt_string_cstr(ptr)");
         emit_line("declare ptr @gallt_alloc_bytes(i64)");
         emit_line("declare void @gallt_free_ptr(ptr)");
+        // RTER 0002：函数指针调用时指针为空（Gallt 0.4.txt 错误表）
+        // RTER 0002: calling a null function pointer (Gallt 0.4.txt error table)
+        emit_line("declare void @gallt_check_fptr(ptr)");
         // Gallt 0.2.txt §17：文件操作运行库
         // Gallt 0.2.txt §17: file-operation runtime
         emit_line("declare ptr @gallt_file_open(ptr, ptr)");
@@ -462,9 +473,13 @@ namespace {
     }
 
     std::string CodeGenerator::function_llvm_name_for_source(std::string_view name) const {
-        // main 必须暴露给 CRT；其余用户函数加前缀防止与运行库冲突
-        // main must be exported to the CRT; other functions are prefixed
-        if (name == "main") return "@main";
+        // 用户 main 以 @glt_main 生 成，运行时由 sgc 生成的 @main 包装函数调用它，
+        // 从而保证“全局对象在 main 之前构造、程序结束时析构”完全由我们控制
+        // （Gallt 0.3.txt §20）；其余用户函数加前缀避免与运行库冲突。
+        // The user's main is emitted as @glt_main and called by the generated @main
+        // wrapper, so global construction/destruction ordering is fully under our control
+        // (Gallt 0.3.txt §20); other user functions are prefixed.
+        if (name == "main") return "@glt_main";
         return "@glt_" + std::string(name);
     }
 
@@ -481,9 +496,14 @@ namespace {
             auto* ext = dynamic_cast<AST::ExternDeclaration*>(top.get());
             if (!ext) continue;
             if (defined_names.count(ext->name)) continue;
+            // 每个 IR 符号只声明一次（同名不同签名的 extern 使用修饰名区分）
+            // Declare each IR symbol once (same-named externs with different signatures are
+            // decorated so they do not collide)
+            std::string symbol = extern_ir_symbol(ext);
+            if (!declared_extern_symbols_.insert(symbol).second) continue;
             std::string ret = llvm_type(ext->return_type);
             if (ext->return_type.kind == TypeKind::Function) ret = "ptr";
-            std::string sig = ret + " @" + ext->name + "(";
+            std::string sig = ret + " @" + symbol + "(";
             for (size_t i = 0; i < ext->parameters.size(); ++i) {
                 if (i != 0) sig += ", ";
                 sig += llvm_type(ext->parameters[i]);
@@ -528,6 +548,9 @@ namespace {
     }
 
     void CodeGenerator::emit_global_initializer() {
+        // 全局析构函数始终生成（@main 包装函数会调用它）
+        // The deinitializer is always emitted; the @main wrapper calls it
+        emit_global_deinit_function();
         if (global_vars_.empty()) return;
 
         // 全局变量通过 CRT 支持的构造函数在 main 之前初始化
@@ -548,6 +571,20 @@ namespace {
             if (var->initializer) {
                 emit_initializer_to_address(var, "@glt_g_" + var->name);
             }
+            else if (var->type.kind == TypeKind::Struct) {
+                // Gallt 0.3.txt §20：默认构造函数对成员执行默认初始化，
+                // 有默认值的成员使用默认值
+                // The default constructor applies declared member defaults
+                AST::ArrayInitializer empty_init(var->location,
+                    std::vector<std::unique_ptr<AST::Initializer>>{});
+                emit_struct_brace_initialization("@glt_g_" + var->name, var->type,
+                    &empty_init);
+            }
+        }
+        // Gallt 0.3.txt §20：全局对象的构造函数调用（在聚合初始化之后执行）
+        // Gallt 0.3.txt §20: constructor calls for global objects (after aggregate init)
+        for (auto& stmt : program_->global_initializers) {
+            emit_statement(stmt.get());
         }
         emit_line("ret void");
         std::string end_label = new_label("function_end");
@@ -563,6 +600,90 @@ namespace {
             "[ { i32, ptr, ptr } { i32 65535, ptr @glt_global_init, ptr null } ]");
     }
 
+    void CodeGenerator::emit_global_deinit_function() {
+        // 全局对象在程序结束时按逆序析构（Gallt 0.3.txt §20）；
+        // 该函数始终生成（即使没有全局对象），由 @main 包装函数在用户 main 返回后调用
+        // Global objects are destroyed in reverse order at exit; the function is always
+        // emitted and invoked by the @main wrapper right after the user main returns
+        scopes_.clear();
+        cleanup_scopes_.clear();
+        push_scope();
+        emitted_labels_.clear();
+        current_label_.clear();
+        current_block_terminated_ = true;
+        emit_line("define void @glt_global_deinit() {");
+        std::string deinit_entry = new_label("entry");
+        start_block(deinit_entry);
+        hoisted_allocas_.clear();
+        hoist_insert_index_ = lines_.size();
+        for (auto it = global_vars_.rbegin(); it != global_vars_.rend(); ++it) {
+            AST::VariableDeclaration* var = *it;
+            bool destructible = false;
+            if (var->type.kind == TypeKind::Struct) {
+                auto def_it = struct_by_name_.find(var->type.struct_name);
+                destructible = def_it != struct_by_name_.end() &&
+                    def_it->second != nullptr && def_it->second->needs_destruction;
+            }
+            if (!destructible && !type_contains_string(var->type)) continue;
+            emit_destroy_string_at(var->type, "@glt_g_" + var->name);
+        }
+        emit_line("ret void");
+        std::string deinit_end = new_label("function_end");
+        if (!current_block_terminated_) {
+            emit_line("br label %" + deinit_end);
+        }
+        start_block(deinit_end);
+        emit_line("ret void");
+        flush_hoisted_allocas();
+        emit_line("}");
+    }
+
+    void CodeGenerator::emit_main_wrapper() {
+        // Gallt 0.3.txt §20：全局对象在 main 之前构造（@llvm.global_ctors）、
+        // 在程序结束时按逆序析构。析构由本包装函数在用户 main 返回后调用，
+        // 避免依赖 CRT 的 .CRT$XT 终止段（该时机下 stdio 行为不可靠）。
+        // Gallt 0.3.txt §20: globals construct before main (@llvm.global_ctors) and are
+        // destroyed in reverse order at exit. The wrapper calls the deinitializer right
+        // after the user main returns instead of relying on CRT .CRT$XT terminators.
+        AST::FunctionDefinition* main_func = nullptr;
+        for (const auto& top : program_->top_levels) {
+            if (auto* func = dynamic_cast<AST::FunctionDefinition*>(top.get())) {
+                if (func->name == "main") {
+                    main_func = func;
+                    break;
+                }
+            }
+        }
+        if (main_func == nullptr) return;
+
+        std::string entry = new_label("main_wrapper");
+        emit_line("define i32 @main(i32 %argc, ptr %argv) {");
+        start_block(entry);
+        // 参数按用户 main 的签名转发（int main() / int main(int count, char* array[])）
+        // Forward parameters according to the user's main signature
+        std::string args;
+        if (main_func->parameters.size() >= 2) {
+            std::string second_type = llvm_type(main_func->parameters[1]);
+            args = "i32 %argc, " + second_type + " %argv";
+        }
+        else if (main_func->parameters.size() == 1) {
+            args = "i32 %argc";
+        }
+        std::string ret_type = llvm_type(main_func->return_type);
+        if (ret_type == "void" || main_func->return_type.kind == TypeKind::Void) {
+            emit_line("call void @glt_main(" + args + ")");
+            emit_line("call void @glt_global_deinit()");
+            emit_line("ret i32 0");
+            emit_line("}");
+            return;
+        }
+        std::string result = new_temp("main_result");
+        emit_line(result + " = call " + ret_type + " @glt_main(" + args + ")");
+        emit_line("call void @glt_global_deinit()");
+        emit_line("ret i32 " + result);
+        emit_line("}");
+    }
+
     void CodeGenerator::emit_initializer_to_address(AST::VariableDeclaration* decl,
         const std::string& address) {
         if (!decl->initializer) return;
@@ -574,19 +695,9 @@ namespace {
         auto* arr_init = dynamic_cast<AST::ArrayInitializer*>(decl->initializer.get());
         if (!arr_init) return;
         if (decl->type.kind == TypeKind::Array) {
-            std::string type_text = llvm_type(decl->type);
-            std::string elem_type = llvm_type(*decl->type.element_type);
-            size_t n = std::min<size_t>(decl->type.array_size.value_or(0),
-                arr_init->elements.size());
-            for (size_t i = 0; i < n; ++i) {
-                auto* e = dynamic_cast<AST::ExpressionInitializer*>(arr_init->elements[i].get());
-                if (!e) continue;
-                std::string ep = new_temp("arrayelem");
-                emit_line(ep + " = getelementptr " + type_text +
-                    ", ptr " + address + ", i64 0, i64 " + std::to_string(i));
-                ExprValue value = gen_expr(e->expr.get());
-                emit_aggregate_assign(ep, *decl->type.element_type, value);
-            }
+            // 全局数组初始化：递归处理嵌套花括号（第 7/14 章）
+            // Global array initialization recurses into nested braces (§7/§14)
+            emit_array_brace_initialization(address, decl->type, arr_init);
         } else if (decl->type.kind == TypeKind::Struct) {
             emit_struct_brace_initialization(address, decl->type, arr_init);
         }
@@ -634,6 +745,16 @@ namespace {
         value.owned_string.clear();
     }
 
+    void CodeGenerator::destroy_statement_temporaries() {
+        // 逆序析构当前语句创建的值临时对象（Gallt 0.3.txt §20）
+        // Destroy value temporaries of the current statement in reverse order
+        while (!statement_temporaries_.empty()) {
+            CleanupRecord record = statement_temporaries_.back();
+            statement_temporaries_.pop_back();
+            emit_destroy_string_at(record.type, record.address);
+        }
+    }
+
     void CodeGenerator::destroy_active_cleanup_scopes(std::size_t until_depth) {
         if (cleanup_scopes_.size() <= until_depth) return;
         for (std::size_t i = cleanup_scopes_.size(); i-- > until_depth;) {
@@ -667,6 +788,15 @@ namespace {
             if (it == struct_by_name_.end()) return;
             std::string struct_ir = llvm_type(type);
             const AST::StructDefinition* def = it->second;
+            // 用户定义析构函数：直接调用，由析构函数负责成员释放
+            // A user destructor is called directly; it owns member cleanup
+            if (!def->destructor_name.empty()) {
+                std::string callee = function_reference(def->destructor_name);
+                if (!callee.empty()) {
+                    emit_line("call void " + callee + "(ptr " + address + ")");
+                }
+                return;
+            }
             for (std::size_t i = 0; i < def->members.size(); ++i) {
                 std::string field = new_temp("cleanup_field");
                 emit_line(field + " = getelementptr " + struct_ir +
@@ -698,10 +828,17 @@ namespace {
         std::string name = function_llvm_name_for_source(func->name);
         std::string ret = llvm_type(func->return_type);
         if (func->return_type.kind == TypeKind::Function) ret = "ptr";
+        // Gallt 0.3.txt §20：结构体返回值改用 sret 约定（调用者分配、被调用者构造）
+        // §20: struct returns use the sret convention (caller allocates, callee constructs)
+        bool sret = returns_via_sret(func->return_type);
 
         std::string header = "define " + ret + " " + name + "(";
+        if (sret) {
+            ret = "void";
+            header = "define void " + name + "(ptr %__sret_ret";
+        }
         for (size_t i = 0; i < func->parameters.size(); ++i) {
-            if (i != 0) header += ", ";
+            if (i != 0 || sret) header += ", ";
             header += llvm_type(func->parameters[i]);
             std::string param_name = (i < func->param_names.size() && !func->param_names[i].empty())
                 ? func->param_names[i]
@@ -710,6 +847,7 @@ namespace {
         }
         header += ") {";
         emit_line(header);
+        current_sret_pointer_ = sret ? std::string("%__sret_ret") : std::string();
 
         // 参数先复制到 alloca，便于取地址和统一左值语义
         // Copy parameters into allocas so address-of and lvalue semantics are uniform
@@ -725,17 +863,28 @@ namespace {
             std::string type_text = llvm_type(func->parameters[i]);
             std::string address = emit_alloca(type_text, ("alloca_" + param_name).c_str());
             std::string incoming = "%" + param_name;
-            if (type_contains_string(func->parameters[i])) {
-                // 含 string 的参数按值传入后必须深拷贝到本函数栈帧
-                // String-containing parameters are deep-copied into this frame
+            const AST::Type& param_type = func->parameters[i];
+            if (param_type.kind == TypeKind::Struct || param_type.kind == TypeKind::String) {
+                // Gallt 0.3.txt §20：按值传递的 struct / string 形参是一个自动对象，
+                // 必须在函数入口对它执行拷贝构造（string 深拷贝；struct 调用其拷贝构造
+                // 或按默认拷贝构造逐成员拷贝），并在函数退出时析构
+                // Gallt 0.3.txt §20: a by-value struct/string parameter is an automatic
+                // object — copy-construct it at entry (string deep copy; struct uses its
+                // copy constructor or the default member-wise copy) and destroy it at exit
                 emit_line("store " + type_text + " zeroinitializer, ptr " + address);
-                std::string shadow = emit_alloca(type_text, "paramstring");
+                std::string shadow = emit_alloca(type_text, "param_incoming");
                 emit_line("store " + type_text + " " + incoming + ", ptr " + shadow);
-                ExprValue source;
-                source.type = func->parameters[i];
-                source.address = shadow;
-                emit_aggregate_assign(address, source.type, source);
-                register_string_cleanup(address, func->parameters[i]);
+                emit_memberwise_copy(param_type, address, shadow, false);
+                bool needs_cleanup = (param_type.kind == TypeKind::String) ||
+                    type_contains_string(param_type);
+                if (!needs_cleanup && param_type.kind == TypeKind::Struct) {
+                    auto def_it = struct_by_name_.find(param_type.struct_name);
+                    needs_cleanup = def_it != struct_by_name_.end() && def_it->second != nullptr &&
+                        def_it->second->needs_destruction;
+                }
+                if (needs_cleanup) {
+                    register_string_cleanup(address, param_type);
+                }
             } else {
                 emit_line("store " + type_text + " " + incoming + ", ptr " + address);
             }
@@ -757,7 +906,7 @@ namespace {
         }
         start_block(end_label);
         destroy_active_cleanup_scopes(0);
-        if (func->return_type.kind == TypeKind::Void) {
+        if (func->return_type.kind == TypeKind::Void || sret) {
             emit_line("ret void");
         } else {
             std::string type_text = llvm_type(func->return_type);
@@ -783,7 +932,20 @@ namespace {
             push_scope();
         }
         for (const auto& stmt : block->statements) {
+            // 语句执行结束时析构该完整表达式创建的值临时对象（Gallt 0.3.txt §20）
+            // Destroy the value temporaries of the full expression when the statement ends
+            std::size_t temp_mark = statement_temporaries_.size();
             emit_statement(stmt.get());
+            if (!current_block_terminated_) {
+                while (statement_temporaries_.size() > temp_mark) {
+                    CleanupRecord record = statement_temporaries_.back();
+                    statement_temporaries_.pop_back();
+                    emit_destroy_string_at(record.type, record.address);
+                }
+            }
+            else {
+                statement_temporaries_.resize(temp_mark);
+            }
         }
         if (new_scope) {
             pop_scope();
@@ -796,6 +958,28 @@ namespace {
             emit_block(block, true);
         } else if (auto* decl = dynamic_cast<AST::VariableDeclaration*>(stmt)) {
             emit_variable_declaration(decl);
+        } else if (auto* destruct_stmt = dynamic_cast<AST::DestructStatement*>(stmt)) {
+            // destruct [指针]（Gallt 0.3.txt §20）：先析构，再释放内存；
+            // 第 20 章规定对 null 指针执行 destruct 是无操作，因此先做运行期判空
+            // destruct [pointer]: destroy first, then release the storage; a null pointer is
+            // a no-op per §20, so emit a runtime null guard
+            ExprValue target = gen_expr(destruct_stmt->target.get());
+            std::string pointer = !target.value.empty() ? target.value
+                : (!target.address.empty() ? target.address : std::string());
+            if (!pointer.empty() && target.type.kind == TypeKind::Pointer &&
+                target.type.pointee_type) {
+                std::string body_label = new_label("destruct");
+                std::string end_label = new_label("destruct_end");
+                std::string is_null = new_temp("destruct_isnull");
+                emit_line(is_null + " = icmp eq ptr " + pointer + ", null");
+                emit_line("br i1 " + is_null + ", label %" + end_label +
+                    ", label %" + body_label);
+                start_block(body_label);
+                emit_destroy_string_at(*target.type.pointee_type, pointer);
+                emit_line("call void @gallt_free_ptr(ptr " + pointer + ")");
+                emit_line("br label %" + end_label);
+                start_block(end_label);
+            }
         } else if (auto* if_stmt = dynamic_cast<AST::IfStatement*>(stmt)) {
             ExprValue cond = gen_expr(if_stmt->condition.get());
             std::string cond_i1 = truth_condition(cond.value, cond.type);
@@ -884,6 +1068,16 @@ namespace {
             AST::Type ret_type = current_function_
                 ? current_function_->return_type
                 : AST::Type::make_void();
+            // Gallt 0.3.txt §20：结构体返回值在调用者提供的存储上做拷贝/移动构造
+            // §20: a struct return copy/move-constructs into the caller-provided storage
+            if (ret->value && returns_via_sret(ret_type) && !current_sret_pointer_.empty()) {
+                emit_struct_return(ret->value.get(), ret_type, current_sret_pointer_);
+                destroy_statement_temporaries();
+                destroy_active_cleanup_scopes(0);
+                emit_line("ret void");
+                current_label_ = new_label("afterret");
+                return;
+            }
             if (ret->value) {
                 ExprValue value = gen_expr(ret->value.get());
                 std::string string_ret_storage;
@@ -917,9 +1111,13 @@ namespace {
                 }
                 // 清除函数栈内仍然存在的 string 局部变量
                 // Destroy remaining string locals in the current stack frame
+                // 完整表达式结束：先析构本次 return 表达式中创建的临时对象
+                // End of the full expression: destroy the temporaries of the return value
+                destroy_statement_temporaries();
                 destroy_active_cleanup_scopes(0);
                 emit_line("ret " + type_text + " " + converted);
             } else {
+                destroy_statement_temporaries();
                 destroy_active_cleanup_scopes(0);
                 emit_line("ret void");
             }
@@ -963,14 +1161,66 @@ namespace {
             emit_line("call void @llvm.memset.p0.i64(ptr " + address +
                 ", i8 0, i64 " + n + ", i1 false)");
         }
+        else if (decl->type.kind == TypeKind::Struct) {
+            // 需要析构（用户析构函数或含析构成员）的对象登记清理
+            // Objects needing destruction register a cleanup record
+            auto it = struct_by_name_.find(decl->type.struct_name);
+            if (it != struct_by_name_.end() && it->second != nullptr &&
+                it->second->needs_destruction) {
+                register_string_cleanup(address, decl->type);
+            }
+        }
 
         // 数组在声明处分配；函数指针变量也使用普通 alloca
         // Arrays allocate at declaration; function-pointer variables use normal allocas
         if (!decl->initializer) {
+            // Gallt 0.3.txt §20：默认构造函数对成员执行默认初始化，成员有默认值时使用默认值
+            // Gallt 0.3.txt §20: the default constructor default-initializes members and
+            // applies declared member defaults
+            if (decl->type.kind == TypeKind::Struct) {
+                AST::ArrayInitializer empty_init(decl->location,
+                    std::vector<std::unique_ptr<AST::Initializer>>{});
+                emit_struct_brace_initialization(address, decl->type, &empty_init);
+            }
             return;
         }
 
         if (auto* expr_init = dynamic_cast<AST::ExpressionInitializer*>(decl->initializer.get())) {
+            // copy / move / deep_copy / shallow_copy（Gallt 0.3.txt §20）
+            if (auto* cm = dynamic_cast<AST::PrimaryExpression*>(expr_init->expr.get())) {
+                if (cm->kind == AST::PrimaryExpression::Kind::CopyMove) {
+                    AST::Type source_type;
+                    std::string source_address = operand_address(cm->paren_expr.get(),
+                        &source_type);
+                    if (!source_address.empty()) {
+                        switch (cm->copy_move_kind) {
+                        case AST::PrimaryExpression::CopyMoveKind::Copy:
+                            emit_memberwise_copy(decl->type, address, source_address, false);
+                            break;
+                        case AST::PrimaryExpression::CopyMoveKind::Move:
+                            emit_memberwise_move(decl->type, address, source_address, false);
+                            break;
+                        case AST::PrimaryExpression::CopyMoveKind::DeepCopy:
+                            emit_deep_copy(decl->type, address, source_address);
+                            break;
+                        case AST::PrimaryExpression::CopyMoveKind::ShallowCopy:
+                            emit_shallow_copy(decl->type, address, source_address);
+                            break;
+                        }
+                        return;
+                    }
+                }
+            }
+            // 复制消除：`T v = f()` 直接把 v 的存储交给结构体返回值的 sret 约定，
+            // 既避免多余拷贝，也避免对同一存储自我赋值
+            // Copy elision: for `T v = f()` the variable's storage is handed to the
+            // struct-returning callee, avoiding both an extra copy and a self-assignment
+            if (returns_via_sret(decl->type) && is_struct_returning_call(expr_init->expr.get())) {
+                pending_sret_destination_ = address;
+                gen_expr(expr_init->expr.get());
+                pending_sret_destination_.clear();
+                return;
+            }
             ExprValue value = gen_expr(expr_init->expr.get());
             emit_aggregate_assign(address, decl->type, value);
             return;
@@ -978,21 +1228,9 @@ namespace {
 
         auto* arr_init = dynamic_cast<AST::ArrayInitializer*>(decl->initializer.get());
         if (arr_init && decl->type.kind == TypeKind::Array) {
-            size_t n = decl->type.array_size.value_or(0);
-            size_t count = std::min(n, arr_init->elements.size());
-            const AST::Type& elem = *decl->type.element_type;
-            std::string elem_type = llvm_type(elem);
-            for (size_t i = 0; i < count; ++i) {
-                auto* e = dynamic_cast<AST::ExpressionInitializer*>(arr_init->elements[i].get());
-                if (!e) continue;
-                std::string idx = emit_alloca("i64", "idx");
-                emit_line("store i64 " + std::to_string(i) + ", ptr " + idx);
-                std::string element_ptr = new_temp("ep");
-                emit_line(element_ptr + " = getelementptr " + type_text +
-                    ", ptr " + address + ", i64 0, i64 " + std::to_string(i));
-                ExprValue value = gen_expr(e->expr.get());
-                emit_aggregate_assign(element_ptr, elem, value);
-            }
+            // 局部数组初始化：递归处理嵌套花括号（第 7/14 章）
+            // Local array initialization recurses into nested braces (§7/§14)
+            emit_array_brace_initialization(address, decl->type, arr_init);
             // 未提供的元素保持声明时的未初始化状态
             // Missing elements remain uninitialized as declared
             return;
@@ -1075,8 +1313,8 @@ namespace {
             ", ptr " + src_addr + ")");
     }
 
-    void CodeGenerator::emit_aggregate_assign(const std::string& dest_address,
-        const AST::Type& dest_type, ExprValue& source) {
+   void CodeGenerator::emit_aggregate_assign(const std::string& dest_address,
+        const AST::Type& dest_type, ExprValue& source, bool is_assignment) {
         if (dest_type.kind == TypeKind::String) {
             emit_string_assign(dest_address, source);
             destroy_owned_string(source);
@@ -1092,26 +1330,38 @@ namespace {
             return;
         }
 
-        if (dest_type.kind == TypeKind::Struct) {
-            // 先浅拷贝所有标量/数组字段，再对含 string 的成员执行深拷贝
-            // Start with a shallow aggregate copy, then deep-copy string members
+        if (dest_type.kind == TypeKind::Array) {
+            // 第 7 章禁止数组整体赋值（类型检查器已诊断）；此处的整体拷贝只是
+            // 保证任何残余路径都有定义明确的行为，而不是静默丢弃初始化
+            // §7 forbids whole-array assignment (diagnosed by the type checker); this copy
+            // keeps any remaining path well-defined instead of silently dropping the store
             std::string type_text = llvm_type(dest_type);
-            std::string loaded = source.value;
-            std::string source_storage = source.address;
-            if (loaded.empty() && !source.address.empty()) {
-                loaded = new_temp("agg");
+            if (!source.address.empty()) {
+                std::string loaded = new_temp("arraycopy");
                 emit_line(loaded + " = load " + type_text + ", ptr " + source.address);
+                emit_line("store " + type_text + " " + loaded + ", ptr " + dest_address);
             }
-            if (!loaded.empty() && source_storage.empty()) {
+            else if (!source.value.empty()) {
+                emit_line("store " + type_text + " " + source.value + ", ptr " + dest_address);
+            }
+            return;
+        }
+
+        if (dest_type.kind == TypeKind::Struct) {
+            // Gallt 0.3.txt §20：结构体赋值/初始化语义由默认拷贝构造/拷贝赋值决定
+            // （逐成员；string 深拷贝、struct 调用其拷贝函数、数组逐元素、裸指针浅拷贝），
+            // 不再使用旧的“整体浅拷贝 + string 补丁”规则。
+            // Gallt 0.3.txt §20: struct copy semantics come from the default copy
+            // constructor/assignment (member-wise), not from the removed shallow+patch rule.
+            std::string type_text = llvm_type(dest_type);
+            std::string source_storage = source.address;
+            if (source_storage.empty()) {
+                std::string loaded = source.value;
+                if (loaded.empty()) return;
                 source_storage = emit_alloca(type_text, "agg_temp");
                 emit_line("store " + type_text + " " + loaded + ", ptr " + source_storage);
             }
-            if (!loaded.empty()) {
-                emit_line("store " + type_text + " " + loaded + ", ptr " + dest_address);
-                if (type_contains_string(dest_type) && !source_storage.empty()) {
-                    emit_deep_copy_string_members(dest_type, dest_address, source_storage);
-                }
-            }
+            emit_memberwise_copy(dest_type, dest_address, source_storage, is_assignment);
         }
     }
 
@@ -1119,6 +1369,12 @@ namespace {
         const std::string& dest_address, const std::string& src_address) {
         // 递归复制结构体中的 string 成员，保证文档要求的深拷贝语义
         // Recursively deep-copy string members to satisfy documented semantics
+        // （Gallt 0.3 第 20 章：默认拷贝构造/拷贝赋值对 string 成员同样深拷贝）
+        // (Gallt 0.3 §20: default copy construction/assignment also deep-copies strings)
+        // 说明：Gallt 0.3 第 20 章的默认拷贝构造/拷贝赋值同样对 string 成员深拷贝，
+        // 因此该路径与默认特殊成员函数语义一致，保留供既有的结构体初始化路径复用。
+        // Gallt 0.3 §20 default copy construction/assignment also deep-copies string
+        // members, so this path stays semantically consistent with the default members.
         auto it = struct_by_name_.find(struct_type.struct_name);
         if (it == struct_by_name_.end() || it->second == nullptr) return;
         const AST::StructDefinition* def = it->second;
@@ -1181,20 +1437,9 @@ namespace {
                 if (member.type.kind == TypeKind::Struct) {
                     emit_struct_brace_initialization(field_ptr, member.type, nested);
                 } else if (member.type.kind == TypeKind::Array) {
-                    // 嵌套数组初始化：逐元素写入
-                    // Nested array initialization writes elements one by one
-                    size_t max = std::min<size_t>(member.type.array_size.value_or(nested->elements.size()),
-                        nested->elements.size());
-                    const AST::Type& elem_type = *member.type.element_type;
-                    for (size_t j = 0; j < max; ++j) {
-                        auto* e = dynamic_cast<AST::ExpressionInitializer*>(nested->elements[j].get());
-                        if (!e) continue;
-                        std::string ep = new_temp("arrayelem");
-                        emit_line(ep + " = getelementptr " + llvm_type(member.type) +
-                            ", ptr " + field_ptr + ", i64 0, i64 " + std::to_string(j));
-                        ExprValue v = gen_expr(e->expr.get());
-                        emit_aggregate_assign(ep, elem_type, v);
-                    }
+                    // 嵌套数组初始化：递归处理嵌套花括号与逐元素写入
+                    // Nested array initialization: recurse into nested braces/elements
+                    emit_array_brace_initialization(field_ptr, member.type, nested);
                 }
             } else if (auto* e = dynamic_cast<AST::ExpressionInitializer*>(element)) {
                 ExprValue value = gen_expr(e->expr.get());
@@ -1216,6 +1461,39 @@ namespace {
         }
     }
 
+    void CodeGenerator::emit_array_brace_initialization(const std::string& address,
+        const AST::Type& array_type, AST::ArrayInitializer* init) {
+        // Gallt 0.3.txt 第 7/14 章：数组的花括号初始化逐元素写入；元素本身是数组时
+        // 递归进入更深一层花括号，元素是 struct 时按第 20 章的拷贝语义写入
+        // Gallt 0.3.txt §7/§14: brace initialization writes elements one by one; nested
+        // arrays recurse into deeper braces and struct elements use §20 copy semantics
+        if (init == nullptr || !array_type.element_type) return;
+        const AST::Type& element_type = *array_type.element_type;
+        const size_t provided = init->elements.size();
+        const size_t count = std::min<size_t>(array_type.array_size.value_or(provided), provided);
+        const std::string array_ir = llvm_type(array_type);
+        for (size_t i = 0; i < count; ++i) {
+            std::string element_ptr = new_temp("arrayelem");
+            emit_line(element_ptr + " = getelementptr " + array_ir +
+                ", ptr " + address + ", i64 0, i64 " + std::to_string(i));
+            AST::Initializer* element = init->elements[i].get();
+            if (auto* nested = dynamic_cast<AST::ArrayInitializer*>(element)) {
+                if (element_type.kind == TypeKind::Struct) {
+                    emit_struct_brace_initialization(element_ptr, element_type, nested);
+                } else if (element_type.kind == TypeKind::Array) {
+                    emit_array_brace_initialization(element_ptr, element_type, nested);
+                }
+                continue;
+            }
+            if (auto* e = dynamic_cast<AST::ExpressionInitializer*>(element)) {
+                ExprValue value = gen_expr(e->expr.get());
+                emit_aggregate_assign(element_ptr, element_type, value);
+            }
+        }
+        // 未提供的元素保持未初始化状态（第 7 章：部分初始化时其余元素未定义）
+        // Elements omitted from the list stay uninitialized (§7 partial initialization)
+    }
+
     CodeGenerator::ExprValue CodeGenerator::gen_expr(AST::Expression* expr) {
         // 未检查/未知表达式统一返回 void，正常编译不会进入
         // Unknown expressions return void; a validated program never reaches here
@@ -1224,11 +1502,49 @@ namespace {
         }
         if (auto* assign = dynamic_cast<AST::AssignmentExpression*>(expr)) {
             ExprValue left = gen_expr(assign->left.get());
-            ExprValue right = gen_expr(assign->right.get());
             if (left.address.empty()) return ExprValue{};
 
             if (assign->op == AST::AssignmentExpression::Operator::Assign) {
-                emit_aggregate_assign(left.address, left.type, right);
+                // Gallt 0.3.txt §20：结构体赋值由拷贝赋值/移动赋值决定；
+                // 这里先解析右值的拷贝/移动语义，避免对 move(...) 右值重复求值
+                // §20: struct assignment uses copy/move assignment; the right-hand side is
+                // analysed first so a move(...) operand is not evaluated twice
+                bool is_move = false;
+                AST::Expression* source_expr = assign->right.get();
+                if (auto* cm = dynamic_cast<AST::PrimaryExpression*>(source_expr)) {
+                    if (cm->kind == AST::PrimaryExpression::Kind::CopyMove) {
+                        source_expr = cm->paren_expr.get();
+                    }
+                }
+                if (auto* cm = dynamic_cast<AST::PrimaryExpression*>(assign->right.get())) {
+                    if (cm->kind == AST::PrimaryExpression::Kind::CopyMove &&
+                        cm->copy_move_kind == AST::PrimaryExpression::CopyMoveKind::Move) {
+                        is_move = true;
+                    }
+                }
+                if (left.type.kind == AST::TypeKind::Struct && source_expr != nullptr) {
+                    std::string source_address = operand_address(source_expr);
+                    if (!source_address.empty()) {
+                        if (is_move) {
+                            emit_memberwise_move(left.type, left.address, source_address, true);
+                        }
+                        else {
+                            emit_memberwise_copy(left.type, left.address, source_address, true);
+                        }
+                        ExprValue result;
+                        result.type = left.type;
+                        result.address = left.address;
+                        result.is_lvalue = true;
+                        result.value = new_temp("assign_result");
+                        emit_line(result.value + " = load " + llvm_type(left.type) +
+                            ", ptr " + left.address);
+                        return result;
+                    }
+                }
+            }
+            ExprValue right = gen_expr(assign->right.get());
+            if (assign->op == AST::AssignmentExpression::Operator::Assign) {
+                emit_aggregate_assign(left.address, left.type, right, true);
             } else {
                 // += 与 -= 展开为左值读、运算、写回
                 // Compound assignment expands to load, arithmetic, store
@@ -1380,18 +1696,26 @@ namespace {
                 emit_line(result.value + " = zext i1 " + t + " to i8");
                 return result;
             }
-            if (l.type.kind == TypeKind::Pointer || r.type.kind == TypeKind::Pointer) {
+            // Gallt 0.4.txt §13：函数指针（TypeKind::Function）与 null 的
+            // `==` / `!=` 比较也走指针地址比较路径
+            // Gallt 0.4.txt §13: function pointers compare through the pointer-address
+            // path as well (they are represented as `ptr` values)
+            bool left_is_address = l.type.kind == TypeKind::Pointer ||
+                l.type.kind == TypeKind::File || l.type.kind == TypeKind::Function;
+            bool right_is_address = r.type.kind == TypeKind::Pointer ||
+                r.type.kind == TypeKind::File || r.type.kind == TypeKind::Function;
+            if (left_is_address || right_is_address) {
                 // 整数与指针比较时先把整数转成 i64 并与地址整数比较
                 // Compare pointer/integer mixes by integerizing the address
                 std::string lv;
                 std::string rv;
-                if (l.type.kind == TypeKind::Pointer) {
+                if (left_is_address) {
                     lv = new_temp("ptrtoint_l");
                     emit_line(lv + " = ptrtoint ptr " + l.value + " to i64");
                 } else {
                     lv = to_i64_value(l.value, l.type);
                 }
-                if (r.type.kind == TypeKind::Pointer) {
+                if (right_is_address) {
                     rv = new_temp("ptrtoint_r");
                     emit_line(rv + " = ptrtoint ptr " + r.value + " to i64");
                 } else {
@@ -1609,10 +1933,10 @@ namespace {
             // An array expression already evaluates to its decayed element pointer
             return value;
         }
-        if (to.kind == TypeKind::Pointer || to.kind == TypeKind::Function ||
-            from.kind == TypeKind::Pointer || from.kind == TypeKind::Function ||
-            to.kind == TypeKind::File || from.kind == TypeKind::File) {
-            // 从整数常量 0 转空指针由调用者负责；这里保留 ptr 值
+       if (to.kind == TypeKind::Pointer || to.kind == TypeKind::Function ||
+           from.kind == TypeKind::Pointer || from.kind == TypeKind::Function ||
+           to.kind == TypeKind::File || from.kind == TypeKind::File) {
+           // 从整数常量 0 转空指针由调用者负责；这里保留 ptr 值
             // Integer zero to null is handled by callers; keep pointer values as-is
             if (from.kind == TypeKind::Pointer || from.kind == TypeKind::Function ||
                 from.kind == TypeKind::File) return value;
@@ -1827,6 +2151,20 @@ namespace {
                 }
                 return out;
             }
+            // 函数名作为值（第 13 章）：产生函数指针常量。
+            // 优先使用类型检查阶段解析出的重载版本，其次按名字查找用户函数 / extern。
+            // A function name used as a value yields a function pointer constant (§13); the
+            // checker's overload resolution is preferred, then a name lookup.
+            {
+                std::string reference = function_reference_for(expr);
+                if (reference.empty()) {
+                    reference = function_reference(expr->identifier);
+                }
+                if (!reference.empty()) {
+                    out.value = reference;
+                    return out;
+                }
+            }
             // 未定义标识符在语义阶段已报告，这里不继续
             // Undefined identifiers were reported semantically; stop here
             return out;
@@ -1850,6 +2188,127 @@ namespace {
             emit_line(out.value + " = call ptr @gallt_alloc_bytes(i64 " + total + ")");
             return out;
         }
+        case AST::PrimaryExpression::Kind::Construct:
+        case AST::PrimaryExpression::Kind::PlacementConstruct: {
+            // construct [类型]([实参]) [at [指针]]（Gallt 0.3.txt §20）
+            // construct [type]([args]) [at [pointer]] (Gallt 0.3.txt §20)
+            AST::Type constructed = expr->construct_type;
+            std::string storage;
+            if (expr->kind == AST::PrimaryExpression::Kind::PlacementConstruct) {
+                ExprValue target = gen_expr(expr->placement_target.get());
+                storage = target.value;
+            }
+            else {
+                std::size_t elem_size = type_size(constructed);
+                storage = new_temp("construct");
+                emit_line(storage + " = call ptr @gallt_alloc_bytes(i64 " +
+                    std::to_string(elem_size) + ")");
+            }
+            out.type = AST::Type::make_pointer(std::make_shared<AST::Type>(constructed));
+            out.value = storage;
+            // 用户构造函数
+            if (!expr->lowered_ctor.empty()) {
+                // 第 20 章：优先使用类型检查阶段按实参类型解析出的构造函数重载
+                // §20: prefer the constructor overload resolved by the type checker
+                std::string ctor_name = expr->lowered_ctor;
+                if (auto resolved = resolved_functions_.find(expr);
+                    resolved != resolved_functions_.end() && resolved->second != nullptr) {
+                    ctor_name = resolved->second->name;
+                }
+                std::string callee = function_reference(ctor_name);
+                if (!callee.empty()) {
+                    // 第 8 章：补齐构造函数被省略的默认实参
+                    // §8: fill in the constructor's omitted default arguments
+                    std::vector<AST::Expression*> ctor_args;
+                    for (auto& arg : expr->construct_args) ctor_args.push_back(arg.get());
+                    collect_constructor_defaults(ctor_name, ctor_args);
+                    std::string call_text = "call void " + callee + "(ptr " + storage;
+                    for (AST::Expression* arg : ctor_args) {
+                        ExprValue value = gen_expr(arg);
+                        std::string type_text = llvm_type(value.type);
+                        if (value.type.kind == TypeKind::String) {
+                            std::string addr = !value.address.empty() ? value.address : value.value;
+                            std::string agg = new_temp("ctorstr");
+                            emit_line(agg + " = load %struct.gallt.string, ptr " + addr);
+                            value.value = agg;
+                            type_text = "%struct.gallt.string";
+                        }
+                        call_text += ", " + type_text + " " + value.value;
+                        destroy_owned_string(value);
+                    }
+                    call_text += ")";
+                    emit_line(call_text);
+                }
+                return out;
+            }
+            // 无用户构造函数：Gallt 0.3.txt §20 要求“执行默认初始化”
+            // （成员有默认值时使用默认值，无默认值保持未初始化；不按实参做聚合赋值）
+            // No user constructor: §20 requires default initialization (declared member
+            // defaults apply; remaining members stay uninitialized)
+            AST::ArrayInitializer empty_init(expr->location,
+                std::vector<std::unique_ptr<AST::Initializer>>{});
+            emit_struct_brace_initialization(storage, constructed, &empty_init);
+            return out;
+        }
+        case AST::PrimaryExpression::Kind::CopyMove: {
+            // Gallt 0.3.txt §20：表达式中的 copy/move/deep_copy/shallow_copy
+            // 物化一个临时对象并在完整表达式结束时析构
+            // §20: copy/move/deep_copy/shallow_copy in an expression materialize a temporary
+            // that is destroyed at the end of its full expression
+            AST::Type operand_type;
+            std::string source_address = operand_address(expr->paren_expr.get(), &operand_type);
+            if (source_address.empty() ||
+                (operand_type.kind != AST::TypeKind::Struct &&
+                    operand_type.kind != AST::TypeKind::String)) {
+                return gen_expr(expr->paren_expr.get());
+            }
+            std::string temp = emit_alloca(llvm_type(operand_type), "copy_move_temp");
+            switch (expr->copy_move_kind) {
+            case AST::PrimaryExpression::CopyMoveKind::Copy:
+                emit_memberwise_copy(operand_type, temp, source_address, false);
+                break;
+            case AST::PrimaryExpression::CopyMoveKind::Move:
+                emit_memberwise_move(operand_type, temp, source_address, false);
+                break;
+            case AST::PrimaryExpression::CopyMoveKind::DeepCopy:
+                emit_deep_copy(operand_type, temp, source_address);
+                break;
+            case AST::PrimaryExpression::CopyMoveKind::ShallowCopy:
+                emit_shallow_copy(operand_type, temp, source_address);
+                break;
+            }
+            // 临时对象在完整表达式结束时析构（浅拷贝的双重释放属文档规定的未定义行为）
+            // The temporary is destroyed at the end of the full expression (a shallow copy
+            // that double-frees is documented undefined behaviour)
+            bool needs_cleanup = operand_type.kind == AST::TypeKind::String ||
+                type_contains_string(operand_type);
+            if (!needs_cleanup && operand_type.kind == AST::TypeKind::Struct) {
+                auto def_it = struct_by_name_.find(operand_type.struct_name);
+                needs_cleanup = def_it != struct_by_name_.end() && def_it->second != nullptr &&
+                    def_it->second->needs_destruction;
+            }
+            if (needs_cleanup) {
+                CleanupRecord record;
+                record.type = operand_type;
+                record.address = temp;
+                statement_temporaries_.push_back(record);
+            }
+            out.type = operand_type;
+            out.address = temp;
+            out.is_lvalue = true;
+            out.value = new_temp("copy_move_value");
+            emit_line(out.value + " = load " + llvm_type(operand_type) + ", ptr " + temp);
+            return out;
+        }
+        case AST::PrimaryExpression::Kind::QualifiedName:
+            // 泛型限定名已在展开阶段解析为具体名字，正常编译不会到达
+            // Generic qualified names are resolved during expansion; unreachable normally
+            return out;
+        case AST::PrimaryExpression::Kind::NamespaceQualified:
+            // 命名空间限定名已在命名空间降低阶段解析为具体名字，正常编译不会到达
+            // Namespace-qualified names are resolved by the namespace lowering pass;
+            // unreachable normally
+            return out;
         }
         return out;
     }
@@ -1878,8 +2337,17 @@ namespace {
                 ExprValue idx = gen_expr(post->subscript_expr.get());
                 std::string i64 = to_i64_value(idx.value, idx.type);
                 std::string elem_type;
+                std::string base_pointer = base.value;
                 if (base.type.kind == TypeKind::Array && base.type.element_type) {
                     elem_type = llvm_type(*base.type.element_type);
+                    // 数组类型的左值必须取其存储地址（数组退化为首元素指针），
+                    // 否则会把 load 出来的聚合值当作指针使用
+                    // An array-typed lvalue must use its storage address; using the loaded
+                    // aggregate value as a pointer is invalid IR
+                    std::string address = gen_address(post->base.get());
+                    if (!address.empty()) {
+                        base_pointer = address;
+                    }
                 } else if (base.type.kind == TypeKind::Pointer && base.type.pointee_type) {
                     elem_type = llvm_type(*base.type.pointee_type);
                 } else {
@@ -1887,7 +2355,7 @@ namespace {
                 }
                 std::string ptr = new_temp("indexptr");
                 emit_line(ptr + " = getelementptr " + elem_type +
-                    ", ptr " + base.value + ", i64 " + i64);
+                    ", ptr " + base_pointer + ", i64 " + i64);
                 return ptr;
             }
             if (post->op == AST::PostfixExpression::Operator::Dot ||
@@ -1947,7 +2415,12 @@ namespace {
             // &function-name yields a function pointer constant
             if (auto* prim = dynamic_cast<AST::PrimaryExpression*>(expr->operand.get())) {
                 if (prim->kind == AST::PrimaryExpression::Kind::Identifier) {
-                    std::string reference = function_reference(prim->identifier);
+                    // 优先使用类型检查阶段解析出的重载版本（第 18 章）
+                    // Prefer the overload resolved by the type checker (§18)
+                    std::string reference = function_reference_for(prim);
+                    if (reference.empty()) {
+                        reference = function_reference(prim->identifier);
+                    }
                     if (!reference.empty()) {
                         out.value = reference;
                         return out;
@@ -2044,7 +2517,7 @@ namespace {
     std::string CodeGenerator::function_reference(const std::string& name) {
         // 查程序中的用户函数与 extern 声明，返回 LLVM 函数名
         // Find a user function or extern declaration and return its LLVM name
-        if (name == "main") return "@main";
+        if (name == "main") return "@glt_main";
         for (const auto& top : program_->top_levels) {
             if (auto* f = dynamic_cast<AST::FunctionDefinition*>(top.get())) {
                 if (f->name == name) return "@glt_" + name;
@@ -2052,8 +2525,54 @@ namespace {
         }
         for (const auto& top : program_->top_levels) {
             if (auto* e = dynamic_cast<AST::ExternDeclaration*>(top.get())) {
-                if (e->name == name) return "@" + name;
+                if (e->name == name) return "@" + extern_ir_symbol(e);
             }
+        }
+        return std::string();
+    }
+
+    std::string CodeGenerator::extern_ir_symbol(const AST::ExternDeclaration* ext) const {
+        // C 符号名；当同名 extern 具有不同签名时，为保证 IR 合法改用带签名的修饰名
+        // （此时要求 C 库导出对应的修饰符号；C 本身不支持同名重载）
+        // The C symbol; when same-named externs differ in signature the symbol is decorated
+        // so the IR stays valid (the C library must then export that decorated name)
+        auto cached = extern_ir_symbols_.find(ext);
+        if (cached != extern_ir_symbols_.end()) return cached->second;
+        std::string candidate = ext->c_symbol_name;
+        for (const auto& top : program_->top_levels) {
+            auto* other = dynamic_cast<AST::ExternDeclaration*>(top.get());
+            if (other == nullptr || other == ext) continue;
+            if (other->c_symbol_name != ext->c_symbol_name) continue;
+            // 同一个 C 符号被两个签名使用 → 需要修饰名区分
+            // Two signatures share one C symbol -> decorate to keep the IR valid
+            if (!(other->parameters == ext->parameters &&
+                other->return_type == ext->return_type)) {
+                std::string type_text = ext->return_type.to_string();
+                for (const AST::Type& p : ext->parameters) type_text += "$" + p.to_string();
+                std::string decorated;
+                for (char c : type_text) {
+                    if (std::isalnum(static_cast<unsigned char>(c)) || c == '_' || c == '$') {
+                        decorated += c;
+                    }
+                }
+                candidate = ext->c_symbol_name + "$" + decorated;
+                break;
+            }
+        }
+        extern_ir_symbols_[ext] = candidate;
+        return candidate;
+    }
+
+    std::string CodeGenerator::function_reference_for(const AST::PrimaryExpression* callee) {
+        if (callee == nullptr) return std::string();
+        auto fit = resolved_functions_.find(callee);
+        if (fit != resolved_functions_.end() && fit->second != nullptr) {
+            std::string reference = function_reference(fit->second->name);
+            if (!reference.empty()) return reference;
+        }
+        auto eit = resolved_externs_.find(callee);
+        if (eit != resolved_externs_.end() && eit->second != nullptr) {
+            return "@" + extern_ir_symbol(eit->second);
         }
         return std::string();
     }
@@ -2067,6 +2586,16 @@ namespace {
             if (address.empty()) return out;
             out.is_lvalue = true;
             out.address = address;
+            if (out.type.kind == TypeKind::Array && out.type.element_type) {
+                // 多维数组的一行本身是数组类型：退化为首元素指针，而不是 load 聚合值
+                // （Gallt 0.3.txt §7：数组表达式退化为指向首元素的指针）
+                // A row of a multi-dimensional array is itself an array: decay to a pointer
+                // to its first element instead of loading the aggregate (§7)
+                out.value = new_temp("arraydecay");
+                emit_line(out.value + " = getelementptr " + llvm_type(out.type) +
+                    ", ptr " + address + ", i64 0, i64 0");
+                return out;
+            }
             std::string type_text = llvm_type(out.type);
             out.value = new_temp("subscript_load");
             emit_line(out.value + " = load " + type_text + ", ptr " + address);
@@ -2078,6 +2607,14 @@ namespace {
             if (address.empty()) return out;
             out.is_lvalue = true;
             out.address = address;
+            if (out.type.kind == TypeKind::Array && out.type.element_type) {
+                // 数组成员（含多维数组的一行）同样退化为首元素指针
+                // Array members (including a row of a multi-dimensional array) decay too
+                out.value = new_temp("arraydecay");
+                emit_line(out.value + " = getelementptr " + llvm_type(out.type) +
+                    ", ptr " + address + ", i64 0, i64 0");
+                return out;
+            }
             std::string type_text = llvm_type(out.type);
             out.value = new_temp("member_load");
             emit_line(out.value + " = load " + type_text + ", ptr " + address);
@@ -2150,6 +2687,127 @@ namespace {
             if (direct_name == "size" || direct_name == "align") {
                 return emit_size_align_call(expr, direct_name == "size");
             }
+            // 显式析构调用：【对象】.destructor() 或 【指针】->destructor()（Gallt 0.3.txt §20）
+            // Explicit destructor call: obj.destructor() / ptr->destructor()
+            // T(args) 值临时对象（Gallt 0.3.txt §20）：在栈上构造，完整表达式结束时析构
+            // T(args) value temporary: constructed on the stack, destroyed at the end of the
+            // full expression
+            if (direct != nullptr) {
+                auto struct_it = struct_by_name_.find(direct->identifier);
+                if (struct_it != struct_by_name_.end() && struct_it->second != nullptr &&
+                    !struct_it->second->constructor_names.empty()) {
+                    AST::StructDefinition* def = struct_it->second;
+                    AST::Type temp_type = AST::Type::make_struct(direct->identifier);
+                    std::string storage = emit_alloca(llvm_type(temp_type), "value_temp");
+                    // 第 20 章：类型检查阶段已按实参类型解析出构造函数；回退到按个数区间选择
+                    // §20: the checker already resolved the constructor by argument type;
+                    // fall back to the argument-count range only when it is unavailable
+                    std::string resolved_ctor_name;
+                    if (auto resolved = resolved_functions_.find(direct);
+                        resolved != resolved_functions_.end() && resolved->second != nullptr) {
+                        resolved_ctor_name = resolved->second->name;
+                    }
+                    // 按实参个数区间（含默认参数）选择构造函数
+                    // Pick the constructor by argument-count range, honouring defaults
+                    std::size_t index = 0;
+                    for (std::size_t i = 0; i < def->constructor_names.size(); ++i) {
+                        const std::vector<AST::Type>& params = def->constructor_param_types[i];
+                        std::size_t required = params.size();
+                        auto fit = function_by_name_.find(def->constructor_names[i]);
+                        if (fit != function_by_name_.end() && fit->second != nullptr) {
+                            const std::vector<std::unique_ptr<AST::Expression>>& defaults =
+                                fit->second->param_defaults;
+                            for (std::size_t k = defaults.size(); k > 0; --k) {
+                                if (defaults[k - 1] != nullptr) required = k - 1;
+                                else break;
+                            }
+                        }
+                        if (expr->arguments.size() <= params.size() &&
+                            expr->arguments.size() >= required) {
+                            index = i;
+                            break;
+                        }
+                    }
+                    std::string ctor_name = resolved_ctor_name.empty()
+                        ? def->constructor_names[index] : resolved_ctor_name;
+                    std::string callee = function_reference(ctor_name);
+                    if (!callee.empty()) {
+                        // 第 8 章：补齐构造函数被省略的默认实参
+                        // §8: fill in the constructor's omitted default arguments
+                        std::vector<AST::Expression*> ctor_args;
+                        for (auto& arg : expr->arguments) ctor_args.push_back(arg.get());
+                        collect_constructor_defaults(ctor_name, ctor_args);
+                        std::string call_text = "call void " + callee + "(ptr " + storage;
+                        const std::vector<AST::Type>& params =
+                            def->constructor_param_types[index];
+                        for (std::size_t i = 0; i < ctor_args.size(); ++i) {
+                            ExprValue value = gen_expr(ctor_args[i]);
+                            AST::Type want = i < params.size() ? params[i] : value.type;
+                            if (want.kind == TypeKind::String &&
+                                value.type.kind == TypeKind::String) {
+                                std::string addr = !value.address.empty()
+                                    ? value.address : value.value;
+                                std::string agg = new_temp("temp_str");
+                                emit_line(agg + " = load %struct.gallt.string, ptr " + addr);
+                                call_text += ", %struct.gallt.string " + agg;
+                            }
+                            else {
+                                call_text += ", " + llvm_type(want) + " " +
+                                    convert_value(value.value, value.type, want);
+                            }
+                            destroy_owned_string(value);
+                        }
+                        call_text += ")";
+                        emit_line(call_text);
+                    }
+                    // 登记析构（所在完整表达式结束时调用）
+                    if (def->needs_destruction) {
+                        CleanupRecord record;
+                        record.type = temp_type;
+                        record.address = storage;
+                        statement_temporaries_.push_back(record);
+                    }
+                    out.type = temp_type;
+                    out.value = storage;
+                    out.address = storage;
+                    out.is_lvalue = true;
+                    return out;
+                }
+            }
+            if (direct == nullptr) {
+                if (auto* member_access = dynamic_cast<AST::PostfixExpression*>(expr->base.get())) {
+                    if ((member_access->op == AST::PostfixExpression::Operator::Dot ||
+                        member_access->op == AST::PostfixExpression::Operator::Arrow) &&
+                        member_access->member_name == "destructor") {
+                        AST::Type owner = resolved_type(member_access->base.get());
+                        if (member_access->op == AST::PostfixExpression::Operator::Arrow &&
+                            owner.kind == TypeKind::Pointer && owner.pointee_type) {
+                            owner = *owner.pointee_type;
+                        }
+                        if (owner.kind == TypeKind::Struct) {
+                            // 箭头形式传递指针值；点形式传递对象地址
+                            // Arrow passes the pointer value; dot passes the object address
+                            ExprValue base_value = gen_expr(member_access->base.get());
+                            std::string address = base_value.value;
+                            if (member_access->op == AST::PostfixExpression::Operator::Dot) {
+                                std::string object_address =
+                                    gen_address(member_access->base.get());
+                                if (!object_address.empty()) address = object_address;
+                            }
+                            auto it = struct_by_name_.find(owner.struct_name);
+                            if (it != struct_by_name_.end() && it->second != nullptr &&
+                                !it->second->destructor_name.empty()) {
+                                std::string callee =
+                                    function_reference(it->second->destructor_name);
+                                if (!callee.empty() && !address.empty()) {
+                                    emit_line("call void " + callee + "(ptr " + address + ")");
+                                }
+                            }
+                        }
+                        return out;
+                    }
+                }
+            }
 
             // 收集函数签名，用于参数转换与 call 返回类型
             // Gather the signature used for argument coercion and call return type
@@ -2162,12 +2820,42 @@ namespace {
                 if (direct_name == "main") {
                     callee = "@main";
                 } else {
+                    // 第 18 章：类型检查阶段已解析出具体重载；优先按其“当前”名字生成调用，
+                    // 这样即便重载集在之后被命名修饰，调用点依然指向正确的函数
+                    // §18: the checker already resolved the overload; prefer its current name so
+                    // a call site stays valid even if the overload set is mangled later
+                    if (AST::PrimaryExpression* callee_node =
+                        dynamic_cast<AST::PrimaryExpression*>(expr->base.get())) {
+                        auto resolved = resolved_functions_.find(callee_node);
+                        if (resolved != resolved_functions_.end() && resolved->second != nullptr) {
+                            const AST::FunctionDefinition* f = resolved->second;
+                            callee = "@glt_" + f->name;
+                            params = f->parameters;
+                            func_type = AST::Type::make_function(
+                                std::make_shared<AST::Type>(f->return_type), params);
+                        }
+                        else {
+                            auto resolved_ext = resolved_externs_.find(callee_node);
+                            if (resolved_ext != resolved_externs_.end() &&
+                                resolved_ext->second != nullptr) {
+                                const AST::ExternDeclaration* e = resolved_ext->second;
+                                callee = "@" + extern_ir_symbol(e);
+                                params = e->parameters;
+                                func_type = AST::Type::make_function(
+                                    std::make_shared<AST::Type>(e->return_type), params);
+                            }
+                        }
+                    }
+                    if (!callee.empty()) {
+                        // 已通过解析结果确定，跳过按名字查找
+                    }
+                    else {
                     // 使用预建的签名索引（O(1)），避免每次都扫描全部顶层节点
                     // Use the prebuilt signature index instead of scanning every call
                     auto fit = function_by_name_.find(direct_name);
                     if (fit != function_by_name_.end()) {
                         AST::FunctionDefinition* f = fit->second;
-                        callee = "@glt_" + direct_name;
+                        callee = "@glt_" + f->name;
                         params = f->parameters;
                         func_type = AST::Type::make_function(
                             std::make_shared<AST::Type>(f->return_type), params);
@@ -2175,11 +2863,12 @@ namespace {
                         auto eit = extern_by_name_.find(direct_name);
                         if (eit != extern_by_name_.end()) {
                             AST::ExternDeclaration* e = eit->second;
-                            callee = "@" + direct_name;
+                            callee = "@" + extern_ir_symbol(e);
                             params = e->parameters;
                             func_type = AST::Type::make_function(
                                 std::make_shared<AST::Type>(e->return_type), params);
                         }
+                    }
                     }
                     if (callee.empty()) {
                         // 不是函数/外部函数时，把它当作函数指针变量调用
@@ -2219,10 +2908,16 @@ namespace {
 
             // 将实参转为形参类型；extern string 参数按 C 字符串处理
             // Coerce arguments; extern string parameters become C strings
-            std::vector<std::string> ir_args;
-            std::vector<std::string> owned_args;
-            for (size_t i = 0; i < expr->arguments.size(); ++i) {
-                ExprValue arg = gen_expr(expr->arguments[i].get());
+           std::vector<std::string> ir_args;
+           std::vector<std::string> owned_args;
+            // 实参 = 调用点实参 + 默认参数补齐（Gallt 0.3.txt §8）
+            // Arguments = call-site arguments + filled-in defaults (Gallt 0.3.txt §8)
+            std::vector<AST::Expression*> all_args;
+            all_args.reserve(expr->arguments.size() + expr->appended_defaults.size());
+            for (auto& a : expr->arguments) all_args.push_back(a.get());
+            for (AST::Expression* d : expr->appended_defaults) all_args.push_back(d);
+            for (size_t i = 0; i < all_args.size(); ++i) {
+                ExprValue arg = gen_expr(all_args[i]);
                 if (!arg.owned_string.empty()) {
                     owned_args.push_back(arg.owned_string);
                 }
@@ -2240,6 +2935,13 @@ namespace {
                     std::string agg = new_temp("stringarg");
                     emit_line(agg + " = load %struct.gallt.string, ptr " + addr);
                     ir_args.push_back(agg);
+                } else if (want.kind == TypeKind::Struct && arg.type.kind == TypeKind::Struct) {
+                    // 结构体按值传递：从存储地址加载聚合值（Gallt 0.3.txt §14/§20）
+                    // Structs pass by value: load the aggregate from its storage address
+                    std::string addr = !arg.address.empty() ? arg.address : arg.value;
+                    std::string agg = new_temp("structarg");
+                    emit_line(agg + " = load " + llvm_type(want) + ", ptr " + addr);
+                    ir_args.push_back(agg);
                 } else {
                     ir_args.push_back(convert_value(arg.value, arg.type, want));
                 }
@@ -2247,9 +2949,49 @@ namespace {
 
             std::string ret_ir = llvm_type(return_type);
             if (return_type.kind == TypeKind::Function) ret_ir = "ptr";
+            if (pointer_call && !callee.empty()) {
+                // RTER 0002：调用空函数指针时由运行库报告运行时错误
+                // RTER 0002: the runtime reports an error when a null function pointer
+                // is called
+                emit_line("call void @gallt_check_fptr(ptr " + callee + ")");
+            }
+            // Gallt 0.3.txt §20：结构体返回值使用 sret 约定（调用者分配存储，
+            // 被调用者在其上执行拷贝/移动构造）；extern 函数保持 C ABI 的按值返回
+            // §20: struct returns use sret (caller storage, callee constructs); extern
+            // functions keep the C ABI by-value return
+            bool extern_call = !direct_name.empty() && function_is_extern(direct_name);
+            bool sret_call = returns_via_sret(return_type) && !extern_call;
+            std::string sret_storage;
+            if (sret_call) {
+                if (!pending_sret_destination_.empty()) {
+                    // `T v = f()`：直接把 v 的存储作为返回对象，避免多余拷贝（复制消除）
+                    // `T v = f()`: use v's own storage for the returned object (copy elision)
+                    sret_storage = pending_sret_destination_;
+                    pending_sret_destination_.clear();
+                }
+                else {
+                    sret_storage = emit_alloca(llvm_type(return_type), "sret_temp");
+                    bool needs_cleanup = type_contains_string(return_type);
+                    if (!needs_cleanup) {
+                        auto def_it = struct_by_name_.find(return_type.struct_name);
+                        needs_cleanup = def_it != struct_by_name_.end() &&
+                            def_it->second != nullptr && def_it->second->needs_destruction;
+                    }
+                    if (needs_cleanup) {
+                        CleanupRecord record;
+                        record.type = return_type;
+                        record.address = sret_storage;
+                        statement_temporaries_.push_back(record);
+                    }
+                }
+                ret_ir = "void";
+            }
             std::string call_text = "call " + ret_ir + " " + callee + "(";
+            if (sret_call) {
+                call_text += "ptr " + sret_storage;
+            }
             for (size_t i = 0; i < ir_args.size(); ++i) {
-                if (i != 0) call_text += ", ";
+                if (i != 0 || sret_call) call_text += ", ";
                 AST::Type want = (i < params.size()) ? params[i] : out.type;
                 if (want.kind == TypeKind::Function) want = Type::make_pointer(
                     std::make_shared<Type>(Type::make_void()));
@@ -2267,7 +3009,16 @@ namespace {
                 call_text += want_type + " " + ir_args[i];
             }
             call_text += ")";
-            if (return_type.kind == TypeKind::Void) {
+            if (sret_call) {
+                emit_line(call_text);
+                out.type = return_type;
+                out.address = sret_storage;
+                out.is_lvalue = true;
+                out.value = new_temp("sret_value");
+                emit_line(out.value + " = load " + llvm_type(return_type) +
+                    ", ptr " + sret_storage);
+            }
+            else if (return_type.kind == TypeKind::Void) {
                 emit_line(call_text);
             } else {
                 out.value = new_temp("callresult");
@@ -2930,6 +3681,15 @@ void gallt_free_ptr(void* ptr) {
     free(ptr);
 }
 
+/* RTER 0002: calling a null function pointer is a runtime error (Gallt 0.4 error table).
+   RTER 0002：函数指针调用时指针为空。运行库消息统一为英文。 */
+void gallt_check_fptr(void* fn) {
+    if (fn == NULL) {
+        fprintf(stderr, "RTER 0002: null function pointer call\n");
+        exit(1);
+    }
+}
+
 /* ---------------------------------------------------------------------------
  * Gallt 0.2.txt §17 文件操作运行库
  * File-operation runtime (Gallt 0.2.txt §17)
@@ -2944,7 +3704,53 @@ typedef struct gallt_file {
        5 读取失败、6 写入失败、7 定位失败、8 磁盘已满、9 未知错误 */
     int error;
     int eof;
+    /* 运行库登记表：句柄对象与句柄槽在进程退出时统一释放（Gallt 0.3.txt §17） */
+    /* Runtime registry: objects and slots are released at process exit (§17) */
+    struct gallt_file* next;
+    void* slot;
 } gallt_file;
+
+/* 句柄槽：Gallt 的 file* 指向一个 8 字节槽，槽内保存不透明句柄对象的地址。
+   这样 file（对象值）与 file*（对象地址）语义自洽：
+   *fp 复制句柄值、&f 得到可用的 file*、关闭后同一槽的副本读作 null。
+   Handle slot: a Gallt file* points at an 8-byte slot holding the opaque handle object,
+   so *fp copies the handle value, &f yields a usable file*, and pointer copies of a
+   closed slot read as null. */
+typedef void* gallt_file_slot;
+
+static gallt_file* gallt_file_registry = NULL;
+static int gallt_file_exit_registered = 0;
+
+static void gallt_file_release_all(void) {
+    gallt_file* h = gallt_file_registry;
+    while (h != NULL) {
+        gallt_file* next = h->next;
+        if (h->fp != NULL) {
+            fclose(h->fp);
+            h->fp = NULL;
+        }
+        free(h->slot);
+        free(h);
+        h = next;
+    }
+    gallt_file_registry = NULL;
+}
+
+static void gallt_file_register(gallt_file* handle) {
+    handle->next = gallt_file_registry;
+    gallt_file_registry = handle;
+    if (!gallt_file_exit_registered) {
+        atexit(gallt_file_release_all);
+        gallt_file_exit_registered = 1;
+    }
+}
+
+/* 从句柄槽取出不透明对象；槽本身或槽内容为 null 时返回 null */
+/* Load the opaque object from a handle slot; null slot or null content yields null */
+static gallt_file* gallt_file_deref(void* slot) {
+    if (slot == NULL) return NULL;
+    return *(gallt_file**)slot;
+}
 
 static int gallt_errno_code(void) {
     switch (errno) {
@@ -2971,8 +3777,10 @@ static char* gallt_cstr_from_string(const gallt_string* s) {
     return buffer;
 }
 
-static gallt_file* gallt_file_valid(void* handle) {
-    gallt_file* h = (gallt_file*)handle;
+/* 句柄参数一律是句柄槽地址；关闭后（含经副本关闭）统一按“句柄无效或已关闭”处理 */
+/* Handle arguments are always slot addresses; a closed handle reports error 1 */
+static gallt_file* gallt_file_valid(void* slot) {
+    gallt_file* h = gallt_file_deref(slot);
     if (h == NULL || h->fp == NULL) {
         gallt_file_set_error(h, 1);
         return NULL;
@@ -3032,21 +3840,32 @@ void* gallt_file_open(const gallt_string* path, const gallt_string* mode) {
         fclose(fp);
         return NULL;
     }
+    gallt_file_slot* slot = (gallt_file_slot*)calloc(1, sizeof(gallt_file_slot));
+    if (slot == NULL) {
+        fclose(fp);
+        free(handle);
+        return NULL;
+    }
+    *slot = handle;
     handle->fp = fp;
     handle->error = 0;
     handle->eof = 0;
-    return handle;
+    handle->slot = slot;
+    gallt_file_register(handle);
+    return slot;
 }
 
-int8_t gallt_file_close(void* handle) {
-    gallt_file* h = (gallt_file*)handle;
+int8_t gallt_file_close(void* slot) {
+    gallt_file* h = gallt_file_deref(slot);
     if (h == NULL || h->fp == NULL) return 0;
     FILE* fp = h->fp;
+    /* 先标记关闭，再写入槽：所有指向同一句柄的副本随后都视为已关闭（§17） */
+    /* Mark closed first, then clear the slot: every copy then reads as invalid (§17) */
     h->fp = NULL;
     int rc = fclose(fp);
     h->error = (rc == 0) ? 0 : gallt_errno_code();
+    *(gallt_file**)slot = NULL;
     int ok = (rc == 0) ? 1 : 0;
-    free(h);
     return (int8_t)ok;
 }
 
@@ -3239,9 +4058,11 @@ int8_t gallt_file_eof(void* handle) {
     return 0;
 }
 
-int32_t gallt_file_error(void* handle) {
-    gallt_file* h = (gallt_file*)handle;
-    if (h == NULL) return 1; /* 句柄无效 */
+int32_t gallt_file_error(void* slot) {
+    gallt_file* h = gallt_file_deref(slot);
+    /* 槽为空、槽内容为空、或句柄已关闭 → 1“句柄无效或已关闭”（§17 错误码表） */
+    /* Null slot, null content, or a closed handle yields 1 "invalid or closed" (§17) */
+    if (h == NULL || h->fp == NULL) return 1;
     return h->error;
 }
 

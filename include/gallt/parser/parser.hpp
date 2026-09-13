@@ -11,6 +11,7 @@
 #include <vector>
 #include <memory>
 #include <optional>
+#include <unordered_set>
 
 namespace gallt {
 
@@ -44,6 +45,31 @@ namespace gallt {
         bool has_peek_ = false;  // 是否已预读
         bool has_error_ = false; // 是否遇到语法错误（用于错误恢复）
 
+        // ---- 0.3：带缓冲的 Token 流（支持任意前瞻与回溯） ----
+        // ---- 0.3: buffered token stream (arbitrary lookahead + backtracking) ----
+        // 泛型实例化（Box<int>）与比较表达式（a < b）在语法上冲突，需要前瞻与
+        // 回溯来消解歧义，因此预先把词法单元缓冲到 vector 中。
+        // Generic instantiations and comparisons are syntactically ambiguous, so the
+        // token stream is buffered to allow lookahead and backtracking.
+        mutable std::vector<Token> tokens_;
+        std::size_t token_index_ = 0;
+        mutable bool lexer_exhausted_ = false;
+
+        // 确保缓冲区至少有 n+1 个 token（n 从 0 开始计）
+        // Ensure at least n+1 tokens are buffered
+        void ensure_tokens(std::size_t n) const;
+        // 返回第 n 个前瞻 token（n=0 表示当前 token）
+        // Return the n-th lookahead token (n = 0 is the current token)
+        Token lookahead(std::size_t n) const;
+        TokenType lookahead_type(std::size_t n) const;
+        // 前瞻位置标记 / 回溯
+        std::size_t mark() const { return token_index_; }
+        void reset_to(std::size_t m);
+
+        // 已出现过的泛型名：第一次出现为主泛型，其后为特化（Gallt 0.3.txt §19）
+        // Generic names already seen: the first occurrence is the primary generic
+        std::unordered_set<std::string> seen_generics_;
+
         // ---- 循环嵌套深度（用于 break 检查） ----
         int loop_depth_ = 0;     // 当前所在循环嵌套层数
 
@@ -68,6 +94,11 @@ namespace gallt {
 
         // ---- 错误恢复状态 ----
         bool in_error_recovery_ = false; // 是否处于错误恢复模式
+        // 是否正在解析泛型块顶部的编译期项（emit / 编译期 if）：
+        // 该状态下 emit 语句被接受（Gallt 0.4.txt §19）
+        // Whether a compile-time item at the top of a generic block is being parsed;
+        // emit statements are accepted in that context (Gallt 0.4.txt §19)
+        int generic_ct_depth_ = 0;
 
         // ---- 核心解析函数 ----
         // 获取下一个 Token (消费当前)
@@ -81,6 +112,11 @@ namespace gallt {
         // 报告语法错误（带位置和消息）
         void report_error(ErrorCode code, const std::string& msg);
         void report_error_at(SourceLocation loc, ErrorCode code, const std::string& msg);
+        // 按标准文档模板报告错误并依次填充占位符
+        // Report an error through the standard template, filling placeholders in order
+        void report_error_template(ErrorCode code, const std::vector<std::string>& values);
+        void report_error_template_at(SourceLocation loc, ErrorCode code,
+            const std::vector<std::string>& values);
 
         // 跳过连续换行 token（空行不影响语法）
         // Skip consecutive newline tokens (blank lines are not significant)
@@ -98,6 +134,52 @@ namespace gallt {
         // A top-level type-start declaration may be a function or a global variable
         std::unique_ptr<AST::TopLevel> parse_function_definition();
         std::unique_ptr<AST::StructDefinition> parse_struct_definition();
+        // ---- 0.4：命名空间 (Gallt 0.4.txt §21) ----
+        std::unique_ptr<AST::NamespaceDefinition> parse_namespace_definition();
+        std::unique_ptr<AST::AccessNamespaceStatement> parse_access_namespace();
+        std::unique_ptr<AST::AdditionNamespaceStatement> parse_addition_namespace();
+        // 命名空间体 / addition namespace 体的成员列表
+        std::vector<std::unique_ptr<AST::TopLevel>> parse_namespace_members();
+        // ---- 0.4：编译期代码生成 (Gallt 0.4.txt §19) ----
+        std::unique_ptr<AST::EmitStatement> parse_emit_statement(bool inside_generic);
+        // 泛型块顶部的编译期项：emit / 编译期 if
+        std::unique_ptr<AST::Statement> parse_generic_compile_time_item();
+        // Emit Block 内当前项是否为函数定义（`类型 名称 (` 形态）
+        // Whether the current emit-block item is a function definition (`type name (`)
+        bool emit_item_starts_with_function_definition() const;
+        // 解析编译期属性 `<...>` 中的单个实参（类型名或字符串字面量）
+        // Parse one compile-time property argument (a type name or a string literal)
+        std::unique_ptr<AST::Expression> parse_property_argument();
+        // 声明名称位置的标识符检查：关键字作标识符报 ER 0099
+        bool check_identifier_name(std::string& out, const char* context);
+        // ---- 0.3：编译期泛型 (Gallt 0.3.txt §19) ----
+        std::unique_ptr<AST::TopLevel> parse_generic_definition();
+        // 扫描 `<...>` 判断是参数列表（主泛型）还是模式列表（特化）
+        bool generic_param_list_is_primary_shaped() const;
+        std::vector<AST::GenericArgument> parse_generic_arguments();
+        AST::GenericRef parse_generic_reference(std::string_view name);
+        AST::GenericConstraint parse_generic_constraint();
+        std::unique_ptr<AST::TopLevel> parse_generic_member();
+        // 常量模式/实参（不含比较运算符，避免与 '>' 冲突）
+        std::unique_ptr<AST::Expression> parse_compile_time_expression();
+        // 解析结构体特殊成员函数（constructor/destructor/...），失败返回 nullptr
+        std::unique_ptr<AST::SpecialMemberFunction> parse_special_member_function();
+        // 判断当前 token 是否为特殊成员函数关键字
+        bool at_special_member_keyword() const;
+        // 尝试把 `Name<...>` 识别为泛型实例化；成功时 current_ 位于 '<' 并返回 true
+        bool looks_like_generic_instantiation() const;
+        // 当前位置为 `Ident (:: Ident)* <...>` 时返回匹配 '>' 之后的下标，否则 npos
+        // When the current position is `Ident (:: Ident)* <...>`, return the index just
+        // after the matching '>'; otherwise return npos
+        std::size_t scan_generic_instantiation_end() const;
+        // 判断当前 token 是否为结构体属性 [nocopy] / [nomove]
+        bool at_struct_attribute() const;
+        // 当前位置是否开始一个变量声明（含泛型实例成员类型）
+        // Whether the current position starts a variable declaration
+        bool at_declaration_start() const;
+        // 已解析出基础类型后，继续解析声明符（名称、数组/函数指针后缀、初始化器）
+        std::unique_ptr<AST::VariableDeclaration> parse_variable_declaration_with_type(
+            AST::Type base_type, bool allow_empty_array = true);
 
         // ---- 解析语句 (Statement) ----
         std::unique_ptr<AST::Statement> parse_statement();
@@ -128,12 +210,15 @@ namespace gallt {
         // 在声明符（变量/成员/形参名称）之后解析数组或函数指针后缀
         // Parse array or function-pointer suffix after a declarator name
         AST::Type finish_declarator_type(AST::Type base, bool allow_empty_array,
-            std::optional<size_t>* out_array_size = nullptr);
+            std::optional<size_t>* out_array_size = nullptr,
+            std::unique_ptr<AST::Expression>* out_size_expr = nullptr);
 
         // ---- 解析形参列表 (Parameter List) ----
         // 形参列表: parameter { ',' parameter }
         // 返回 (类型列表, 名称列表)
-        std::pair<std::vector<AST::Type>, std::vector<std::string>> parse_parameter_list();
+        // 形参列表；defaults 非空时同时收集默认参数（Gallt 0.3.txt §8）
+        std::pair<std::vector<AST::Type>, std::vector<std::string>> parse_parameter_list(
+            std::vector<std::unique_ptr<AST::Expression>>* defaults = nullptr);
 
         // ---- 解析初始化器 (Initializer) ----
         std::unique_ptr<AST::Initializer> parse_initializer();

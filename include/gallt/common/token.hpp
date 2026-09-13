@@ -46,6 +46,16 @@ namespace gallt {
         Keyword_Output,     // output
         Keyword_Size,       // size
         Keyword_Align,      // align
+        // 0.3 新增：编译期泛型块关键字 (Gallt 0.3.txt §19)
+        // Added in 0.3: compile-time generics block keyword (Gallt 0.3.txt §19)
+        Keyword_Generics,   // generics
+        // 0.4 新增：命名空间与编译期代码生成关键字 (Gallt 0.4.txt §19/§21)
+        // Added in 0.4: namespace and compile-time code-generation keywords
+        // (Gallt 0.4.txt §19/§21)
+        Keyword_Namespace,  // namespace
+        Keyword_Access,     // access
+        Keyword_Addition,   // addition
+        Keyword_Emit,       // emit
 
         // ---- 标识符 (Identifier) ----
         Identifier,
@@ -76,6 +86,9 @@ namespace gallt {
         Star,               // * (乘号 / 解引用)
         Slash,              // /
         Percent,            // % (取余，优先级与 *、/ 相同)
+        // 0.3 新增：约束联合类型分隔符（Gallt 0.3.txt §19 类型参数约束）
+        // Added in 0.3: union-constraint separator (Gallt 0.3.txt §19)
+        Pipe,               // |
         Power,              // **
         Increment,          // ++
         Decrement,          // --
@@ -85,6 +98,9 @@ namespace gallt {
         LogicalNot,         // !
         Dot,                // .
         Arrow,              // ->
+        // 0.4 新增：作用域访问运算符 :: (Gallt 0.4.txt §3)
+        // Added in 0.4: scope-access operator :: (Gallt 0.4.txt §3)
+        ColonColon,         // ::
 
         // ---- 分隔符 (Delimiters) ----
         // 参照 Gallt 0.2 EBNF.txt 中的语法规则
@@ -97,6 +113,7 @@ namespace gallt {
         RightBracket,       // ]
         Comma,              // ,
         Semicolon,          // ;
+        Colon,              // :（0.3：泛型类型参数约束分隔符）
         Newline,            // 换行符
 
         // ---- 特殊 (Special) ----
@@ -127,7 +144,7 @@ namespace gallt {
 
         // 判断是否属于关键字类别
         bool is_keyword() const noexcept {
-            return type >= TokenType::Keyword_Int && type <= TokenType::Keyword_Align;
+            return type >= TokenType::Keyword_Int && type <= TokenType::Keyword_Emit;
         }
 
         // 判断是否为字面量
@@ -137,7 +154,7 @@ namespace gallt {
 
         // 判断是否为运算符
         bool is_operator() const noexcept {
-            return type >= TokenType::Assign && type <= TokenType::Arrow;
+            return type >= TokenType::Assign && type <= TokenType::ColonColon;
         }
 
         // 判断是否为分隔符

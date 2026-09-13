@@ -10,6 +10,9 @@
 #include "../lexer/lexer.hpp"
 #include "../parser/ast.hpp"
 #include "../parser/parser.hpp"
+#include "../semantic/generic_expander.hpp"
+#include "../semantic/lifecycle.hpp"
+#include "../semantic/namespace_lowering.hpp"
 #include "../semantic/type_checker.hpp"
 
 #include <windows.h>
@@ -209,6 +212,92 @@ namespace {
         return result;
     }
 
+    // 标准库搜索目录列表。
+    // Gallt 0.3（最新修正）规定：
+    //   “标准库文件夹必须和编译器文件夹在同级目录，否则编译器无法找到标准库”
+    // 即：以编译器可执行文件所在目录为“编译器文件夹”，其**同级目录**下的
+    // `sl/` 就是标准库文件夹：<编译器文件夹>/../sl/。
+    //
+    // 下列顺序中，第 1 项是显式环境变量覆盖（非文档路径，仅用于部署自定义），
+    // 第 2 项是文档规定的权威路径，其余为兼容回退（例如源码树内把 exe 与 sl
+    // 放在同一目录的历史布局），不影响文档路径的优先级。
+    // Standard-library search directories. The latest Gallt 0.3 revision states that the
+    // standard-library folder must be a sibling of the compiler folder, i.e.
+    // <compiler folder>/../sl/. Item 1 is an explicit environment override (not a
+    // documented path); item 2 is the documented authoritative path; the rest are
+    // compatibility fallbacks only.
+    const std::vector<fs::path>& standard_library_dirs() {
+        static const std::vector<fs::path> dirs = [] {
+            std::vector<fs::path> out;
+            // 显式覆盖：SGC_STDLIB / SGC_SL 优先
+            // Explicit overrides: SGC_STDLIB / SGC_SL take priority
+            for (const wchar_t* env : { L"SGC_STDLIB", L"SGC_SL" }) {
+                DWORD size = ::GetEnvironmentVariableW(env, nullptr, 0);
+                if (size > 0) {
+                    std::wstring value(static_cast<size_t>(size - 1), L'\0');
+                    ::GetEnvironmentVariableW(env, value.data(), size);
+                    out.emplace_back(value);
+                }
+            }
+            fs::path exe_dir;
+            wchar_t module_path[MAX_PATH];
+            if (::GetModuleFileNameW(nullptr, module_path, MAX_PATH) > 0) {
+                fs::path self(module_path);
+                exe_dir = self.parent_path();
+                // 【文档规定】标准库文件夹与编译器文件夹同级：<编译器文件夹>/../sl/
+                // Documented: the stdlib folder is a sibling of the compiler folder
+                out.push_back(exe_dir.parent_path() / L"sl");
+                // 兼容回退：编译器与 sl 位于同一目录（源码树 in-tree 布局）
+                // Compatibility fallback: compiler and sl in the same folder
+                out.push_back(exe_dir / L"sl");
+                // 兼容回退：源码树布局 <仓库>/SGC/sl
+                out.push_back(exe_dir.parent_path() / L"SGC" / L"sl");
+            }
+            // 兼容回退：当前工作目录下的 sl/
+            // Compatibility fallback: ./sl
+            out.push_back(fs::path(L".") / L"sl");
+            return out;
+        }();
+        return dirs;
+    }
+
+    // 解析 guide 引用：先相对当前文件，再相对标准库目录（支持短名导入）
+    // Resolve a guide reference: relative to the current file first, then the
+    // standard-library directories (this is what makes short names work)
+    std::optional<fs::path> resolve_guide_path(const std::string& guide,
+        const fs::path& current_dir) {
+        std::string normalized = normalize_library_reference(guide);
+        fs::path referenced(utf8_to_wide(normalized));
+        std::error_code ec;
+        if (referenced.is_absolute()) {
+            if (fs::exists(referenced)) {
+                return fs::weakly_canonical(referenced, ec);
+            }
+            return std::nullopt;
+        }
+        // 1) 相对当前源文件所在目录 / relative to the importing file
+        fs::path local = current_dir / referenced;
+        if (fs::exists(local)) {
+            return fs::weakly_canonical(local, ec);
+        }
+        // 2) 标准库目录（短名导入）/ standard-library directories (short names)
+        for (const fs::path& dir : standard_library_dirs()) {
+            fs::path candidate = dir / referenced;
+            if (fs::exists(candidate)) {
+                return fs::weakly_canonical(candidate, ec);
+            }
+            // 短名：只按文件名在标准库目录下查找
+            // Short name: look up by file name inside the standard-library directory
+            if (!referenced.has_parent_path()) {
+                fs::path by_name = dir / referenced.filename();
+                if (fs::exists(by_name)) {
+                    return fs::weakly_canonical(by_name, ec);
+                }
+            }
+        }
+        return std::nullopt;
+    }
+
 } // anonymous namespace
 
     int run_compiler(const CommandOptions& options) {
@@ -255,17 +344,16 @@ namespace {
             for (auto& top : loaded_program->top_levels) {
                 if (auto* guide = dynamic_cast<AST::GuideStatement*>(top.get())) {
                     std::string gpath = normalize_library_reference(guide->path);
-                    fs::path child(utf8_to_wide(gpath));
-                    if (child.is_relative()) {
-                        child = canonical.parent_path() / child;
-                    }
-                    child = fs::weakly_canonical(child, ce);
-                    if (!fs::exists(child)) {
+                    // 解析顺序：当前文件目录 → 标准库目录（短名导入）
+                    // Resolution order: importing file directory -> standard library
+                    std::optional<fs::path> resolved =
+                        resolve_guide_path(gpath, canonical.parent_path());
+                    if (!resolved.has_value()) {
                         diag.report_error(guide->location, ErrorCode::LibraryNotFound,
                             "guide file not found: " + gpath);
                         return false;
                     }
-                    if (!load_with_guides(child)) {
+                    if (!load_with_guides(*resolved)) {
                         return false;
                     }
                 }
@@ -298,15 +386,13 @@ namespace {
             for (auto& node : current->program->top_levels) {
                 if (auto* guide = dynamic_cast<AST::GuideStatement*>(node.get())) {
                     std::string gpath = normalize_library_reference(guide->path);
-                    fs::path child = fs::path(utf8_to_wide(gpath));
-                    if (child.is_relative()) {
-                        child = current->canonical_path.parent_path() / child;
-                    }
-                    std::error_code ce;
-                    child = fs::weakly_canonical(child, ce);
-                    auto found = by_path.find(child);
-                    if (found != by_path.end()) {
-                        append_in_guide_order(found->second);
+                    std::optional<fs::path> resolved =
+                        resolve_guide_path(gpath, current->canonical_path.parent_path());
+                    if (resolved.has_value()) {
+                        auto found = by_path.find(*resolved);
+                        if (found != by_path.end()) {
+                            append_in_guide_order(found->second);
+                        }
                     }
                 } else {
                     all_nodes.push_back(std::move(node));
@@ -319,13 +405,39 @@ namespace {
         SourceLocation fake_start;
         AST::Program combined(fake_start, std::move(all_nodes));
 
+        // Gallt 0.3.txt §19：编译期泛型展开（单态化），必须先于类型检查执行
+        // Gallt 0.3.txt §19: expand compile-time generics before type checking
+        // Gallt 0.4.txt §21：命名空间降低（在泛型展开之前完成名字归属与限定名解析）
+        // Gallt 0.4.txt §21: lower namespaces before generic expansion so that name
+        // ownership and qualified-name resolution are already settled
+        NamespaceLowering namespaces(diag);
+        if (!namespaces.run(&combined) || diag.has_errors()) {
+            diag.print_all(std::cerr);
+            return 1;
+        }
+
+        GenericExpander expander(diag);
+        if (!expander.expand(&combined) || diag.has_errors()) {
+            diag.print_all(std::cerr);
+            return 1;
+        }
+
+        // Gallt 0.3.txt §20：对象生命周期降低（构造/析构/拷贝/移动）
+        // Gallt 0.3.txt §20: lower object lifetime (ctor/dtor/copy/move)
+        LifecycleLowering lifecycle(diag);
+        if (!lifecycle.run(&combined) || diag.has_errors()) {
+            diag.print_all(std::cerr);
+            return 1;
+        }
+
         TypeChecker checker(diag);
         if (!checker.check_program(&combined)) {
             diag.print_all(std::cerr);
             return 1;
         }
 
-        CodeGenerator generator(&combined, checker.expression_types());
+        CodeGenerator generator(&combined, checker.expression_types(),
+            checker.resolved_functions(), checker.resolved_externs());
         generator.generate();
         if (diag.has_errors()) {
             diag.print_all(std::cerr);
@@ -353,10 +465,24 @@ namespace {
             output_path += L".exe";
         }
 
+        // 优化等级（Doc/编译器参数.txt）直接转发给 clang：0→-O0、1→-O1、2→-O2、
+        // 3→-O3、4→-Os。编译器自身不实现优化，全部交由 LLVM 后端。
+        // The optimization level (Doc/compiler-options.txt) is forwarded verbatim to clang:
+        // 0->-O0, 1->-O1, 2->-O2, 3->-O3, 4->-Os. Optimization itself is left to LLVM.
+        std::wstring optimization_flag;
+        switch (options.optimization_level) {
+        case 0: optimization_flag = L"-O0"; break;
+        case 1: optimization_flag = L"-O1"; break;
+        case 3: optimization_flag = L"-O3"; break;
+        case 4: optimization_flag = L"-Os"; break;
+        case 2:
+        default: optimization_flag = L"-O2"; break;
+        }
+
         std::vector<std::wstring> tool_args = {
             L"--target=x86_64-pc-windows-msvc",
             L"-fuse-ld=lld",
-            L"-O2",
+            optimization_flag,
             L"-Wno-override-module",
             L"-Wno-deprecated-declarations",
             L"-x", L"ir",

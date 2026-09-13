@@ -35,6 +35,15 @@ namespace gallt {
                 {"from", TokenType::Keyword_From},
                 {"null", TokenType::Keyword_Null},
                 {"heap", TokenType::Keyword_Heap},
+                // 0.3 新增：编译期泛型 (Gallt 0.3.txt §19)
+                // Added in 0.3: compile-time generics (Gallt 0.3.txt §19)
+                {"generics", TokenType::Keyword_Generics},
+                // 0.4 新增：命名空间与编译期代码生成 (Gallt 0.4.txt §19/§21)
+                // Added in 0.4: namespaces and compile-time code generation
+                {"namespace", TokenType::Keyword_Namespace},
+                {"access", TokenType::Keyword_Access},
+                {"addition", TokenType::Keyword_Addition},
+                {"emit", TokenType::Keyword_Emit},
             };
             return table;
         }
@@ -70,6 +79,11 @@ namespace gallt {
         case TokenType::Keyword_Output: return "output";
         case TokenType::Keyword_Size: return "size";
         case TokenType::Keyword_Align: return "align";
+        case TokenType::Keyword_Generics: return "generics";
+        case TokenType::Keyword_Namespace: return "namespace";
+        case TokenType::Keyword_Access: return "access";
+        case TokenType::Keyword_Addition: return "addition";
+        case TokenType::Keyword_Emit: return "emit";
         case TokenType::Identifier: return "identifier";
         case TokenType::IntegerLiteral: return "integer literal";
         case TokenType::FloatLiteral: return "float literal";
@@ -90,6 +104,7 @@ namespace gallt {
         case TokenType::Star: return "*";
         case TokenType::Slash: return "/";
         case TokenType::Percent: return "%";
+        case TokenType::Pipe: return "|";
         case TokenType::Power: return "**";
         case TokenType::Increment: return "++";
         case TokenType::Decrement: return "--";
@@ -99,6 +114,7 @@ namespace gallt {
         case TokenType::LogicalNot: return "!";
         case TokenType::Dot: return ".";
         case TokenType::Arrow: return "->";
+        case TokenType::ColonColon: return "::";
         case TokenType::LeftParen: return "(";
         case TokenType::RightParen: return ")";
         case TokenType::LeftBrace: return "{";
@@ -107,6 +123,7 @@ namespace gallt {
         case TokenType::RightBracket: return "]";
         case TokenType::Comma: return ",";
         case TokenType::Semicolon: return ";";
+        case TokenType::Colon: return ":";
         case TokenType::Newline: return "newline";
         case TokenType::EndOfFile: return "end of file";
         case TokenType::Unknown: return "unknown token";

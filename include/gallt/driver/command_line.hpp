@@ -21,6 +21,10 @@ namespace gallt {
         CommandMode mode = CommandMode::Compile;
         std::string input;       // 输入 .glt 文件
         std::string output;      // 输出 .exe 文件
+        // 优化等级（Doc/编译器参数.txt）：0 不优化、1 基本、2 中等、3 激进、4 代码体积
+        // Optimization level (Doc/compiler-options.txt): 0 none, 1 basic, 2 medium,
+        // 3 aggressive, 4 size-oriented；直接转发给 clang（-O0/-O1/-O2/-O3/-Os）
+        int optimization_level = 2;
         std::vector<std::string> positional;
         std::string error_message;
     };

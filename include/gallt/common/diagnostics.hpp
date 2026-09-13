@@ -27,13 +27,13 @@ namespace gallt {
     };
 
     // ============================================================================
-    // 错误码定义 —— 完全对应 Gallt 标准文档错误表 (ER 0001 ~ ER 0059, RTER 0001 ~ RTER 0002)
+    // 错误码定义 —— 完全对应 Gallt 标准文档错误表 (ER 0001 ~ ER 0098, RTER 0001 ~ RTER 0002)
     // Error codes — exactly match Gallt Standard Document error table
-    // 参照: Gallt 0.2.txt § 错误表
-    // Reference: Gallt 0.2.txt § Error Table
+    // 参照: Gallt 0.3.txt § 错误表
+    // Reference: Gallt 0.3.txt § Error Table
     // ============================================================================
 
-    // 编译时错误 (ER 0001 ~ ER 0059)
+    // 编译时错误 (ER 0001 ~ ER 0098)
     enum class ErrorCode : std::uint16_t {
         // ER 0001: 未定义标识符
         UndefinedIdentifier = 1,                 // "未定义标识符 '[identifier]'"
@@ -155,6 +155,126 @@ namespace gallt {
         FileSizeNotInt = 58,                     // "文件读写大小必须为 int 类型，得到 '[type]'"
         // ER 0059: 文件路径或模式必须为 string 类型
         FilePathOrModeNotString = 59,            // "文件路径或模式必须为 string 类型，得到 '[type]'"
+
+        // ---- Gallt 0.3.txt §19 编译期泛型新增错误码 ----
+        // ---- New compile-time-generics error codes (Gallt 0.3.txt §19) ----
+        // ER 0060: 泛型块顶部、所有成员定义之外不允许可执行语句
+        GenericStatementNotAllowed = 60,         // "泛型块顶部、所有成员定义之外不允许可执行语句"
+        // ER 0061: 泛型未定义
+        GenericUndefined = 61,                   // "泛型 '[generic]' 未定义"
+        // ER 0062: 泛型重复定义为主泛型
+        GenericPrimaryRedefined = 62,            // "泛型 '[generic]' 重复定义为主泛型"
+        // ER 0063: 泛型参数重复声明
+        GenericParameterRedefined = 63,          // "泛型参数 '[parameter]' 重复声明"
+        // ER 0064: 泛型实例化实参数量不匹配
+        GenericArgCountMismatch = 64,            // "泛型实例化 '[generic]<[arguments]>' 实参数量不匹配：需要 '[num]' 个，提供 '[num2]' 个"
+        // ER 0065: 泛型实参不满足约束
+        GenericConstraintViolated = 65,          // "泛型实例化 '[generic]<[arguments]>' 实参 '[index]' 不满足约束 '[constraint]'，得到 '[type]'"
+        // ER 0066: 泛型实例化无法匹配任何泛型或特化
+        GenericNoMatch = 66,                     // "泛型实例化 '[generic]<[arguments]>' 无法匹配任何泛型或特化"
+        // ER 0067: 泛型实例化存在多个互不可比较的最特化候选
+        GenericAmbiguousSpecialization = 67,     // "泛型实例化 '[generic]<[arguments]>' 存在多个互不可比较的最特化候选，产生二义性"
+        // ER 0068: 泛型常量模式无法在编译期求值
+        GenericConstantPatternNotConstant = 68,  // "泛型常量模式无法在编译期求值：'[expr]'"
+        // ER 0069: 泛型非类型实参必须是编译期常量表达式
+        GenericNonTypeArgNotConstant = 69,       // "泛型非类型实参必须是编译期常量表达式，得到 '[expr]'"
+        // ER 0070: 泛型非类型实参类型无法转换为常量参数类型
+        GenericNonTypeArgTypeMismatch = 70,      // "泛型非类型实参类型无法转换为常量参数类型 '[type]'，得到 '[type2]'"
+        // ER 0071: 泛型非类型实参值超出常量参数类型可表示范围
+        GenericNonTypeArgOutOfRange = 71,        // "泛型非类型实参值超出常量参数类型 '[type]' 的可表示范围"
+        // ER 0072: 偏特化自由标识符与同一偏特化块内其他自由标识符冲突
+        GenericFreeIdentifierConflict = 72,      // "偏特化自由标识符 '[identifier]' 与同一偏特化块内其他自由标识符冲突"
+        // ER 0073: 泛型成员短名产生二义性
+        GenericShortNameAmbiguous = 73,          // "泛型成员短名 '[identifier]' 产生二义性，必须使用限定名"
+        // ER 0074: 泛型成员短名与当前作用域中已有声明冲突
+        GenericShortNameConflict = 74,           // "泛型成员短名 '[identifier]' 与当前作用域中已有声明冲突"
+        // ER 0075: 特化中缺少实例化后必须存在的成员
+        GenericSpecializationMissingMember = 75, // "特化 '[specialization]' 中缺少实例化后必须存在的成员 '[member]'"
+        // ER 0076: 泛型的特化缺少主泛型声明
+        GenericSpecializationWithoutPrimary = 76, // "泛型 '[generic]' 的特化缺少主泛型声明"
+        // ER 0077: 泛型约束无效
+        GenericConstraintInvalid = 77,           // "泛型约束 '[constraint]' 无效"
+        // ER 0078: 泛型编译期常量参数不允许为左值或参与运行时操作
+        GenericConstantParameterRuntimeUse = 78, // "泛型编译期常量参数 '[parameter]' 不允许为左值或参与运行时操作"
+        // ER 0079: 泛型实参规范化冲突
+        GenericNormalizationConflict = 79,       // "泛型实参规范化冲突：相同实参组合产生不同规范化结果"
+        // ER 0080: 泛型成员在实例化中不存在
+        GenericMemberNotInInstantiation = 80,    // "泛型成员 '[member]' 在实例化 '[instantiation]' 中不存在"
+        // ER 0081: 特化必须出现在主泛型之后
+        GenericSpecializationBeforePrimary = 81, // "特化 '[specialization]' 必须出现在主泛型 '[generic]' 之后"
+        // ER 0082: 偏特化自由标识符在模式中多次出现但推导类型不一致
+        GenericPatternDeductionMismatch = 82,    // "偏特化自由标识符 '[identifier]' 在模式中多次出现，但推导类型不一致"
+        // ER 0083: 泛型块内成员名与泛型参数冲突
+        GenericMemberNameConflictsParameter = 83, // "泛型块内成员名 '[member]' 与泛型参数 '[parameter]' 冲突"
+
+        // ---- Gallt 0.3.txt §18/§20 重载与对象生命周期新增错误码 ----
+        // ---- New overload/lifetime error codes (Gallt 0.3.txt §18/§20) ----
+        // ER 0084: 重载二义性
+        OverloadAmbiguous = 84,                  // "'[function]' 重载二义性"
+        // ER 0085: 特殊成员函数重复定义
+        SpecialMemberRedefined = 85,             // "特殊成员函数 '[function]' 重复定义"
+        // ER 0086: 特殊成员函数参数类型不匹配
+        SpecialMemberParamMismatch = 86,         // "特殊成员函数 '[function]' 参数类型不匹配：期望 '[expected]'，得到 '[actual]'"
+        // ER 0087: 析构函数不允许有参数
+        DestructorWithParameters = 87,           // "析构函数不允许有参数"
+        // ER 0088: 构造函数不允许声明返回值类型
+        ConstructorWithReturnType = 88,          // "构造函数不允许声明返回值类型"
+        // ER 0089: 特殊成员函数不允许使用 return 返回表达式
+        SpecialMemberReturnValue = 89,           // "特殊成员函数不允许使用 return 返回表达式"
+        // ER 0090: 类型标记为 [nocopy]
+        NoCopyViolation = 90,                    // "类型 '[type]' 标记为 [nocopy]，不允许拷贝构造或拷贝赋值"
+        // ER 0091: 类型标记为 [nomove]
+        NoMoveViolation = 91,                    // "类型 '[type]' 标记为 [nomove]，不允许移动构造或移动赋值"
+        // ER 0092: 对非 construct 分配的对象调用 destruct
+        DestructNonConstructed = 92,             // "对非 construct 分配的对象调用 destruct"
+        // ER 0093: 对同一对象重复调用 destruct
+        DestructTwice = 93,                      // "对同一对象重复调用 destruct"
+        // ER 0094: Placement 构造目标内存不足或未对齐
+        PlacementTargetInvalid = 94,             // "Placement 构造目标内存不足或未对齐"
+        // ER 0095: 特殊成员函数不能通过点运算符或箭头运算符直接调用
+        SpecialMemberDirectCall = 95,            // "特殊成员函数 '[function]' 不能通过点运算符或箭头运算符直接调用 (显式析构例外)"
+        // ER 0096: 特殊成员函数重载决议二义性
+        SpecialMemberAmbiguous = 96,             // "特殊成员函数 '[function]' 重载决议二义性"
+        // ER 0097: 类型不是结构体，不能定义特殊成员函数
+        SpecialMemberOnNonStruct = 97,           // "类型 '[type]' 不是结构体，不能定义特殊成员函数"
+        // ER 0098: 特殊成员函数与普通函数同名冲突
+        SpecialMemberNameConflict = 98,          // "特殊成员函数 '[function]' 与普通函数同名冲突"
+
+        // ---- Gallt 0.4.txt §19/§21 命名空间与编译期代码生成新增错误码 ----
+        // ---- New namespace / compile-time code-generation error codes
+        //      (Gallt 0.4.txt §19/§21) ----
+        // ER 0099: 定义了编译器关键字
+        KeywordAsIdentifier = 99,                // "定义了编译器关键字 '[identifier]'"
+        // ER 0100: 命名空间未定义
+        NamespaceUndefined = 100,                // "命名空间 '[namespace]' 未定义"
+        // ER 0101: 命名空间重复定义
+        NamespaceRedefined = 101,                // "命名空间 '[namespace]' 重复定义"
+        // ER 0102: 命名空间成员不存在
+        NamespaceMemberNotFound = 102,           // "命名空间成员 '[member]' 在命名空间 '[namespace]' 中不存在"
+        // ER 0103: access namespace 目标不存在或不可引入
+        AccessNamespaceTargetInvalid = 103,      // "access namespace 目标 '[target]' 不存在或不可引入"
+        // ER 0104: addition namespace 未找到可追加的命名空间
+        AdditionNamespaceTargetMissing = 104,    // "addition namespace '[namespace]' 未找到可追加的命名空间"
+        // ER 0105: '::' 左操作数必须为命名空间或泛型实例
+        ScopeOperatorOperandInvalid = 105,       // "'::' 左操作数必须为命名空间或泛型实例，得到 '[type]'"
+        // ER 0106: emit 语句只能出现在泛型块内
+        EmitOutsideGenericBlock = 106,           // "emit 语句只能出现在泛型块内"
+        // ER 0107: emit 字符串表达式不是编译期字符串常量
+        EmitStringNotConstant = 107,             // "emit 字符串表达式不是编译期字符串常量：'[expr]'"
+        // ER 0108: emit 块中包含无法在编译期展开的内容
+        EmitBlockNotExpandable = 108,            // "emit 块中包含无法在编译期展开的内容"
+        // ER 0109: 编译期属性不适用于参数
+        CompileTimePropertyNotApplicable = 109,  // "编译期属性 '[property]' 不适用于参数 '[parameter]'"
+        // ER 0110: 编译期属性参数数量不匹配
+        CompileTimePropertyArgCountMismatch = 110, // "编译期属性 '[property]' 参数数量不匹配：需要 '[num]' 个，提供 '[num2]' 个"
+        // ER 0111: 编译期属性参数必须为字符串字面量
+        CompileTimePropertyArgNotString = 111,   // "编译期属性 '[property]' 的参数 '[index]' 必须为字符串字面量"
+        // ER 0112: 编译期条件表达式必须为编译期布尔常量
+        CompileTimeConditionNotBoolean = 112,    // "编译期条件表达式必须为编译期布尔常量，得到 '[expr]'"
+        // ER 0113: access namespace 引入的名字与当前作用域已有声明冲突
+        AccessNamespaceNameConflict = 113,       // "access namespace 引入 '[name]' 与当前作用域已有声明冲突"
+        // ER 0114: addition namespace 合并后成员与已有声明冲突
+        AdditionNamespaceMemberConflict = 114,   // "addition namespace 合并后成员 '[member]' 与已有声明冲突"
     };
 
     // 运行时错误 (RTER 0001 ~ RTER 0002)
@@ -181,6 +301,14 @@ namespace gallt {
         static std::string error_code_string(ErrorCode code);
         // 将运行时错误码转换为字符串 "RTER XXXX"
         static std::string runtime_error_code_string(RuntimeErrorCode code);
+
+        // 返回标准文档中该错误码的消息模板（含 [占位符]）
+        // Return the message template of the error code (with [placeholders])
+        static std::string error_template(ErrorCode code);
+        // 将模板中的 [占位符] 按出现顺序依次替换为 values
+        // Substitute every [placeholder] in the template, in order, with values
+        static std::string substitute_placeholders(std::string_view tmpl,
+            const std::vector<std::string>& values);
     };
 
     // ============================================================================
@@ -195,6 +323,10 @@ namespace gallt {
 
         // 报告错误 (编译错误)
         void report_error(SourceLocation loc, ErrorCode code, std::string_view message);
+        // 按标准文档模板报告错误并按顺序填充占位符
+        // Report an error using the standard-document template, filling placeholders in order
+        void report_error_template(SourceLocation loc, ErrorCode code,
+            const std::vector<std::string>& values);
         // 报告警告
         void report_warning(SourceLocation loc, ErrorCode code, std::string_view message);
         // 报告通知/备注 (通常用于附加信息)

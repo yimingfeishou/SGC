@@ -44,6 +44,10 @@ namespace gallt {
         std::vector<AST::Type> param_types;
         std::vector<std::string> param_names;
         AST::FunctionDefinition* function_node = nullptr; // 指向AST节点（用于代码生成）
+        // 仅当符号来自 extern 声明时有效（extern 函数参与重载，见第 18 章）
+        // Valid when the symbol comes from an extern declaration (extern functions take
+        // part in overload resolution, Gallt 0.3.txt §18)
+        AST::ExternDeclaration* extern_node = nullptr;
 
         // 仅当 kind == Struct 时有效
         AST::StructDefinition* struct_node = nullptr;
@@ -100,6 +104,14 @@ namespace gallt {
         // 声明符号，返回是否成功（失败表示重复定义）
         bool declare(const Symbol& sym);
 
+        // ---- 0.3：重载集 (Gallt 0.3.txt §18) ----
+        // ---- 0.3: overload sets (Gallt 0.3.txt §18) ----
+        // 在当前作用域登记一个函数重载；返回 false 表示签名重复（ER 0010）
+        bool declare_overload(const Symbol& sym);
+        // 当前作用域的同名重载集（可能为空）
+        std::vector<Symbol>* overloads(std::string_view name);
+        const std::vector<Symbol>* overloads(std::string_view name) const;
+
         // 查找符号（在当前作用域内）
         Symbol* lookup(std::string_view name);
         const Symbol* lookup(std::string_view name) const;
@@ -109,6 +121,7 @@ namespace gallt {
 
     private:
         std::unordered_map<std::string, Symbol> symbols_; // 符号名 -> 符号信息
+        std::unordered_map<std::string, std::vector<Symbol>> overloads_; // 重载集
     };
 
     // ============================================================================
@@ -132,11 +145,21 @@ namespace gallt {
         // ---- 符号声明 ----
         // 在当前作用域声明符号，返回是否成功（失败表示重复定义）
         bool declare(const Symbol& sym);
+        // 在当前作用域登记函数重载（签名重复返回 false）
+        bool declare_overload(const Symbol& sym);
 
         // ---- 符号查找 ----
         // 从当前作用域向上查找符号（包括所有外层作用域）
         Symbol* lookup(std::string_view name);
         const Symbol* lookup(std::string_view name) const;
+
+        // 按 0.3 §5 的查找规则取得同名重载集：
+        // 每一层先按函数名收集同名重载集，若存在则停止向外查找
+        // Look up the overload set of a name following the 0.3 §5 rules
+        std::vector<Symbol>* lookup_overloads(std::string_view name);
+        // 是否为内层非函数声明所遮蔽（用于区分 ER 0001/E 0017）
+        // Whether an inner non-function declaration shadows the name
+        bool is_shadowed_by_non_function(std::string_view name) const;
 
         // 仅在当前作用域查找（不向上）
         Symbol* lookup_current(std::string_view name);
@@ -175,6 +198,35 @@ namespace gallt {
         return it == symbols_.end() ? nullptr : &it->second;
     }
 
+    inline bool Scope::declare_overload(const Symbol& sym) {
+        // 同一作用域内参数类型完全相同（含数量）视为重复定义（ER 0010）
+        // An identical parameter type list in one scope is a redefinition (ER 0010)
+        auto& set = overloads_[sym.name];
+        for (const Symbol& existing : set) {
+            if (existing.param_types.size() != sym.param_types.size()) continue;
+            bool same = true;
+            for (std::size_t i = 0; i < existing.param_types.size(); ++i) {
+                if (!(existing.param_types[i] == sym.param_types[i])) {
+                    same = false;
+                    break;
+                }
+            }
+            if (same) return false;
+        }
+        set.push_back(sym);
+        return true;
+    }
+
+    inline std::vector<Symbol>* Scope::overloads(std::string_view name) {
+        auto it = overloads_.find(std::string(name));
+        return it == overloads_.end() ? nullptr : &it->second;
+    }
+
+    inline const std::vector<Symbol>* Scope::overloads(std::string_view name) const {
+        auto it = overloads_.find(std::string(name));
+        return it == overloads_.end() ? nullptr : &it->second;
+    }
+
     inline void SymbolTable::enter_scope() {
         scopes_.push_back(std::make_unique<Scope>());
     }
@@ -192,6 +244,11 @@ namespace gallt {
         return scopes_.back()->declare(sym);
     }
 
+    inline bool SymbolTable::declare_overload(const Symbol& sym) {
+        if (scopes_.empty()) enter_scope();
+        return scopes_.back()->declare_overload(sym);
+    }
+
     inline Symbol* SymbolTable::lookup(std::string_view name) {
         // 从内到外查找
         // Search from inner to outer scopes
@@ -206,6 +263,31 @@ namespace gallt {
             if (const Symbol* s = (*it)->lookup(name)) return s;
         }
         return nullptr;
+    }
+
+    inline std::vector<Symbol>* SymbolTable::lookup_overloads(std::string_view name) {
+        // 每一层：先看重载集，再看普通声明（0.3 §5 查找规则）
+        // Per scope: overload set first, then ordinary declarations (0.3 §5)
+        for (auto it = scopes_.rbegin(); it != scopes_.rend(); ++it) {
+            if (std::vector<Symbol>* set = (*it)->overloads(name)) {
+                return set;
+            }
+            if ((*it)->lookup(name) != nullptr) {
+                return nullptr;   // 被内层普通声明遮蔽
+            }
+        }
+        return nullptr;
+    }
+
+    inline bool SymbolTable::is_shadowed_by_non_function(std::string_view name) const {
+        for (auto it = scopes_.rbegin(); it != scopes_.rend(); ++it) {
+            if ((*it)->overloads(name) != nullptr) return false;
+            const Symbol* s = (*it)->lookup(name);
+            if (s != nullptr) {
+                return s->kind != SymbolKind::Function;
+            }
+        }
+        return false;
     }
 
     inline Symbol* SymbolTable::lookup_current(std::string_view name) {
