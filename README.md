@@ -77,7 +77,7 @@ Running `sgc` also requires LLVM's `clang.exe` and `lld`.
 sgc --compile --input file.glt --output file.exe
 sgc --help
 sgc --version
-sgv -OL <optimization level>
+sgc -OL <optimization level>
 ```
 
 ### Notes
