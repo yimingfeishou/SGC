@@ -585,13 +585,12 @@ namespace gallt {
         if (auto* prim = dynamic_cast<const PrimaryExpression*>(expr)) {
             if (prim->kind == PrimaryExpression::Kind::Literal) {
                 switch (prim->literal_token.type) {
-                case TokenType::IntegerLiteral: return Type::make_int();
-                case TokenType::FloatLiteral: {
-                    std::string_view lexeme = prim->literal_token.lexeme;
-                    bool is_float = !lexeme.empty() &&
-                        (lexeme.back() == 'f' || lexeme.back() == 'F');
-                    return is_float ? Type::make_float() : Type::make_double();
-                }
+                // 0.4.1 §7：字面量类型由后缀决定（整数 l/u/lu，浮点 f）
+                // 0.4.1 §7: literal types follow their suffixes (integer l/u/lu, float f)
+                case TokenType::IntegerLiteral:
+                    return Type::integer_literal_type(prim->literal_token.lexeme);
+                case TokenType::FloatLiteral:
+                    return Type::float_literal_type(prim->literal_token.lexeme);
                 case TokenType::CharLiteral: return Type::make_char();
                 case TokenType::BoolLiteral: return Type::make_bool();
                 case TokenType::StringLiteral: return Type::make_string();
@@ -614,6 +613,12 @@ namespace gallt {
         if (param.is_floating() && arg_type.is_arithmetic()) return true;
         if (param.kind == TypeKind::Double && arg_type.kind == TypeKind::Float) return true;
         if (param.kind == TypeKind::Int && arg_type.is_integer()) return true;
+        // 0.4.1 §2：新增整数类型的实参同样可隐式转换为算术形参
+        // 0.4.1 §2: arguments of the added integer kinds convert to arithmetic parameters
+        if (param.kind == TypeKind::Lint && arg_type.is_integer()) return true;
+        if (param.kind == TypeKind::Uint && arg_type.is_integer()) return true;
+        if (param.kind == TypeKind::Luint && arg_type.is_integer()) return true;
+        if (param.kind == TypeKind::Uchar && arg_type.is_integer()) return true;
         if (param.kind == TypeKind::Bool && arg_type.is_integer()) return true;
         if (param.kind == TypeKind::Char && arg_type.is_integer()) return true;
         return false;
@@ -634,9 +639,16 @@ namespace gallt {
             switch (t.kind) {
             case TypeKind::Char:
             case TypeKind::Bool:
-            case TypeKind::Int: return 0;
-            case TypeKind::Float: return 1;
-            case TypeKind::Double: return 2;
+                return 0;
+            // 0.4.1 §7 提升链：char < uchar < int < uint < lint < luint < float < double
+            // 0.4.1 §7 promotion ladder
+            case TypeKind::Uchar: return 1;
+            case TypeKind::Int: return 2;
+            case TypeKind::Uint: return 3;
+            case TypeKind::Lint: return 4;
+            case TypeKind::Luint: return 5;
+            case TypeKind::Float: return 6;
+            case TypeKind::Double: return 7;
             default: return -1;
             }
         };
@@ -651,7 +663,11 @@ namespace gallt {
         if (from_pos >= 0 && to_pos >= 0) {
             // char/bool → int 属于整数提升；float → double 属于浮点提升
             // char/bool -> int is an integral promotion; float -> double a floating one
-            bool promotion = (from_pos == 0 && to_pos == 0) || (from_pos == 1 && to_pos == 2);
+            const bool small_integer = arg_type.kind == TypeKind::Bool ||
+                arg_type.kind == TypeKind::Char || arg_type.kind == TypeKind::Uchar;
+            bool promotion = (small_integer && (param.kind == TypeKind::Int ||
+                param.kind == TypeKind::Uint)) ||
+                (arg_type.kind == TypeKind::Float && param.kind == TypeKind::Double);
             int distance = std::abs(to_pos - from_pos);
             if (distance == 0) distance = 1;
             return (promotion ? kPromotion : kConversion) + distance;

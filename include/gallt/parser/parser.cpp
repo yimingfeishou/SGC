@@ -18,6 +18,50 @@ using namespace gallt::AST;
 namespace gallt {
 
     namespace {
+        // ========================================================================
+        // 0.4.1 §2 类型说明符判定辅助
+        // 0.4.1 §2 type-specifier classification helpers
+        //
+        // 文档 0.4.1 新增 lint / uint / luint / uchar 与类型限定符 const；为避免
+        // 各语法判定点遗漏新增关键字，所有“是否为类型起始”的判断统一走这里。
+        // 0.4.1 adds lint / uint / luint / uchar and the const qualifier; every
+        // "does a type start here?" decision goes through these helpers so no new
+        // keyword can be forgotten at a single site.
+        // ========================================================================
+
+        // 内建类型说明符（不含 void 与 const）
+        // Builtin type specifiers (excluding void and const)
+        bool is_builtin_type_keyword(TokenType t) noexcept {
+            switch (t) {
+            case TokenType::Keyword_Int:
+            case TokenType::Keyword_Lint:
+            case TokenType::Keyword_Uint:
+            case TokenType::Keyword_Luint:
+            case TokenType::Keyword_Float:
+            case TokenType::Keyword_Double:
+            case TokenType::Keyword_Char:
+            case TokenType::Keyword_Uchar:
+            case TokenType::Keyword_Bool:
+            case TokenType::Keyword_String:
+            case TokenType::Keyword_File:
+                return true;
+            default:
+                return false;
+            }
+        }
+
+        // 内建类型说明符 + void
+        // Builtin type specifiers plus void
+        bool is_builtin_or_void_type_keyword(TokenType t) noexcept {
+            return is_builtin_type_keyword(t) || t == TokenType::Keyword_Void;
+        }
+
+        // 可以被 const 限定并能出现在声明/类型位置的关键字集合
+        // Keywords that may be const-qualified and may start a declaration
+        bool is_type_start_keyword(TokenType t) noexcept {
+            return is_builtin_or_void_type_keyword(t) || t == TokenType::Keyword_Const;
+        }
+
         // 去掉字符串字面量外层引号；返回内部文本
         // Remove the surrounding quotes from a string literal lexeme
         std::string unquote_string(std::string_view lexeme) {
@@ -349,11 +393,7 @@ namespace gallt {
             if (at_struct_attribute()) {
                 return parse_struct_definition();
             }
-            if (tt == TokenType::Keyword_Int || tt == TokenType::Keyword_Float ||
-                tt == TokenType::Keyword_Double || tt == TokenType::Keyword_Char ||
-                tt == TokenType::Keyword_Bool || tt == TokenType::Keyword_String ||
-                tt == TokenType::Keyword_File || tt == TokenType::Keyword_Void ||
-                tt == TokenType::Identifier) {
+            if (is_type_start_keyword(tt) || tt == TokenType::Identifier) {
                 if (tt == TokenType::Identifier && looks_like_generic_instantiation()) {
                     // Box<int> / Box<int>.Example 作为实例化语句或泛型类型声明
                     // Instantiation statement or a declaration typed by a generic member
@@ -573,14 +613,7 @@ namespace gallt {
             // 当作普通成员，这里给出更精确的诊断
             // A constructor may not declare a return type; diagnose it precisely
             bool type_start_token = (current_.type == TokenType::Identifier ||
-                current_.type == TokenType::Keyword_Int ||
-                current_.type == TokenType::Keyword_Float ||
-                current_.type == TokenType::Keyword_Double ||
-                current_.type == TokenType::Keyword_Char ||
-                current_.type == TokenType::Keyword_Bool ||
-                current_.type == TokenType::Keyword_String ||
-                current_.type == TokenType::Keyword_File ||
-                current_.type == TokenType::Keyword_Void);
+                is_type_start_keyword(current_.type));
             if (type_start_token &&
                 lookahead_type(1) == TokenType::Identifier &&
                 lookahead_type(2) == TokenType::LeftParen) {
@@ -762,14 +795,7 @@ namespace gallt {
                     }
                 }
                 else if (at_declaration_start() ||
-                    current_.type == TokenType::Keyword_Int ||
-                    current_.type == TokenType::Keyword_Float ||
-                    current_.type == TokenType::Keyword_Double ||
-                    current_.type == TokenType::Keyword_Char ||
-                    current_.type == TokenType::Keyword_Bool ||
-                    current_.type == TokenType::Keyword_String ||
-                    current_.type == TokenType::Keyword_File ||
-                    current_.type == TokenType::Keyword_Void) {
+                    is_type_start_keyword(current_.type)) {
                     // 函数定义或命名空间级变量声明
                     // Function definition or namespace-scope variable declaration
                     member = parse_function_definition();
@@ -955,10 +981,7 @@ namespace gallt {
         // Scan `type name (` from the current position; the type may carry a generic
         // argument list, `::` qualification, and pointer/array suffixes
         auto is_type_keyword = [](TokenType t) {
-            return t == TokenType::Keyword_Int || t == TokenType::Keyword_Float ||
-                t == TokenType::Keyword_Double || t == TokenType::Keyword_Char ||
-                t == TokenType::Keyword_Bool || t == TokenType::Keyword_String ||
-                t == TokenType::Keyword_File || t == TokenType::Keyword_Void;
+            return is_type_start_keyword(t);
         };
 
         std::size_t i = 0;
@@ -1040,10 +1063,7 @@ namespace gallt {
             return std::make_unique<PrimaryExpression>(loc, lit);
         }
         auto is_type_keyword = [](TokenType t) {
-            return t == TokenType::Keyword_Int || t == TokenType::Keyword_Float ||
-                t == TokenType::Keyword_Double || t == TokenType::Keyword_Char ||
-                t == TokenType::Keyword_Bool || t == TokenType::Keyword_String ||
-                t == TokenType::Keyword_File;
+            return is_builtin_type_keyword(t);
         };
         if (current_.type == TokenType::Identifier || is_type_keyword(current_.type)) {
             std::string text(current_.lexeme);
@@ -1185,10 +1205,7 @@ namespace gallt {
                 }
                 reset_to(start);
            }
-            if (tt == TokenType::Keyword_Int || tt == TokenType::Keyword_Float ||
-                tt == TokenType::Keyword_Double || tt == TokenType::Keyword_Char ||
-                tt == TokenType::Keyword_Bool || tt == TokenType::Keyword_String ||
-                tt == TokenType::Keyword_File || at_declaration_start()) {
+            if (is_type_start_keyword(tt) || at_declaration_start()) {
                 auto var_decl = parse_variable_declaration();
                 if (var_decl != nullptr) {
                     return var_decl;
@@ -1210,10 +1227,7 @@ namespace gallt {
             advance();
             return nullptr;
         }
-        if (tt == TokenType::Keyword_Int || tt == TokenType::Keyword_Float ||
-            tt == TokenType::Keyword_Double || tt == TokenType::Keyword_Char ||
-            tt == TokenType::Keyword_Bool || tt == TokenType::Keyword_String ||
-            tt == TokenType::Keyword_File || at_declaration_start()) {
+        if (is_type_start_keyword(tt) || at_declaration_start()) {
             auto var_decl = parse_variable_declaration();
             if (var_decl != nullptr) {
                 return var_decl;
@@ -1669,10 +1683,31 @@ namespace gallt {
     }
 
     Type Parser::parse_type_specifier(bool allow_void) {
+        // 0.4.1 §2 类型限定符 const：`const [类型]`，限定作用在紧随其后的
+        // 类型说明符上（因此 `const char* p` 是“指向 const char 的指针”，
+        // 与 C++20 的 const 结合规则一致；文档未另行规定时按 C++20 处理）。
+        // 0.4.1 §2 type qualifier const: `const [type]` qualifies the specifier it
+        // precedes, so `const char* p` denotes a pointer to const char, matching
+        // C++20 binding rules (the fallback for semantics the document leaves open).
+        if (current_.type == TokenType::Keyword_Const) {
+            advance();
+            Type qualified = parse_type_specifier(allow_void);
+            qualified.is_const = true;
+            return qualified;
+        }
         switch (current_.type) {
         case TokenType::Keyword_Int:
             advance();
             return Type::make_int();
+        case TokenType::Keyword_Lint:
+            advance();
+            return Type::make_lint();
+        case TokenType::Keyword_Uint:
+            advance();
+            return Type::make_uint();
+        case TokenType::Keyword_Luint:
+            advance();
+            return Type::make_luint();
         case TokenType::Keyword_Float:
             advance();
             return Type::make_float();
@@ -1682,6 +1717,9 @@ namespace gallt {
         case TokenType::Keyword_Char:
             advance();
             return Type::make_char();
+        case TokenType::Keyword_Uchar:
+            advance();
+            return Type::make_uchar();
         case TokenType::Keyword_Bool:
             advance();
             return Type::make_bool();
@@ -2291,9 +2329,13 @@ namespace gallt {
             return std::make_unique<PrimaryExpression>(loc, id);
         }
         case TokenType::Keyword_Int:
+        case TokenType::Keyword_Lint:
+        case TokenType::Keyword_Uint:
+        case TokenType::Keyword_Luint:
         case TokenType::Keyword_Float:
         case TokenType::Keyword_Double:
         case TokenType::Keyword_Char:
+        case TokenType::Keyword_Uchar:
         case TokenType::Keyword_Bool:
         case TokenType::Keyword_String: {
             // size/align 的参数可以是类型名（int、double、struct 等）
@@ -2395,9 +2437,13 @@ namespace gallt {
             switch (lookahead_type(1)) {
             case TokenType::Identifier:
             case TokenType::Keyword_Int:
+            case TokenType::Keyword_Lint:
+            case TokenType::Keyword_Uint:
+            case TokenType::Keyword_Luint:
             case TokenType::Keyword_Float:
             case TokenType::Keyword_Double:
             case TokenType::Keyword_Char:
+            case TokenType::Keyword_Uchar:
             case TokenType::Keyword_Bool:
             case TokenType::Keyword_String:
             case TokenType::Keyword_File:
@@ -2558,6 +2604,19 @@ namespace gallt {
             base = 8;
             lexeme = lexeme.substr(1);
         }
+        // 0.4.1 §7：去掉整数字面量后缀（l/L、u/U、lu/Lu/lU/LU）后再解析数值。
+        // 只剥离 l/L/u/U，十六进制数字 A–F 不会被误当作后缀。
+        // 0.4.1 §7: strip an integer literal suffix (l/L, u/U, lu/Lu/lU/LU) first;
+        // only l/L/u/U are stripped so hexadecimal digits A-F stay intact.
+        while (lexeme.size() > 1) {
+            const char back = lexeme.back();
+            if (back == 'l' || back == 'L' || back == 'u' || back == 'U') {
+                lexeme.remove_suffix(1);
+            }
+            else {
+                break;
+            }
+        }
         size_t value = 0;
         auto [ptr, ec] = std::from_chars(lexeme.data(), lexeme.data() + lexeme.size(), value, base);
         if (ec != std::errc()) {
@@ -2664,11 +2723,7 @@ namespace gallt {
             TokenType first = lookahead_type(i);
             TokenType second = lookahead_type(i + 1);
             bool first_ident = first == TokenType::Identifier;
-            bool first_type_keyword = (first == TokenType::Keyword_Int ||
-                first == TokenType::Keyword_Float || first == TokenType::Keyword_Double ||
-                first == TokenType::Keyword_Char || first == TokenType::Keyword_Bool ||
-                first == TokenType::Keyword_String || first == TokenType::Keyword_File ||
-                first == TokenType::Keyword_Void);
+            bool first_type_keyword = is_type_start_keyword(first);
            if (first_ident) {
                if (second == TokenType::Identifier) {
                    i += 2;                                  // `T N` 常量参数
@@ -2719,10 +2774,7 @@ namespace gallt {
 
     bool Parser::at_declaration_start() const {
         TokenType tt = current_.type;
-        if (tt == TokenType::Keyword_Int || tt == TokenType::Keyword_Float ||
-            tt == TokenType::Keyword_Double || tt == TokenType::Keyword_Char ||
-            tt == TokenType::Keyword_Bool || tt == TokenType::Keyword_String ||
-            tt == TokenType::Keyword_File) {
+        if (is_type_start_keyword(tt)) {
             return true;
         }
        if (tt == TokenType::Identifier) {
@@ -2818,13 +2870,18 @@ namespace gallt {
                 break;
             case TokenType::Identifier:
             case TokenType::Keyword_Int:
+            case TokenType::Keyword_Lint:
+            case TokenType::Keyword_Uint:
+            case TokenType::Keyword_Luint:
             case TokenType::Keyword_Float:
             case TokenType::Keyword_Double:
             case TokenType::Keyword_Char:
+            case TokenType::Keyword_Uchar:
             case TokenType::Keyword_Bool:
             case TokenType::Keyword_String:
             case TokenType::Keyword_File:
             case TokenType::Keyword_Void:
+            case TokenType::Keyword_Const:
             case TokenType::IntegerLiteral:
             case TokenType::FloatLiteral:
             case TokenType::CharLiteral:
@@ -2912,9 +2969,13 @@ namespace gallt {
             // 类型转换 [类型]([编译期常量表达式])（第 19 章 / 第 7 章）
             // Type conversion [type]([compile-time constant expression])
             case TokenType::Keyword_Int:
+            case TokenType::Keyword_Lint:
+            case TokenType::Keyword_Uint:
+            case TokenType::Keyword_Luint:
             case TokenType::Keyword_Float:
             case TokenType::Keyword_Double:
             case TokenType::Keyword_Char:
+            case TokenType::Keyword_Uchar:
             case TokenType::Keyword_Bool:
             case TokenType::Keyword_String: {
                 Type cast_type = parse_type_specifier(false);
@@ -2945,10 +3006,7 @@ namespace gallt {
                 // The argument of size/align may be a type name (§14) or an expression
                 std::unique_ptr<Expression> arg;
                 TokenType tt = current_.type;
-                bool type_name_argument = (tt == TokenType::Keyword_Int ||
-                    tt == TokenType::Keyword_Float || tt == TokenType::Keyword_Double ||
-                    tt == TokenType::Keyword_Char || tt == TokenType::Keyword_Bool ||
-                    tt == TokenType::Keyword_String || tt == TokenType::Keyword_File ||
+                bool type_name_argument = (is_builtin_type_keyword(tt) ||
                     (tt == TokenType::Identifier &&
                         lookahead_type(1) == TokenType::RightParen));
                 if (type_name_argument) {
@@ -3051,9 +3109,13 @@ namespace gallt {
             case TokenType::Identifier:
             case TokenType::LeftParen:
             case TokenType::Keyword_Int:
+            case TokenType::Keyword_Lint:
+            case TokenType::Keyword_Uint:
+            case TokenType::Keyword_Luint:
             case TokenType::Keyword_Float:
             case TokenType::Keyword_Double:
             case TokenType::Keyword_Char:
+            case TokenType::Keyword_Uchar:
             case TokenType::Keyword_Bool:
             case TokenType::Keyword_String:
             case TokenType::Keyword_Size:
@@ -3131,10 +3193,7 @@ namespace gallt {
             GenericArgument arg;
             bool parsed_type = false;
             TokenType tt = current_.type;
-            bool type_start = (tt == TokenType::Keyword_Int || tt == TokenType::Keyword_Float ||
-                tt == TokenType::Keyword_Double || tt == TokenType::Keyword_Char ||
-                tt == TokenType::Keyword_Bool || tt == TokenType::Keyword_String ||
-                tt == TokenType::Keyword_File || tt == TokenType::Keyword_Void ||
+            bool type_start = (is_builtin_or_void_type_keyword(tt) ||
                 tt == TokenType::Identifier);
             if (type_start) {
                // 先按类型尝试：`int`、`T*`、`Box<int>.Example`
@@ -3381,12 +3440,7 @@ namespace gallt {
                             def->parameters.push_back(std::move(param));
                         }
                     }
-                    else if (current_.type == TokenType::Keyword_Int ||
-                        current_.type == TokenType::Keyword_Float ||
-                        current_.type == TokenType::Keyword_Double ||
-                        current_.type == TokenType::Keyword_Char ||
-                        current_.type == TokenType::Keyword_Bool ||
-                        current_.type == TokenType::Keyword_String) {
+                    else if (is_builtin_type_keyword(current_.type)) {
                         // `int N`：显式类型的常量参数
                         param.is_type = false;
                         param.constant_type = parse_type_specifier(true);
@@ -3408,13 +3462,7 @@ namespace gallt {
                 else {
                     // 特化模式：类型模式或编译期常量模式
                     GenericPatternArg pattern;
-                    bool type_like = (current_.type == TokenType::Keyword_Int ||
-                        current_.type == TokenType::Keyword_Float ||
-                        current_.type == TokenType::Keyword_Double ||
-                        current_.type == TokenType::Keyword_Char ||
-                        current_.type == TokenType::Keyword_Bool ||
-                        current_.type == TokenType::Keyword_String ||
-                        current_.type == TokenType::Keyword_File ||
+                    bool type_like = (is_builtin_type_keyword(current_.type) ||
                         current_.type == TokenType::Identifier);
                     if (type_like) {
                         Type t = parse_type(true, false);
@@ -3557,10 +3605,7 @@ namespace gallt {
             return parse_struct_definition();
         }
         TokenType tt = current_.type;
-        bool type_start = (tt == TokenType::Keyword_Int || tt == TokenType::Keyword_Float ||
-            tt == TokenType::Keyword_Double || tt == TokenType::Keyword_Char ||
-            tt == TokenType::Keyword_Bool || tt == TokenType::Keyword_String ||
-            tt == TokenType::Keyword_File || tt == TokenType::Keyword_Void ||
+        bool type_start = (is_type_start_keyword(tt) ||
             tt == TokenType::Identifier);
         if (type_start) {
             return parse_function_definition();

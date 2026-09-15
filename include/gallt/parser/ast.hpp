@@ -57,7 +57,11 @@ namespace gallt {
         struct GenericRef;       // 前向声明 / forward declaration
 
         enum class TypeKind {
-            Int, Float, Double, Char, Bool, String, File, Void,
+            // 0.4.1 §2 新增整型/无符号类型：lint（64 位有符号）、uint（32 位无符号）、
+            // luint（64 位无符号）、uchar（8 位无符号）
+            // Integer/unsigned kinds added in 0.4.1 §2: lint (64-bit signed),
+            // uint (32-bit unsigned), luint (64-bit unsigned) and uchar (8-bit unsigned)
+            Int, Lint, Uint, Luint, Float, Double, Char, Uchar, Bool, String, File, Void,
             Array, Pointer, Struct, Function
         };
 
@@ -78,6 +82,11 @@ namespace gallt {
             // Generic instantiated member type, e.g. Box<int>.Example
             std::shared_ptr<GenericRef> generic_ref;
 
+            // 0.4.1 §2 类型限定符 const：被限定对象是编译期常量，不可修改
+            // 0.4.1 §2 type qualifier const: the qualified object is a compile-time
+            // constant and cannot be modified
+            bool is_const = false;
+
             // 对于 Function: return_type, parameter_types
             std::shared_ptr<Type> return_type;
             std::vector<Type> parameter_types;
@@ -86,9 +95,13 @@ namespace gallt {
             explicit Type(TypeKind k) : kind(k) {}
 
             static Type make_int() { return Type(TypeKind::Int); }
+            static Type make_lint() { return Type(TypeKind::Lint); }
+            static Type make_uint() { return Type(TypeKind::Uint); }
+            static Type make_luint() { return Type(TypeKind::Luint); }
             static Type make_float() { return Type(TypeKind::Float); }
             static Type make_double() { return Type(TypeKind::Double); }
             static Type make_char() { return Type(TypeKind::Char); }
+            static Type make_uchar() { return Type(TypeKind::Uchar); }
             static Type make_bool() { return Type(TypeKind::Bool); }
             static Type make_string() { return Type(TypeKind::String); }
             static Type make_file() { return Type(TypeKind::File); }
@@ -120,11 +133,73 @@ namespace gallt {
                 return t;
             }
 
+            // ---- 0.4.1 §7 数值字面量后缀 ----
+            // ---- 0.4.1 §7 numeric literal suffixes ----
+            // 去掉整数字面量后缀（l/L、u/U、lu/Lu/lU/LU）；十六进制数字 A-F 不受影响
+            // Strip an integer literal suffix (l/L, u/U, lu/Lu/lU/LU); hex digits A-F
+            // are left untouched
+            static std::string_view strip_integer_suffix(std::string_view lexeme) noexcept;
+            // 整数字面量的默认类型（0.4.1 §7）
+            // Default type of an integer literal (0.4.1 §7)
+            static Type integer_literal_type(std::string_view lexeme) noexcept;
+            // 浮点字面量的默认类型：f/F → float，否则 double（0.4.1 §7）
+            // Default type of a floating literal: f/F selects float, otherwise double
+            static Type float_literal_type(std::string_view lexeme) noexcept;
+
             bool operator==(const Type& other) const;
             bool operator!=(const Type& other) const { return !(*this == other); }
 
             bool is_integer() const {
-                return kind == TypeKind::Int || kind == TypeKind::Char || kind == TypeKind::Bool;
+                return kind == TypeKind::Int || kind == TypeKind::Lint ||
+                    kind == TypeKind::Uint || kind == TypeKind::Luint ||
+                    kind == TypeKind::Char || kind == TypeKind::Uchar ||
+                    kind == TypeKind::Bool;
+            }
+            // 有符号整数类型：char、int、lint（0.4.1 §2）
+            // Signed integer kinds: char, int and lint (0.4.1 §2)
+            bool is_signed_integer() const {
+                return kind == TypeKind::Char || kind == TypeKind::Int ||
+                    kind == TypeKind::Lint;
+            }
+            // 无符号类型：uchar、uint、luint、bool（0.4.1 §2）
+            // Unsigned kinds: uchar, uint, luint and bool (0.4.1 §2)
+            bool is_unsigned_integer() const {
+                return kind == TypeKind::Uchar || kind == TypeKind::Uint ||
+                    kind == TypeKind::Luint || kind == TypeKind::Bool;
+            }
+            // 0.4.1 §7 类型提升优先级位置：char < uchar < int < uint < lint < luint <
+            // float < double。bool 不在文档给出的优先级链上，按 C++20 与 char 同档。
+            // Promotion position on the 0.4.1 §7 ladder: char < uchar < int < uint <
+            // lint < luint < float < double. bool is not on the documented ladder and
+            // shares char's slot per C++20.
+            int promotion_rank() const {
+                switch (kind) {
+                case TypeKind::Char:
+                case TypeKind::Bool: return 1;
+                case TypeKind::Uchar: return 2;
+                case TypeKind::Int: return 3;
+                case TypeKind::Uint: return 4;
+                case TypeKind::Lint: return 5;
+                case TypeKind::Luint: return 6;
+                case TypeKind::Float: return 7;
+                case TypeKind::Double: return 8;
+                default: return 0;
+                }
+            }
+            // 整数类型的位宽（-1 表示不是整数类型）；与代码生成保持一致
+            // Bit width of an integer kind (-1 when not an integer); kept consistent
+            // with code generation
+            int integer_bit_width() const {
+                switch (kind) {
+                case TypeKind::Char:
+                case TypeKind::Uchar:
+                case TypeKind::Bool: return 8;
+                case TypeKind::Int:
+                case TypeKind::Uint: return 32;
+                case TypeKind::Lint:
+                case TypeKind::Luint: return 64;
+                default: return -1;
+                }
             }
             bool is_floating() const {
                 return kind == TypeKind::Float || kind == TypeKind::Double;

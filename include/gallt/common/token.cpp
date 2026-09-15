@@ -15,9 +15,15 @@ namespace gallt {
         const std::unordered_map<std::string_view, TokenType>& keyword_table() {
             static const std::unordered_map<std::string_view, TokenType> table = {
                 {"int", TokenType::Keyword_Int},
+                // 0.4.1 新增类型说明符 (Gallt 0.4.1.txt §2)
+                // Type specifiers added in 0.4.1 (Gallt 0.4.1.txt §2)
+                {"lint", TokenType::Keyword_Lint},
+                {"uint", TokenType::Keyword_Uint},
+                {"luint", TokenType::Keyword_Luint},
                 {"float", TokenType::Keyword_Float},
                 {"double", TokenType::Keyword_Double},
                 {"char", TokenType::Keyword_Char},
+                {"uchar", TokenType::Keyword_Uchar},
                 {"bool", TokenType::Keyword_Bool},
                 {"string", TokenType::Keyword_String},
                 {"file", TokenType::Keyword_File},
@@ -44,6 +50,9 @@ namespace gallt {
                 {"access", TokenType::Keyword_Access},
                 {"addition", TokenType::Keyword_Addition},
                 {"emit", TokenType::Keyword_Emit},
+                // 0.4.1 新增：类型限定符 (Gallt 0.4.1.txt §2)
+                // Added in 0.4.1: the const type qualifier (Gallt 0.4.1.txt §2)
+                {"const", TokenType::Keyword_Const},
             };
             return table;
         }
@@ -54,9 +63,13 @@ namespace gallt {
         // Human-readable name for each token type, used in diagnostics
         switch (type) {
         case TokenType::Keyword_Int: return "int";
+        case TokenType::Keyword_Lint: return "lint";
+        case TokenType::Keyword_Uint: return "uint";
+        case TokenType::Keyword_Luint: return "luint";
         case TokenType::Keyword_Float: return "float";
         case TokenType::Keyword_Double: return "double";
         case TokenType::Keyword_Char: return "char";
+        case TokenType::Keyword_Uchar: return "uchar";
         case TokenType::Keyword_Bool: return "bool";
         case TokenType::Keyword_String: return "string";
         case TokenType::Keyword_File: return "file";
@@ -84,6 +97,7 @@ namespace gallt {
         case TokenType::Keyword_Access: return "access";
         case TokenType::Keyword_Addition: return "addition";
         case TokenType::Keyword_Emit: return "emit";
+        case TokenType::Keyword_Const: return "const";
         case TokenType::Identifier: return "identifier";
         case TokenType::IntegerLiteral: return "integer literal";
         case TokenType::FloatLiteral: return "float literal";

@@ -1,9 +1,10 @@
-// semantic/type_checker.cpp
+﻿// semantic/type_checker.cpp
 // 类型检查器实现 —— 执行语义分析、类型推导、符号解析、错误报告
 // Type Checker implementation — performs semantic analysis, type inference, symbol resolution, error reporting
 
 #include "../semantic/type_checker.hpp"
 #include "../parser/ast.hpp"
+#include "../semantic/constant_folding.hpp"
 #include <algorithm>
 #include <cctype>
 #include <charconv>
@@ -132,7 +133,7 @@ namespace gallt {
         program_ = program;
 
         // 进入全局作用域
-        sym_table_.enter_scope();
+        enter_scope();
 
         // 声明内置函数（第一次调用时会注册）
         declare_builtin_functions();
@@ -172,7 +173,7 @@ namespace gallt {
         verify_main_function();
 
         // 退出全局作用域
-        sym_table_.exit_scope();
+        exit_scope();
 
         return !diag_.has_errors();
     }
@@ -392,7 +393,7 @@ namespace gallt {
             }
             sym_table_.declare_overload(sym);
         }
-       sym_table_.enter_scope();
+       enter_scope();
        for (size_t i = 0; i < node->parameters.size(); ++i) {
             std::string pname = (i < node->param_names.size() && !node->param_names[i].empty())
                 ? node->param_names[i]
@@ -455,7 +456,7 @@ namespace gallt {
                     "non-void function '" + node->name + "' must return a value");
             }
         }
-        sym_table_.exit_scope();
+        exit_scope();
         current_function_ = nullptr;
     }
 
@@ -474,6 +475,21 @@ namespace gallt {
             if (member.array_size.has_value() && !member.type.array_size.has_value() &&
                 member.type.kind == TypeKind::Array) {
                 member.type.array_size = member.array_size;
+            }
+            // 0.4.1 §7：成员数组的长度同样必须是常量整数表达式（可引用 const 常量）
+            // 0.4.1 §7: member array lengths must also be constant integer expressions
+            // (const constants may be referenced)
+            if (member.type.kind == TypeKind::Array && !member.array_size.has_value() &&
+                member.array_size_expr != nullptr) {
+                auto value = evaluate_const_integer_expression(member.array_size_expr.get());
+                if (value.has_value() && *value > 0) {
+                    member.array_size = static_cast<std::size_t>(*value);
+                    member.type.array_size = member.array_size;
+                }
+                else {
+                    report_error(member.location, ErrorCode::ArraySizeNotConstant,
+                        "array size in a declaration must be a constant integer expression");
+                }
             }
             AST::Type& mem_type = member.type;
             if (mem_type.kind == TypeKind::Struct && mem_type.struct_name == node->name) {
@@ -627,14 +643,20 @@ namespace gallt {
     }
 
     void TypeChecker::check_block(AST::Block* block) {
-        sym_table_.enter_scope();
+        enter_scope();
         for (auto& stmt : block->statements) {
             check_statement(stmt.get());
         }
-        sym_table_.exit_scope();
+        exit_scope();
     }
 
     void TypeChecker::check_variable_declaration(AST::VariableDeclaration* decl) {
+        // 0.4.1 §2：const 对象必须在编译期求值，且不能存储变量（ER 0116）
+        // 0.4.1 §2: a const object must be evaluated at compile time and cannot store
+        // a variable (ER 0116)
+        if (decl->type.is_const) {
+            check_const_declaration(decl);
+        }
         // 将声明符上的数组长度同步到类型对象，避免重复维护两处状态
         // Sync the declarator array length into the type object
         if (decl->type.kind == TypeKind::Array) {
@@ -643,6 +665,21 @@ namespace gallt {
             }
             if (!decl->array_size.has_value() && decl->type.array_size.has_value()) {
                 decl->array_size = decl->type.array_size;
+            }
+            // 0.4.1 §7：数组长度必须是常量整数表达式；支持引用 const 常量（0.4.1 §2）
+            // 0.4.1 §7: an array length must be a constant integer expression; const
+            // constants may be referenced (0.4.1 §2)
+            if (!decl->array_size.has_value() && decl->array_size_expr != nullptr) {
+                auto value = evaluate_const_integer_expression(decl->array_size_expr.get());
+                if (value.has_value() && *value > 0) {
+                    decl->type.array_size = static_cast<std::size_t>(*value);
+                    decl->array_size = static_cast<std::size_t>(*value);
+                }
+                else {
+                    report_error(decl->array_size_expr->location,
+                        ErrorCode::ArraySizeNotConstant,
+                        "array size in a declaration must be a constant integer expression");
+                }
             }
         }
         if (decl->type.kind == TypeKind::Array && !decl->array_size.has_value()) {
@@ -769,6 +806,11 @@ namespace gallt {
         }
         Symbol sym = Symbol::make_variable(decl->name, decl->type, decl->location,
             decl->initializer != nullptr);
+        // 0.4.1 §2：const 变量不可修改
+        // 0.4.1 §2: const variables are not mutable
+        if (decl->type.is_const) {
+            sym.is_mutable = false;
+        }
         if (!sym_table_.declare(sym)) {
             report_error(decl->location, ErrorCode::RedefinedIdentifier,
                 "variable '" + decl->name + "' already declared");
@@ -922,7 +964,7 @@ namespace gallt {
     }
 
     void TypeChecker::check_for_statement(AST::ForStatement* for_stmt) {
-        sym_table_.enter_scope();
+        enter_scope();
         if (for_stmt->init) {
             check_statement(for_stmt->init.get());
         }
@@ -943,7 +985,7 @@ namespace gallt {
             check_statement(for_stmt->body.get());
         }
         loop_depth_--;
-        sym_table_.exit_scope();
+        exit_scope();
     }
 
     void TypeChecker::check_while_statement(AST::WhileStatement* while_stmt) {
@@ -1082,6 +1124,12 @@ namespace gallt {
                 "left-hand side of assignment must be an lvalue");
         }
         AST::Type left_type = check_expression(expr->left.get());
+        // 0.4.1 §2：const 常量不可修改（ER 0115）
+        // 0.4.1 §2: a const constant cannot be modified (ER 0115)
+        if (left_type.is_const) {
+            diag_.report_error_template(expr->left->location, ErrorCode::ConstModification,
+                { expression_display_name(expr->left.get()) });
+        }
         // 目标类型：左值类型（函数指针赋值时按目标类型选择重载，第 18 章）
         // Expected type: the left-hand type (§18 function-pointer overload selection)
         const AST::Type* saved_expected = expected_type_;
@@ -1423,6 +1471,14 @@ namespace gallt {
                 report_error(expr->operand->location, ErrorCode::ExpressionSyntaxError,
                     "operand of increment/decrement must be an lvalue");
             }
+            // 0.4.1 §2：自增/自减同样修改对象，const 常量报 ER 0115
+            // 0.4.1 §2: increment/decrement also modifies the object, so a const
+            // constant reports ER 0115
+            if (operand.is_const) {
+                diag_.report_error_template(expr->operand->location,
+                    ErrorCode::ConstModification,
+                    { expression_display_name(expr->operand.get()) });
+            }
             if (!is_numeric_type(operand) && operand.kind != TypeKind::Pointer) {
                 report_error(expr->location, ErrorCode::UnaryOperatorTypeMismatch,
                     "increment/decrement requires arithmetic or pointer type, got '" +
@@ -1566,7 +1622,9 @@ namespace gallt {
                     if (prim_arg->kind == AST::PrimaryExpression::Kind::Identifier) {
                         std::string name = prim_arg->identifier;
                         // 基本类型名
-                        if (name == "int" || name == "float" || name == "double" || name == "char" ||
+                        if (name == "int" || name == "lint" || name == "uint" ||
+                            name == "luint" || name == "float" || name == "double" ||
+                            name == "char" || name == "uchar" ||
                             name == "bool" || name == "string" || name == "file" ||
                             name == "void") {
                             is_type_name = true;
@@ -1821,6 +1879,13 @@ namespace gallt {
                 report_error(expr->base->location, ErrorCode::ExpressionSyntaxError,
                     "operand of increment/decrement must be an lvalue");
             }
+            // 0.4.1 §2：后缀自增/自减修改 const 常量时报 ER 0115
+            // 0.4.1 §2: postfix increment/decrement of a const constant reports ER 0115
+            if (base_type.is_const) {
+                diag_.report_error_template(expr->base->location,
+                    ErrorCode::ConstModification,
+                    { expression_display_name(expr->base.get()) });
+            }
             if (!is_numeric_type(base_type) && base_type.kind != TypeKind::Pointer) {
                 report_error(expr->location, ErrorCode::UnaryOperatorTypeMismatch,
                     "increment/decrement requires arithmetic or pointer type, got '" +
@@ -1845,7 +1910,14 @@ namespace gallt {
                    "struct has no member named '" + expr->member_name + "'");
                 return AST::Type::make_void();
             }
-            return member->type;
+            // 0.4.1 §2 + C++20：const 结构体对象的成员同样是常量
+            // 0.4.1 §2 with the C++20 fallback: members of a const struct object are
+            // const as well
+            AST::Type member_type = member->type;
+            if (base_type.is_const) {
+                member_type.is_const = true;
+            }
+            return member_type;
         }
        case AST::PostfixExpression::Operator::Arrow: {
            if (base_type.kind != TypeKind::Pointer) {
@@ -1867,12 +1939,18 @@ namespace gallt {
                     std::vector<AST::Type>{});
             }
            const auto* member = get_struct_member(*pointee, expr->member_name);
-            if (!member) {
-                report_error(expr->location, ErrorCode::StructMemberNotFound,
-                    "struct has no member named '" + expr->member_name + "'");
+           if (!member) {
+               report_error(expr->location, ErrorCode::StructMemberNotFound,
+                   "struct has no member named '" + expr->member_name + "'");
                 return AST::Type::make_void();
             }
-            return member->type;
+            // 指向 const 结构体的指针：成员按常量处理
+            // A pointer to a const struct yields const members
+            AST::Type member_type = member->type;
+            if (pointee->is_const) {
+                member_type.is_const = true;
+            }
+            return member_type;
         }
         default:
             report_error(expr->location, ErrorCode::ExpressionSyntaxError,
@@ -2031,17 +2109,15 @@ namespace gallt {
         case AST::PrimaryExpression::Kind::Literal: {
             switch (expr->literal_token.type) {
             case TokenType::IntegerLiteral:
-                return AST::Type::make_int();
+                // 0.4.1 §7：整数默认 int，l 后缀 → lint，u 后缀 → uint，
+                // lu 后缀 → luint
+                // 0.4.1 §7: an integer literal is int by default; the l suffix selects
+                // lint, u selects uint and lu selects luint
+                return AST::Type::integer_literal_type(expr->literal_token.lexeme);
             case TokenType::FloatLiteral:
-                // 无 f/F 后缀的浮点字面量默认为 double（Gallt 0.2.txt §7）
-                // A float literal defaults to double unless it carries f/F (§7)
-                if (!expr->literal_token.lexeme.empty()) {
-                    char last = expr->literal_token.lexeme.back();
-                    if (last == 'f' || last == 'F') {
-                        return AST::Type::make_float();
-                    }
-                }
-                return AST::Type::make_double();
+                // 无 f/F 后缀的浮点字面量默认为 double（Gallt 0.4.1 §7）
+                // A float literal defaults to double unless it carries f/F (0.4.1 §7)
+                return AST::Type::float_literal_type(expr->literal_token.lexeme);
             case TokenType::CharLiteral:
                 return AST::Type::make_char();
             case TokenType::StringLiteral:
@@ -2265,15 +2341,22 @@ namespace gallt {
     }
 
     AST::Type TypeChecker::usual_arithmetic_conversion(const AST::Type& left, const AST::Type& right) {
-        if (left == right) return left;
-        int rank_left = 0, rank_right = 0;
-        if (left.kind == TypeKind::Bool || left.kind == TypeKind::Char || left.kind == TypeKind::Int) rank_left = 1;
-        else if (left.kind == TypeKind::Float) rank_left = 2;
-        else if (left.kind == TypeKind::Double) rank_left = 3;
-        if (right.kind == TypeKind::Bool || right.kind == TypeKind::Char || right.kind == TypeKind::Int) rank_right = 1;
-        else if (right.kind == TypeKind::Float) rank_right = 2;
-        else if (right.kind == TypeKind::Double) rank_right = 3;
-        return (rank_left >= rank_right) ? left : right;
+        // 算术运算的结果是右值：const 限定不会传染到表达式类型上
+        // The result of an arithmetic operation is an rvalue, so const does not
+        // propagate into the expression type.
+        auto without_const = [](AST::Type t) {
+            t.is_const = false;
+            return t;
+        };
+        if (left == right) return without_const(left);
+        // 0.4.1 §7：提升优先级 char < uchar < int < uint < lint < luint < float < double；
+        // 低精度自动提升为高精度，二者同档时沿用 0.4 的规则（取左值类型）。
+        // 0.4.1 §7 promotion ladder: char < uchar < int < uint < lint < luint <
+        // float < double. A lower-precision operand is promoted to the higher one; for
+        // equal ranks the 0.4 rule (left operand wins) is preserved.
+        const int rank_left = left.promotion_rank();
+        const int rank_right = right.promotion_rank();
+        return without_const((rank_left >= rank_right) ? left : right);
     }
 
     bool TypeChecker::is_numeric_type(const AST::Type& type) const {
@@ -2319,8 +2402,11 @@ namespace gallt {
 
     bool TypeChecker::is_complete_type(const AST::Type& type) {
         if (type.kind == TypeKind::Void) return true;
-        if (type.kind == TypeKind::Int || type.kind == TypeKind::Float ||
+        if (type.kind == TypeKind::Int || type.kind == TypeKind::Lint ||
+            type.kind == TypeKind::Uint || type.kind == TypeKind::Luint ||
+            type.kind == TypeKind::Float ||
             type.kind == TypeKind::Double || type.kind == TypeKind::Char ||
+            type.kind == TypeKind::Uchar ||
             type.kind == TypeKind::Bool || type.kind == TypeKind::String ||
             type.kind == TypeKind::File) {
             return true;
@@ -2562,12 +2648,248 @@ namespace gallt {
         return std::nullopt;
     }
 
-   bool TypeChecker::is_constant_integer_expression(AST::Expression* expr, size_t* out_value) {
+    bool TypeChecker::is_constant_integer_expression(AST::Expression* expr, size_t* out_value) {
         if (auto val = evaluate_const_expression(expr)) {
             if (out_value) *out_value = *val;
             return true;
         }
         return false;
+    }
+
+    // ============================================================================
+    // 0.4.1 §2/§7：const 限定符语义
+    // 0.4.1 §2/§7: const qualifier semantics
+    // ============================================================================
+
+    void TypeChecker::enter_scope() {
+        // 符号表作用域与 const 常量取值表同步进出（0.4.1 §2）
+        // The symbol-table scope and the const value table enter/leave together
+        sym_table_.enter_scope();
+        const_values_.emplace_back();
+    }
+
+    void TypeChecker::exit_scope() {
+        sym_table_.exit_scope();
+        if (!const_values_.empty()) {
+            const_values_.pop_back();
+        }
+    }
+
+    std::optional<long long> TypeChecker::evaluate_const_integer_expression(
+        AST::Expression* expr) {
+        if (expr == nullptr) return std::nullopt;
+        ConstantEvaluationContext ctx;
+        // 常量名解析：按作用域由内向外查找已记录的 const 常量（0.4.1 §2）
+        // Constant-name resolution: search the recorded const constants from the
+        // innermost scope outward (0.4.1 §2)
+        ctx.lookup_constant = [this](const std::string& name, long long& int_value,
+            double& float_value, bool& is_float) {
+            for (auto it = const_values_.rbegin(); it != const_values_.rend(); ++it) {
+                auto found = it->find(name);
+                if (found != it->end()) {
+                    int_value = found->second;
+                    float_value = static_cast<double>(found->second);
+                    is_float = false;
+                    return true;
+                }
+            }
+            return false;
+        };
+        long long int_value = 0;
+        double float_value = 0.0;
+        bool is_float = false;
+        if (!evaluate_constant_expression(expr, int_value, float_value, is_float, ctx)) {
+            return std::nullopt;
+        }
+        if (is_float) {
+            const auto truncated = static_cast<long long>(float_value);
+            if (static_cast<double>(truncated) != float_value) return std::nullopt;
+            int_value = truncated;
+        }
+        if (int_value < 0) return std::nullopt;
+        return int_value;
+    }
+
+    void TypeChecker::record_const_value(const std::string& name, AST::Expression* initializer,
+        const AST::Type& type) {
+        // 只有整数/字符/布尔常量可用于常量整数表达式
+        // Only integer, character and boolean constants take part in constant integer
+        // expressions
+        if (!type.is_integer()) return;
+        auto value = evaluate_const_integer_expression(initializer);
+        if (!value.has_value()) return;
+        if (const_values_.empty()) {
+            const_values_.emplace_back();
+        }
+        const_values_.back()[name] = *value;
+    }
+
+    std::string TypeChecker::expression_display_name(const AST::Expression* expr) {
+        using namespace AST;
+        if (expr == nullptr) return "<expression>";
+        if (auto* prim = dynamic_cast<const PrimaryExpression*>(expr)) {
+            switch (prim->kind) {
+            case PrimaryExpression::Kind::Identifier:
+                return prim->identifier;
+            case PrimaryExpression::Kind::Parens:
+                return expression_display_name(prim->paren_expr.get());
+            default:
+                return "<expression>";
+            }
+        }
+        if (auto* post = dynamic_cast<const PostfixExpression*>(expr)) {
+            switch (post->op) {
+            case PostfixExpression::Operator::Subscript:
+            case PostfixExpression::Operator::Increment:
+            case PostfixExpression::Operator::Decrement:
+                return expression_display_name(post->base.get());
+            case PostfixExpression::Operator::Dot:
+            case PostfixExpression::Operator::Arrow:
+                if (!post->member_name.empty()) return post->member_name;
+                return expression_display_name(post->base.get());
+            default:
+                return "<expression>";
+            }
+        }
+        if (auto* un = dynamic_cast<const UnaryExpression*>(expr)) {
+            if (un->op == UnaryExpression::Operator::Dereference ||
+                un->op == UnaryExpression::Operator::Increment ||
+                un->op == UnaryExpression::Operator::Decrement) {
+                return expression_display_name(un->operand.get());
+            }
+        }
+        return "<expression>";
+    }
+
+    bool TypeChecker::is_compile_time_constant_expression(AST::Expression* expr) {
+        using namespace AST;
+        if (expr == nullptr) return false;
+
+        // 字面量（整数、浮点、字符、字符串、布尔）都是编译期常量（0.4.1 §19）
+        // Literals (integer, float, char, string, bool) are compile-time constants (§19)
+        if (auto* prim = dynamic_cast<PrimaryExpression*>(expr)) {
+            switch (prim->kind) {
+            case PrimaryExpression::Kind::Literal:
+                return true;
+            case PrimaryExpression::Kind::Parens:
+                return is_compile_time_constant_expression(prim->paren_expr.get());
+            case PrimaryExpression::Kind::Identifier: {
+                // 只允许引用其它 const 常量；普通变量不是编译期常量（ER 0116）
+                // Only other const constants may be referenced; a plain variable is
+                // not a compile-time constant (ER 0116)
+                Symbol* sym = lookup_symbol(prim->identifier, false);
+                return sym != nullptr && sym->type.is_const;
+            }
+            default:
+                return false;
+            }
+        }
+
+        if (auto* un = dynamic_cast<UnaryExpression*>(expr)) {
+            switch (un->op) {
+            case UnaryExpression::Operator::UnaryPlus:
+            case UnaryExpression::Operator::UnaryMinus:
+            case UnaryExpression::Operator::LogicalNot:
+                return is_compile_time_constant_expression(un->operand.get());
+            default:
+                // 取地址、解引用、自增、自减不允许出现在编译期常量表达式中
+                // Address-of, dereference and increment/decrement are not allowed
+                return false;
+            }
+        }
+        if (auto* e = dynamic_cast<AdditiveExpression*>(expr)) {
+            return is_compile_time_constant_expression(e->left.get()) &&
+                is_compile_time_constant_expression(e->right.get());
+        }
+        if (auto* e = dynamic_cast<MultiplicativeExpression*>(expr)) {
+            return is_compile_time_constant_expression(e->left.get()) &&
+                is_compile_time_constant_expression(e->right.get());
+        }
+        if (auto* e = dynamic_cast<PowerExpression*>(expr)) {
+            return is_compile_time_constant_expression(e->left.get()) &&
+                is_compile_time_constant_expression(e->right.get());
+        }
+        if (auto* e = dynamic_cast<ComparisonExpression*>(expr)) {
+            return is_compile_time_constant_expression(e->left.get()) &&
+                is_compile_time_constant_expression(e->right.get());
+        }
+        if (auto* e = dynamic_cast<LogicalAndExpression*>(expr)) {
+            return is_compile_time_constant_expression(e->left.get()) &&
+                is_compile_time_constant_expression(e->right.get());
+        }
+        if (auto* e = dynamic_cast<LogicalOrExpression*>(expr)) {
+            return is_compile_time_constant_expression(e->left.get()) &&
+                is_compile_time_constant_expression(e->right.get());
+        }
+        if (auto* post = dynamic_cast<PostfixExpression*>(expr)) {
+            switch (post->op) {
+            case PostfixExpression::Operator::Cast:
+                // 类型转换：转换结果仍须是编译期常量（0.4.1 §19）
+                // A cast keeps the result constant only when the operand is constant
+                return is_compile_time_constant_expression(post->base.get()) &&
+                    (post->cast_type.is_arithmetic() ||
+                        post->cast_type.kind == TypeKind::String);
+            case PostfixExpression::Operator::FunctionCall: {
+                // 编译期内建函数 size / align 在参数可确定时是编译期常量（§19）
+                // The compile-time builtins size/align are constant when the argument
+                // is determinable (§19)
+                auto* callee = dynamic_cast<PrimaryExpression*>(post->base.get());
+                if (callee == nullptr ||
+                    callee->kind != PrimaryExpression::Kind::Identifier) {
+                    return false;
+                }
+                if (callee->identifier != "size" && callee->identifier != "align") {
+                    return false;
+                }
+                return post->arguments.size() == 1 &&
+                    is_compile_time_constant_expression(post->arguments[0].get());
+            }
+            default:
+                // 下标、成员访问、自增自减不是编译期常量表达式
+                // Subscript, member access and increment/decrement are not
+                return false;
+            }
+        }
+        // 赋值、构造、拷贝/移动等含副作用，均不是编译期常量表达式
+        // Assignment, construction and copy/move carry side effects and are not
+        // compile-time constant expressions
+        return false;
+    }
+
+    void TypeChecker::check_const_declaration(AST::VariableDeclaration* decl) {
+        const std::string& name = decl->name;
+        // 没有初始化器 → 常量无法在编译期求值（ER 0116）
+        // Without an initializer the constant cannot be evaluated at compile time
+        if (decl->initializer == nullptr) {
+            diag_.report_error_template(decl->location,
+                ErrorCode::ConstCannotStoreVariable, { name });
+            return;
+        }
+        // 记录可在常量整数表达式（如数组长度）中使用的常量取值（0.4.1 §2/§7）
+        // Record the value of a constant so later constant integer expressions (array
+        // lengths) can use it (0.4.1 §2/§7)
+        if (auto* expr_init = dynamic_cast<AST::ExpressionInitializer*>(decl->initializer.get())) {
+            record_const_value(name, expr_init->expr.get(), decl->type);
+        }
+        // 递归校验初始化器中的每个表达式都是编译期常量表达式
+        // Validate every initializer expression recursively
+        std::function<void(AST::Initializer*)> check_initializer =
+            [&](AST::Initializer* init) {
+                if (init == nullptr) return;
+                if (auto* expr_init = dynamic_cast<AST::ExpressionInitializer*>(init)) {
+                    if (!is_compile_time_constant_expression(expr_init->expr.get())) {
+                        diag_.report_error_template(init->location,
+                            ErrorCode::ConstCannotStoreVariable, { name });
+                    }
+                    return;
+                }
+                if (auto* arr_init = dynamic_cast<AST::ArrayInitializer*>(init)) {
+                    for (auto& element : arr_init->elements) {
+                        check_initializer(element.get());
+                    }
+                }
+            };
+        check_initializer(decl->initializer.get());
     }
 
     // ============================================================================
@@ -2631,9 +2953,13 @@ namespace gallt {
         std::function<std::string(const AST::Type&)> encode = [&](const AST::Type& t) -> std::string {
             switch (t.kind) {
             case TypeKind::Int: return "i";
+            case TypeKind::Lint: return "l";
+            case TypeKind::Uint: return "u";
+            case TypeKind::Luint: return "q";
             case TypeKind::Float: return "f";
             case TypeKind::Double: return "d";
             case TypeKind::Char: return "c";
+            case TypeKind::Uchar: return "h";
             case TypeKind::Bool: return "b";
             case TypeKind::String: return "s";
             case TypeKind::File: return "F";
@@ -2856,9 +3182,16 @@ namespace gallt {
             return (value + alignment - 1) / alignment * alignment;
         };
         switch (type.kind) {
-        case TypeKind::Int: case TypeKind::Float: size = 4; align = 4; return true;
+        // 0.4.1 §2：int/uint 4 字节、lint/luint/double 8 字节、
+        // char/uchar/bool 1 字节；对齐与占用一致
+        // 0.4.1 §2: int/uint are 4 bytes, lint/luint/double 8 bytes, char/uchar/bool
+        // one byte; alignment equals the size for these scalar kinds
+        case TypeKind::Int: case TypeKind::Uint:
+        case TypeKind::Float: size = 4; align = 4; return true;
+        case TypeKind::Lint: case TypeKind::Luint:
         case TypeKind::Double: size = 8; align = 8; return true;
-        case TypeKind::Char: case TypeKind::Bool: size = 1; align = 1; return true;
+        case TypeKind::Char: case TypeKind::Uchar:
+        case TypeKind::Bool: size = 1; align = 1; return true;
         case TypeKind::String: size = 32; align = 8; return true;
         case TypeKind::File: size = 8; align = 8; return true;
         case TypeKind::Pointer:
@@ -2948,15 +3281,23 @@ namespace gallt {
         constexpr int kExact = 0;
         constexpr int kPromotion = 100;
         constexpr int kConversion = 200;
-        // 算术链位置：char/bool 与 int 视为同一档，int < float < double
-        // Position on the arithmetic ladder: char/bool share int's slot; int < float < double
+        // 算术链位置：0.4.1 §7 的提升优先级 char < uchar < int < uint < lint < luint <
+        // float < double；bool 不在文档链上，按 C++20 与 char 同档。
+        // Position on the arithmetic ladder per 0.4.1 §7: char < uchar < int < uint <
+        // lint < luint < float < double. bool is not on the documented ladder and
+        // shares char's slot per C++20.
         auto arithmetic_position = [](const AST::Type& t) -> int {
             switch (t.kind) {
             case TypeKind::Char:
             case TypeKind::Bool:
-            case TypeKind::Int: return 0;
-            case TypeKind::Float: return 1;
-            case TypeKind::Double: return 2;
+                return 0;
+            case TypeKind::Uchar: return 1;
+            case TypeKind::Int: return 2;
+            case TypeKind::Uint: return 3;
+            case TypeKind::Lint: return 4;
+            case TypeKind::Luint: return 5;
+            case TypeKind::Float: return 6;
+            case TypeKind::Double: return 7;
             default: return -1;
             }
         };
@@ -2972,10 +3313,23 @@ namespace gallt {
         const int from_pos = arithmetic_position(from);
         const int to_pos = arithmetic_position(to);
         if (from_pos >= 0 && to_pos >= 0) {
-            // char/bool → int 属于整数提升；float → double 属于浮点提升
-            // char/bool -> int is an integral promotion; float -> double is a floating one
-            bool promotion = (from_pos == 0 && to_pos == 0 && from != to) ||
-                (from_pos == 1 && to_pos == 2);
+            // 提升按 C++20 的整数提升/浮点提升定义（文档 §18 只要求“精确匹配优于
+            // 隐式转换”，未细化提升分类）：
+            //   - bool/char/uchar → int/uint 为整数提升
+            //   - float → double 为浮点提升
+            // 其余均为隐式转换（含截断），与 0.4 的判定保持一致。
+            // Promotions follow C++20 integer/floating promotions (§18 only requires
+            // "exact match beats implicit conversion"):
+            //   - bool/char/uchar -> int/uint is an integral promotion
+            //   - float -> double is a floating promotion
+            // Everything else is a conversion (including truncation), as in 0.4.
+            const bool small_integer = from.kind == TypeKind::Bool ||
+                from.kind == TypeKind::Char || from.kind == TypeKind::Uchar;
+            const bool integral_promotion = small_integer &&
+                (to.kind == TypeKind::Int || to.kind == TypeKind::Uint);
+            const bool floating_promotion = from.kind == TypeKind::Float &&
+                to.kind == TypeKind::Double;
+            const bool promotion = integral_promotion || floating_promotion;
             int distance = std::abs(to_pos - from_pos);
             if (distance == 0) distance = 1;   // char ↔ bool 等同档不同类型
             return (promotion ? kPromotion : kConversion) + distance;

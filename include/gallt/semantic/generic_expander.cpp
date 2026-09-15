@@ -19,9 +19,12 @@ namespace gallt {
 
     namespace {
         bool is_builtin_type_name(const std::string& name) {
-            return name == "int" || name == "float" || name == "double" ||
-                name == "char" || name == "bool" || name == "string" ||
-                name == "file" || name == "void";
+            // 0.4.1 §2：新增 lint / uint / luint / uchar
+            // 0.4.1 §2: lint / uint / luint / uchar are added
+            return name == "int" || name == "lint" || name == "uint" ||
+                name == "luint" || name == "float" || name == "double" ||
+                name == "char" || name == "uchar" || name == "bool" ||
+                name == "string" || name == "file" || name == "void";
         }
 
         // 规范化实参列表文本，用于诊断与命名修饰
@@ -615,9 +618,17 @@ namespace gallt {
         std::size_t& align, const Substitution& sub) const {
         // 内建类型（第 2 章）
         // Builtin types (§2)
-        if (type_name == "int" || type_name == "float") { size = 4; align = 4; return true; }
-        if (type_name == "double") { size = 8; align = 8; return true; }
-        if (type_name == "char" || type_name == "bool") { size = 1; align = 1; return true; }
+        // 0.4.1 §2：int/uint 4 字节，lint/luint/double 8 字节，char/uchar/bool 1 字节
+        // 0.4.1 §2: int/uint are 4 bytes, lint/luint/double 8, char/uchar/bool one byte
+        if (type_name == "int" || type_name == "uint" || type_name == "float") {
+            size = 4; align = 4; return true;
+        }
+        if (type_name == "lint" || type_name == "luint" || type_name == "double") {
+            size = 8; align = 8; return true;
+        }
+        if (type_name == "char" || type_name == "uchar" || type_name == "bool") {
+            size = 1; align = 1; return true;
+        }
         if (type_name == "string") { size = 32; align = 8; return true; }
         if (type_name == "file") { size = 8; align = 8; return true; }
         // 泛型参数名 → 其绑定的具体类型
@@ -1994,9 +2005,13 @@ namespace gallt {
         // Generic parameters, constant parameters, builtin types and known structs
         if (param_type_of(name, sub, out)) return true;
         if (name == "int") { out = AST::Type::make_int(); return true; }
+        if (name == "lint") { out = AST::Type::make_lint(); return true; }
+        if (name == "uint") { out = AST::Type::make_uint(); return true; }
+        if (name == "luint") { out = AST::Type::make_luint(); return true; }
         if (name == "float") { out = AST::Type::make_float(); return true; }
         if (name == "double") { out = AST::Type::make_double(); return true; }
         if (name == "char") { out = AST::Type::make_char(); return true; }
+        if (name == "uchar") { out = AST::Type::make_uchar(); return true; }
         if (name == "bool") { out = AST::Type::make_bool(); return true; }
         if (name == "string") { out = AST::Type::make_string(); return true; }
         if (name == "file") { out = AST::Type::make_file(); return true; }
@@ -2158,7 +2173,15 @@ namespace gallt {
         // 单一类型判定属性
         // Single type-predicate properties
         auto matches = [&](TypeKind kind) { out = (type.kind == kind); return true; };
-        if (property == "is_integer") return matches(TypeKind::Int);
+        // 0.4.1 §2：is_integer 覆盖全部整数型（int / lint / uint / luint）。
+        // char/uchar/bool 仍各自有 is_char / is_bool 判定，保持 0.4 的语义。
+        // 0.4.1 §2: is_integer covers every integer type (int / lint / uint / luint);
+        // char/uchar/bool keep their own is_char / is_bool predicates as in 0.4.
+        if (property == "is_integer") {
+            out = type.kind == TypeKind::Int || type.kind == TypeKind::Lint ||
+                type.kind == TypeKind::Uint || type.kind == TypeKind::Luint;
+            return true;
+        }
         if (property == "is_float") return matches(TypeKind::Float);
         if (property == "is_double") return matches(TypeKind::Double);
         if (property == "is_char") return matches(TypeKind::Char);

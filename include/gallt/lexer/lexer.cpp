@@ -21,9 +21,15 @@ namespace gallt {
         const std::unordered_map<std::string_view, TokenType> KEYWORD_MAP = {
             // 类型 (Types)
             {"int", TokenType::Keyword_Int},
+            // 0.4.1 新增整型/无符号类型说明符 (Gallt 0.4.1.txt §2)
+            // Added in 0.4.1: long/unsigned type specifiers (Gallt 0.4.1.txt §2)
+            {"lint", TokenType::Keyword_Lint},
+            {"uint", TokenType::Keyword_Uint},
+            {"luint", TokenType::Keyword_Luint},
             {"float", TokenType::Keyword_Float},
             {"double", TokenType::Keyword_Double},
             {"char", TokenType::Keyword_Char},
+            {"uchar", TokenType::Keyword_Uchar},
             {"bool", TokenType::Keyword_Bool},
             {"string", TokenType::Keyword_String},
             {"file", TokenType::Keyword_File},
@@ -54,6 +60,9 @@ namespace gallt {
             {"access", TokenType::Keyword_Access},
             {"addition", TokenType::Keyword_Addition},
             {"emit", TokenType::Keyword_Emit},
+            // 0.4.1 新增：类型限定符 (Gallt 0.4.1.txt §2)
+            // Added in 0.4.1: the const type qualifier (Gallt 0.4.1.txt §2)
+            {"const", TokenType::Keyword_Const},
         };
 
         // 检查字符是否为标识符的合法起始字符 (字母或下划线)
@@ -96,6 +105,31 @@ namespace gallt {
         // Check if character is an octal digit
         bool is_octal_digit(char c) noexcept {
             return c >= '0' && c <= '7';
+        }
+
+        // 0.4.1 §7：数值字面量后缀合法性
+        // 整数字面量允许 l/L、u/U、lu/Lu/lU/LU；浮点字面量仅允许 f/F。
+        // 0.4.1 §7: valid numeric literal suffixes. Integer literals accept
+        // l/L, u/U and lu/Lu/lU/LU; floating literals accept only f/F.
+        bool is_valid_integer_suffix(std::string_view suffix) noexcept {
+            auto lower = [](char c) {
+                return static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            };
+            if (suffix.size() == 1) {
+                char c = lower(suffix[0]);
+                return c == 'l' || c == 'u';
+            }
+            if (suffix.size() == 2) {
+                char a = lower(suffix[0]);
+                char b = lower(suffix[1]);
+                return a == 'l' && b == 'u';
+            }
+            return false;
+        }
+
+        bool is_valid_float_suffix(std::string_view suffix) noexcept {
+            return suffix.size() == 1 &&
+                (suffix[0] == 'f' || suffix[0] == 'F');
         }
     } // anonymous namespace
 
@@ -369,6 +403,34 @@ namespace gallt {
         bool is_float = false;
         bool has_exponent = false;
 
+        // 后缀扫描 + Token 构造（0.4.1 §7）
+        // 整数字面量后缀：l/L → lint，u/U → uint，lu/Lu/lU/LU → luint
+        // 浮点字面量后缀：f/F → float
+        // Suffix scan and token construction (0.4.1 §7): integer literals accept
+        // l/L, u/U and lu/Lu/lU/LU; floating literals accept only f/F.
+        auto finish_number = [&](bool as_float) {
+            std::size_t suffix_start = position_;
+            while (!is_at_end() &&
+                (std::isalnum(static_cast<unsigned char>(peek())) || peek() == '_')) {
+                advance();
+            }
+            std::string_view suffix = source_.substr(suffix_start, position_ - suffix_start);
+            if (!suffix.empty()) {
+                const bool valid = as_float ? is_valid_float_suffix(suffix)
+                                            : is_valid_integer_suffix(suffix);
+                if (!valid) {
+                    // ER 0025：0.4.1 更新为允许 'f'、'l'、'u' 与 'lu'
+                    // ER 0025: 0.4.1 allows 'f', 'l', 'u' and 'lu'
+                    report_error(ErrorCode::InvalidNumericSuffix,
+                        "invalid numeric literal suffix: only 'f', 'l', 'u' and 'lu' "
+                        "are allowed, got '" + std::string(suffix) + "'");
+                }
+            }
+            std::string_view lexeme = source_.substr(start_pos, position_ - start_pos);
+            return Token{ as_float ? TokenType::FloatLiteral : TokenType::IntegerLiteral,
+                start_loc, lexeme };
+        };
+
         // 检查十六进制前缀 (Check hex prefix)
         if (peek() == '0' && (peek_next() == 'x' || peek_next() == 'X')) {
             advance(); // 跳过 '0'
@@ -387,9 +449,10 @@ namespace gallt {
                 advance();
             }
 
-            // 十六进制不支持后缀和浮点
-            std::string_view lexeme = source_.substr(start_pos, position_ - start_pos);
-            return Token{ TokenType::IntegerLiteral, start_loc, lexeme };
+            // 十六进制不带小数/指数，但仍是整数字面量，允许整数后缀
+            // Hexadecimal literals carry no fraction/exponent but still accept
+            // integer suffixes
+            return finish_number(false);
         }
 
         // 八进制前缀 (Octal prefix) — 以 0 开头且后跟八进制数字
@@ -398,9 +461,9 @@ namespace gallt {
             while (!is_at_end() && is_octal_digit(peek())) {
                 advance();
             }
-            // 八进制不允许后缀
-            std::string_view lexeme = source_.substr(start_pos, position_ - start_pos);
-            return Token{ TokenType::IntegerLiteral, start_loc, lexeme };
+            // 八进制同样允许整数后缀（0.4.1 §7 未做限制）
+            // Octal literals accept integer suffixes as well (0.4.1 §7)
+            return finish_number(false);
         }
 
         // 整数或浮点数 (Integer or float)
@@ -447,31 +510,8 @@ namespace gallt {
             }
         }
 
-        // 检查后缀 (Check suffix)
-        if (!is_at_end() && (peek() == 'f' || peek() == 'F')) {
-            if (is_float) {
-                is_float = true; // 保持
-                advance(); // 跳过 'f'/'F'
-            }
-            else {
-                // ER 0025: 数值字面量后缀无效：仅允许 'f' 表示 float 类型
-                // ER 0025: Invalid numeric literal suffix: only 'f' allowed for float type
-                std::string suffix(1, peek());
-                report_error(ErrorCode::InvalidNumericSuffix,
-                    "invalid numeric literal suffix, only 'f' allowed for float type, got '" + suffix + "'");
-                // 仍然跳过后缀以防无限循环
-                advance();
-            }
-        }
-
-        std::string_view lexeme = source_.substr(start_pos, position_ - start_pos);
-
-        if (is_float) {
-            return Token{ TokenType::FloatLiteral, start_loc, lexeme };
-        }
-        else {
-            return Token{ TokenType::IntegerLiteral, start_loc, lexeme };
-        }
+        (void)has_exponent;
+        return finish_number(is_float);
     }
 
     // ============================================================================

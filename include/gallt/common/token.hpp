@@ -21,9 +21,15 @@ namespace gallt {
         // 参照 Gallt 0.2.txt §2 (类型) 和 §8, §9, §11, §12, §14, §15, §16, §17
         // Reference: Gallt 0.2.txt §2 (Types) and §8, §9, §11, §12, §14, §15, §16, §17
         Keyword_Int,        // int
+        // 0.4.1 新增整型/无符号类型说明符 (Gallt 0.4.1.txt §2)
+        // Added in 0.4.1: long/unsigned type specifiers (Gallt 0.4.1.txt §2)
+        Keyword_Lint,       // lint (64 位有符号 / 64-bit signed)
+        Keyword_Uint,       // uint (32 位无符号 / 32-bit unsigned)
+        Keyword_Luint,      // luint (64 位无符号 / 64-bit unsigned)
         Keyword_Float,      // float
         Keyword_Double,     // double
         Keyword_Char,       // char
+        Keyword_Uchar,      // uchar (8 位无符号 / 8-bit unsigned)
         Keyword_Bool,       // bool
         Keyword_String,     // string
         Keyword_File,       // file (Gallt 0.2.txt §2：文件类型)
@@ -56,6 +62,9 @@ namespace gallt {
         Keyword_Access,     // access
         Keyword_Addition,   // addition
         Keyword_Emit,       // emit
+        // 0.4.1 新增：类型限定符 const (Gallt 0.4.1.txt §2)
+        // Added in 0.4.1: the const type qualifier (Gallt 0.4.1.txt §2)
+        Keyword_Const,      // const
 
         // ---- 标识符 (Identifier) ----
         Identifier,
@@ -144,7 +153,9 @@ namespace gallt {
 
         // 判断是否属于关键字类别
         bool is_keyword() const noexcept {
-            return type >= TokenType::Keyword_Int && type <= TokenType::Keyword_Emit;
+            // 关键字区间以最后一个关键字枚举值为界（0.4.1 起为 Keyword_Const）
+            // The keyword range ends at the last keyword enumerator (Keyword_Const since 0.4.1)
+            return type >= TokenType::Keyword_Int && type <= TokenType::Keyword_Const;
         }
 
         // 判断是否为字面量

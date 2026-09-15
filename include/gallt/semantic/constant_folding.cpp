@@ -43,9 +43,17 @@ namespace gallt {
         // 内建类型的大小与对齐（与代码生成阶段保持一致）
         // Builtin type sizes and alignments (kept consistent with codegen)
         bool builtin_layout(const std::string& name, std::size_t& size, std::size_t& align) {
-            if (name == "int" || name == "float") { size = 4; align = 4; return true; }
-            if (name == "double") { size = 8; align = 8; return true; }
-            if (name == "char" || name == "bool") { size = 1; align = 1; return true; }
+            // 0.4.1 §2：新增 lint / uint / luint / uchar
+            // 0.4.1 §2: lint / uint / luint / uchar are added
+            if (name == "int" || name == "uint" || name == "float") {
+                size = 4; align = 4; return true;
+            }
+            if (name == "lint" || name == "luint" || name == "double") {
+                size = 8; align = 8; return true;
+            }
+            if (name == "char" || name == "uchar" || name == "bool") {
+                size = 1; align = 1; return true;
+            }
             if (name == "string") { size = 32; align = 8; return true; }
             if (name == "file") { size = 8; align = 8; return true; }
             if (name == "void") { size = 0; align = 1; return true; }
@@ -86,7 +94,18 @@ namespace gallt {
             switch (target.kind) {
             case TypeKind::Int:
                 return make_int(v.is_float ? static_cast<long long>(v.float_value) : v.int_value);
+            case TypeKind::Lint:
+                return make_int(v.is_float ? static_cast<long long>(v.float_value) : v.int_value);
+            case TypeKind::Uint:
+                return make_int(static_cast<unsigned int>(v.is_float
+                    ? static_cast<long long>(v.float_value) : v.int_value));
+            case TypeKind::Luint:
+                return make_int(static_cast<long long>(static_cast<unsigned long long>(
+                    v.is_float ? static_cast<long long>(v.float_value) : v.int_value)));
             case TypeKind::Char:
+                return make_int(static_cast<unsigned char>(v.is_float
+                    ? static_cast<long long>(v.float_value) : v.int_value));
+            case TypeKind::Uchar:
                 return make_int(static_cast<unsigned char>(v.is_float
                     ? static_cast<long long>(v.float_value) : v.int_value));
             case TypeKind::Bool:
@@ -109,7 +128,9 @@ namespace gallt {
                 case PrimaryExpression::Kind::Literal: {
                     const Token& tok = prim->literal_token;
                     if (tok.type == TokenType::IntegerLiteral) {
-                        std::string_view lexeme = tok.lexeme;
+                        // 0.4.1 §7：先去掉整数字面量后缀（l/L、u/U、lu/Lu/lU/LU）
+                        // 0.4.1 §7: strip the integer literal suffix first
+                        std::string_view lexeme = Type::strip_integer_suffix(tok.lexeme);
                         int base = 10;
                         if (lexeme.size() > 2 && lexeme[0] == '0' &&
                             (lexeme[1] == 'x' || lexeme[1] == 'X')) {

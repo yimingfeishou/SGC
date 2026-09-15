@@ -84,7 +84,7 @@ namespace gallt {
         // ER 0024: 字符串常量格式错误：未闭合的字符串字面量
         UnclosedStringLiteral = 24,              // "字符串常量格式错误：未闭合的字符串字面量"
         // ER 0025: 数值字面量后缀无效
-        InvalidNumericSuffix = 25,               // "数值字面量后缀无效：仅允许 'f' 表示 float 类型，得到 '[suffix]'"
+        InvalidNumericSuffix = 25,               // 0.4.1: "数值字面量后缀无效：仅允许 'f'、'l'、'u' 和 'lu' 表示类型，得到 '[suffix]'"
         // ER 0026: else 语句缺少匹配的 if
         ElseWithoutIf = 26,                      // "else 语句缺少匹配的 if"
         // ER 0027: return 语句出现在函数体之外
@@ -275,6 +275,13 @@ namespace gallt {
         AccessNamespaceNameConflict = 113,       // "access namespace 引入 '[name]' 与当前作用域已有声明冲突"
         // ER 0114: addition namespace 合并后成员与已有声明冲突
         AdditionNamespaceMemberConflict = 114,   // "addition namespace 合并后成员 '[member]' 与已有声明冲突"
+
+        // ---- Gallt 0.4.1.txt §2/§7 新增的 const 限定符错误码 ----
+        // ---- Error codes for the const qualifier added in Gallt 0.4.1.txt §2/§7 ----
+        // ER 0115: 试图修改常量
+        ConstModification = 115,                 // "试图修改常量 '[identifier]'"
+        // ER 0116: 常量无法存储变量
+        ConstCannotStoreVariable = 116,          // "常量 '[identifier]' 无法存储变量"
     };
 
     // 运行时错误 (RTER 0001 ~ RTER 0002)

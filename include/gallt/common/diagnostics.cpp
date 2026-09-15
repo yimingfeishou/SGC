@@ -44,11 +44,11 @@ namespace gallt {
             { ErrorCode::MissingBraces, "control statement requires a '{' block to introduce a scope" },
             { ErrorCode::BreakOutsideLoop, "'break' may only appear inside a loop body" },
             { ErrorCode::ExpressionSyntaxError, "expression syntax error: unexpected token '[token]'" },
-            { ErrorCode::MainSignatureError, "invalid main signature: must be 'int main()' or 'int main(int count, char *array[])'" },
+            { ErrorCode::MainSignatureError, "invalid main signature: must be 'int main()' or 'int main(int count, char* array[])'" },
             { ErrorCode::MainReturnTypeError, "main must return int, but returns '[type]'" },
             { ErrorCode::InvalidCharLiteral, "invalid character constant: empty character or invalid escape sequence" },
             { ErrorCode::UnclosedStringLiteral, "invalid string constant: unterminated string literal" },
-            { ErrorCode::InvalidNumericSuffix, "invalid numeric literal suffix: only 'f' for float is allowed, got '[suffix]'" },
+            { ErrorCode::InvalidNumericSuffix, "invalid numeric literal suffix: only 'f', 'l', 'u' and 'lu' are allowed, got '[suffix]'" },
             { ErrorCode::ElseWithoutIf, "'else' without a matching 'if'" },
             { ErrorCode::ReturnOutsideFunction, "'return' outside of a function body" },
             { ErrorCode::StatementInGlobalScope, "executable statements are not allowed at global scope" },
@@ -122,8 +122,6 @@ namespace gallt {
             { ErrorCode::SpecialMemberAmbiguous, "special member function '[function]' overload resolution is ambiguous" },
             { ErrorCode::SpecialMemberOnNonStruct, "type '[type]' is not a struct; special member functions cannot be defined" },
             { ErrorCode::SpecialMemberNameConflict, "special member function '[function]' conflicts with an ordinary function of the same name" },
-            // Gallt 0.4.txt §19/§21 命名空间与编译期代码生成
-            // Gallt 0.4.txt §19/§21 namespaces and compile-time code generation
             { ErrorCode::KeywordAsIdentifier, "compiler keyword '[identifier]' was defined as an identifier" },
             { ErrorCode::NamespaceUndefined, "namespace '[namespace]' is undefined" },
             { ErrorCode::NamespaceRedefined, "namespace '[namespace]' is redefined" },
@@ -140,6 +138,8 @@ namespace gallt {
             { ErrorCode::CompileTimeConditionNotBoolean, "compile-time condition must be a compile-time boolean constant, got '[expr]'" },
             { ErrorCode::AccessNamespaceNameConflict, "name '[name]' imported by access namespace conflicts with an existing declaration in the current scope" },
             { ErrorCode::AdditionNamespaceMemberConflict, "member '[member]' merged by addition namespace conflicts with an existing declaration" },
+            { ErrorCode::ConstModification, "cannot modify constant '[identifier]'" },
+            { ErrorCode::ConstCannotStoreVariable, "constant '[identifier]' cannot store a variable" },
         };
     } // anonymous namespace
 

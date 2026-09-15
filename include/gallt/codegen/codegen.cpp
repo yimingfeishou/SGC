@@ -238,9 +238,15 @@ namespace {
     std::string CodeGenerator::llvm_type(const AST::Type& type) {
         switch (type.kind) {
         case TypeKind::Int: return "i32";
+        // 0.4.1 §2：uint → i32，lint/luint → i64，uchar → i8
+        // 0.4.1 §2: uint maps to i32, lint/luint to i64 and uchar to i8
+        case TypeKind::Lint: return "i64";
+        case TypeKind::Uint: return "i32";
+        case TypeKind::Luint: return "i64";
         case TypeKind::Float: return "float";
         case TypeKind::Double: return "double";
         case TypeKind::Char: return "i8";
+        case TypeKind::Uchar: return "i8";
         case TypeKind::Bool: return "i8";
         case TypeKind::String: return "%struct.gallt.string";
         // Gallt 0.2.txt §2：file 为不透明类型，占用平台指针大小
@@ -403,6 +409,11 @@ namespace {
         // 所有 runtime 函数由随编译器提供的 C 运行库实现
         // Runtime helpers are implemented in the bundled C runtime
         emit_line("declare void @gallt_output_i32(i32)");
+        // 0.4.1 §2：新增类型的输出/输入辅助（uint、lint、luint、uchar）
+        // 0.4.1 §2: output/input helpers for the new types (uint, lint, luint, uchar)
+        emit_line("declare void @gallt_output_u32(i32)");
+        emit_line("declare void @gallt_output_i64(i64)");
+        emit_line("declare void @gallt_output_u64(i64)");
         emit_line("declare void @gallt_output_f32(float)");
         emit_line("declare void @gallt_output_f64(double)");
         emit_line("declare void @gallt_output_char(i8)");
@@ -410,6 +421,10 @@ namespace {
         emit_line("declare void @gallt_output_ptr(ptr)");
         emit_line("declare void @gallt_output_string(ptr)");
         emit_line("declare void @gallt_input_i32(ptr)");
+        emit_line("declare void @gallt_input_u32(ptr)");
+        emit_line("declare void @gallt_input_i64(ptr)");
+        emit_line("declare void @gallt_input_u64(ptr)");
+        emit_line("declare void @gallt_input_uchar(ptr)");
         emit_line("declare void @gallt_input_f32(ptr)");
         emit_line("declare void @gallt_input_f64(ptr)");
         emit_line("declare void @gallt_input_char(ptr)");
@@ -420,6 +435,9 @@ namespace {
         emit_line("declare void @gallt_string_destroy(ptr)");
         emit_line("declare void @gallt_string_concat(ptr, ptr, ptr)");
         emit_line("declare void @gallt_string_from_i32(ptr, i32)");
+        emit_line("declare void @gallt_string_from_u32(ptr, i32)");
+        emit_line("declare void @gallt_string_from_i64(ptr, i64)");
+        emit_line("declare void @gallt_string_from_u64(ptr, i64)");
         emit_line("declare void @gallt_string_from_f32(ptr, float)");
         emit_line("declare void @gallt_string_from_f64(ptr, double)");
         emit_line("declare void @gallt_string_from_char(ptr, i8)");
@@ -1249,9 +1267,13 @@ namespace {
         };
         switch (type.kind) {
         case TypeKind::Int:
+        case TypeKind::Uint:
         case TypeKind::Float: return 4;
+        case TypeKind::Lint:
+        case TypeKind::Luint:
         case TypeKind::Double: return 8;
         case TypeKind::Char:
+        case TypeKind::Uchar:
         case TypeKind::Bool: return 1;
         case TypeKind::String: return 32;
         case TypeKind::File: return 8;
@@ -1281,9 +1303,13 @@ namespace {
     std::size_t CodeGenerator::type_align(const AST::Type& type) const {
         switch (type.kind) {
         case TypeKind::Int:
+        case TypeKind::Uint:
         case TypeKind::Float: return 4;
+        case TypeKind::Lint:
+        case TypeKind::Luint:
         case TypeKind::Double: return 8;
         case TypeKind::Char:
+        case TypeKind::Uchar:
         case TypeKind::Bool: return 1;
         case TypeKind::String: return 8;
         case TypeKind::File: return 8;
@@ -1740,26 +1766,34 @@ namespace {
             }
             // 普通整数/浮点比较已在上面覆盖；这里用于整型
             // Ordinary integer comparisons fall through here
-            AST::Type common = l.type.is_floating() || r.type.is_floating()
-                ? (l.type.kind == TypeKind::Double || r.type.kind == TypeKind::Double
-                    ? Type::make_double() : Type::make_float())
-                : Type::make_int();
+            // 0.4.1 §7：整型比较按提升优先级选择公共类型；无符号类型使用无符号比较
+            // 0.4.1 §7: integer comparisons use the promoted common type, and unsigned
+            // operands use unsigned comparison predicates
+            AST::Type common = Type::make_int();
+            if (l.type.integer_bit_width() > 0 && r.type.integer_bit_width() > 0) {
+                common = (l.type.promotion_rank() >= r.type.promotion_rank())
+                    ? l.type : r.type;
+                if (common.integer_bit_width() == 8) {
+                    common = Type::make_int();
+                }
+            }
             if (common.kind == TypeKind::Float || common.kind == TypeKind::Double) {
                 return ExprValue{};
             }
             std::string lv = convert_value(l.value, l.type, common);
             std::string rv = convert_value(r.value, r.type, common);
+            const char* prefix = common.is_unsigned_integer() ? "u" : "s";
             std::string op;
             switch (comp->op) {
             case AST::ComparisonExpression::Operator::Equal: op = "eq"; break;
             case AST::ComparisonExpression::Operator::NotEqual: op = "ne"; break;
-            case AST::ComparisonExpression::Operator::Greater: op = "sgt"; break;
-            case AST::ComparisonExpression::Operator::Less: op = "slt"; break;
-            case AST::ComparisonExpression::Operator::GreaterEqual: op = "sge"; break;
-            case AST::ComparisonExpression::Operator::LessEqual: op = "sle"; break;
+            case AST::ComparisonExpression::Operator::Greater: op = std::string(prefix) + "gt"; break;
+            case AST::ComparisonExpression::Operator::Less: op = std::string(prefix) + "lt"; break;
+            case AST::ComparisonExpression::Operator::GreaterEqual: op = std::string(prefix) + "ge"; break;
+            case AST::ComparisonExpression::Operator::LessEqual: op = std::string(prefix) + "le"; break;
             }
             std::string t = new_temp("icmp");
-            emit_line(t + " = icmp " + op + " i32 " + lv + ", " + rv);
+            emit_line(t + " = icmp " + op + " " + llvm_type(common) + " " + lv + ", " + rv);
             ExprValue result;
             result.type = Type::make_bool();
             result.value = new_temp("bool");
@@ -1828,13 +1862,18 @@ namespace {
             if (common.kind == TypeKind::Float || common.kind == TypeKind::Double) {
                 opcode = add->op == AST::AdditiveExpression::Operator::Plus ? "fadd" : "fsub";
             } else {
-                // 整数统一按 i32 运算，char/bool 结果最后截断
-                // Integer arithmetic runs in i32; char/bool results are truncated later
-                AST::Type wide = Type::make_int();
+                // 0.4.1 §7：整数运算在“通常算术转换”后的类型上进行；char/uchar/bool
+                // 保留 0.4 的 i32 计算 + 末尾截断行为。lint/luint 使用 i64。
+                // 0.4.1 §7: integer arithmetic runs in the usual-arithmetic-conversion
+                // type; char/uchar/bool keep the 0.4 i32 computation plus trailing
+                // truncation, while lint/luint compute in i64.
+                if (common.integer_bit_width() == 8) {
+                    common = Type::make_int();
+                }
+                AST::Type wide = common;
                 lv = convert_value(l.value, l.type, wide);
                 rv = convert_value(r.value, r.type, wide);
-                ir_type = "i32";
-                common = wide;
+                ir_type = llvm_type(wide);
                 opcode = add->op == AST::AdditiveExpression::Operator::Plus ? "add" : "sub";
             }
             std::string tmp = new_temp("arith");
@@ -1856,18 +1895,25 @@ namespace {
             if (common.kind == TypeKind::Float || common.kind == TypeKind::Double) {
                 opcode = mul->op == AST::MultiplicativeExpression::Operator::Multiply ? "fmul" : "fdiv";
             } else {
-                AST::Type wide = Type::make_int();
+                // 0.4.1 §7：整数乘除取余按结果类型的位宽与有符号性选择指令
+                // 0.4.1 §7: integer mul/div/rem select the opcode by width and signedness
+                if (common.integer_bit_width() == 8) {
+                    common = Type::make_int();
+                }
+                AST::Type wide = common;
                 lv = convert_value(l.value, l.type, wide);
                 rv = convert_value(r.value, r.type, wide);
-                common = wide;
-                ir_type = "i32";
+                ir_type = llvm_type(wide);
+                const bool unsigned_op = result_type.is_unsigned_integer();
                 // Gallt 0.2.txt §3：% 与 *、/ 同级，整数取余使用 srem
                 // Gallt 0.2.txt §3: '%' shares the precedence of '*' and '/'; integer
-                // remainder is emitted as srem
+                // remainder is emitted as srem/urem depending on signedness (0.4.1 §7)
                 switch (mul->op) {
                 case AST::MultiplicativeExpression::Operator::Multiply: opcode = "mul"; break;
-                case AST::MultiplicativeExpression::Operator::Divide:   opcode = "sdiv"; break;
-                case AST::MultiplicativeExpression::Operator::Remainder: opcode = "srem"; break;
+                case AST::MultiplicativeExpression::Operator::Divide:
+                    opcode = unsigned_op ? "udiv" : "sdiv"; break;
+                case AST::MultiplicativeExpression::Operator::Remainder:
+                    opcode = unsigned_op ? "urem" : "srem"; break;
                 }
             }
             std::string tmp = new_temp("mul");
@@ -1894,19 +1940,15 @@ namespace {
     }
 
     std::string CodeGenerator::to_i64_value(const std::string& value, const AST::Type& type) {
-        if (type.kind == TypeKind::Char) {
-            std::string out = new_temp("sextchar");
-            emit_line(out + " = sext i8 " + value + " to i64");
-            return out;
-        }
-        if (type.kind == TypeKind::Bool) {
-            std::string out = new_temp("zextbool");
-            emit_line(out + " = zext i8 " + value + " to i64");
-            return out;
-        }
-        if (type.kind == TypeKind::Int) {
-            std::string out = new_temp("sextint");
-            emit_line(out + " = sext i32 " + value + " to i64");
+        // 0.4.1 §2：把任意整数类型扩展到 i64 时按有符号性选择 sext/zext
+        // 0.4.1 §2: widening any integer type to i64 uses sext/zext by signedness
+        const int bits = type.integer_bit_width();
+        if (bits > 0) {
+            if (bits == 64) return value;
+            std::string out = new_temp("int64");
+            const char* from_ir = (bits == 32) ? "i32" : "i8";
+            const char* opcode = type.is_unsigned_integer() ? "zext" : "sext";
+            emit_line(out + " = " + opcode + " " + from_ir + " " + value + " to i64");
             return out;
         }
         if (type.kind == TypeKind::Float) {
@@ -1927,6 +1969,17 @@ namespace {
         // 算术类型间转换；指针/函数指针之间直接通过 ptr bitcast
         // Convert arithmetic types; pointer and function-pointer values pass through as ptr
         if (from == to) return value;
+        // 整数位宽与 IR 类型（0.4.1 §2/§7）：char/uchar/bool → i8、int/uint → i32、
+        // lint/luint → i64。有符号性决定扩展与浮点转换指令。
+        // Integer width and IR type (0.4.1 §2/§7): char/uchar/bool -> i8, int/uint ->
+        // i32, lint/luint -> i64. Signedness selects the extension/conversion opcode.
+        auto int_ir = [](int bits) -> const char* {
+            switch (bits) {
+            case 64: return "i64";
+            case 32: return "i32";
+            default: return "i8";
+            }
+        };
         if (from.kind == TypeKind::Array &&
             (to.kind == TypeKind::Pointer || to.kind == TypeKind::Function)) {
             // 数组名已按首元素指针求值，直接作为指针使用
@@ -1942,10 +1995,10 @@ namespace {
                 from.kind == TypeKind::File) return value;
             if (to.kind == TypeKind::Pointer || to.kind == TypeKind::Function) {
                 std::string out = new_temp("inttoptr");
-                if (from.kind == TypeKind::Int) {
-                    emit_line(out + " = inttoptr i32 " + value + " to ptr");
-                } else if (from.kind == TypeKind::Char) {
-                    emit_line(out + " = inttoptr i8 " + value + " to ptr");
+                const int from_bits = from.integer_bit_width();
+                if (from_bits > 0) {
+                    emit_line(out + " = inttoptr " + int_ir(from_bits) + " " + value +
+                        " to ptr");
                 } else {
                     emit_line(out + " = inttoptr i64 0 to ptr");
                 }
@@ -1958,67 +2011,48 @@ namespace {
         if (to.kind == TypeKind::Float) {
             if (from.kind == TypeKind::Double) {
                 emit_line(tmp + " = fptrunc double " + value + " to float");
-            } else if (from.kind == TypeKind::Int || from.kind == TypeKind::Char) {
-                if (from.kind == TypeKind::Int) {
-                    emit_line(tmp + " = sitofp i32 " + value + " to float");
-                } else {
-                    emit_line(tmp + " = sitofp i8 " + value + " to float");
-                }
-            } else if (from.kind == TypeKind::Bool) {
-                emit_line(tmp + " = uitofp i8 " + value + " to float");
+            } else if (from.integer_bit_width() > 0) {
+                const bool unsigned_from = from.is_unsigned_integer();
+                emit_line(tmp + std::string(" = ") + (unsigned_from ? "uitofp " : "sitofp ") +
+                    int_ir(from.integer_bit_width()) + " " + value + " to float");
             }
             return tmp;
         }
         if (to.kind == TypeKind::Double) {
             if (from.kind == TypeKind::Float) {
                 emit_line(tmp + " = fpext float " + value + " to double");
-            } else if (from.kind == TypeKind::Int || from.kind == TypeKind::Char) {
-                if (from.kind == TypeKind::Int) {
-                    emit_line(tmp + " = sitofp i32 " + value + " to double");
-                } else {
-                    emit_line(tmp + " = sitofp i8 " + value + " to double");
-                }
-            } else if (from.kind == TypeKind::Bool) {
-                emit_line(tmp + " = uitofp i8 " + value + " to double");
+            } else if (from.integer_bit_width() > 0) {
+                const bool unsigned_from = from.is_unsigned_integer();
+                emit_line(tmp + std::string(" = ") + (unsigned_from ? "uitofp " : "sitofp ") +
+                    int_ir(from.integer_bit_width()) + " " + value + " to double");
             }
             return tmp;
         }
-        if (from.kind == TypeKind::Float) {
-            if (to.kind == TypeKind::Int) {
-                emit_line(tmp + " = fptosi float " + value + " to i32");
-            } else if (to.kind == TypeKind::Char) {
-                emit_line(tmp + " = fptosi float " + value + " to i8");
-            } else if (to.kind == TypeKind::Bool) {
-                emit_line(tmp + " = fptoui float " + value + " to i8");
+        if (from.kind == TypeKind::Float || from.kind == TypeKind::Double) {
+            const int to_bits = to.integer_bit_width();
+            if (to_bits > 0) {
+                const bool unsigned_to = to.is_unsigned_integer();
+                emit_line(tmp + std::string(" = ") + (unsigned_to ? "fptoui " : "fptosi ") +
+                    (from.kind == TypeKind::Float ? "float" : "double") + " " + value +
+                    " to " + int_ir(to_bits));
             }
             return tmp;
         }
-        if (from.kind == TypeKind::Double) {
-            if (to.kind == TypeKind::Int) {
-                emit_line(tmp + " = fptosi double " + value + " to i32");
-            } else if (to.kind == TypeKind::Char) {
-                emit_line(tmp + " = fptosi double " + value + " to i8");
-            } else if (to.kind == TypeKind::Bool) {
-                emit_line(tmp + " = fptoui double " + value + " to i8");
-            }
-            return tmp;
+        // 整型间转换：按位宽做符号/零扩展或截断（0.4.1 §7）
+        // Integer-to-integer conversions extend (sign/zero) or truncate by bit width
+        const int from_bits = from.integer_bit_width();
+        const int to_bits = to.integer_bit_width();
+        if (from_bits <= 0 || to_bits <= 0) return value;
+        if (from_bits == to_bits) return value;
+        const char* from_ir = int_ir(from_bits);
+        const char* to_ir = int_ir(to_bits);
+        if (from_bits < to_bits) {
+            const char* opcode = from.is_unsigned_integer() ? "zext" : "sext";
+            emit_line(tmp + " = " + opcode + " " + from_ir + " " + value + " to " + to_ir);
         }
-        // 整型间：char/bool 使用 i8，int 使用 i32
-        // Integer-to-integer conversions are i8/i32 based
-        std::string from_ir = from.kind == TypeKind::Int ? "i32" : "i8";
-        std::string to_ir = to.kind == TypeKind::Int ? "i32" : "i8";
-        bool to_unsigned = to.kind == TypeKind::Bool;
-        if (from_ir == to_ir) return value;
-        if (to_ir == "i32" && from_ir == "i8") {
-            if (from.kind == TypeKind::Bool) {
-                emit_line(tmp + " = zext i8 " + value + " to i32");
-            } else {
-                emit_line(tmp + " = sext i8 " + value + " to i32");
-            }
-        } else if (to_ir == "i8" && from_ir == "i32") {
-            emit_line(tmp + " = trunc i32 " + value + " to i8");
+        else {
+            emit_line(tmp + " = trunc " + from_ir + " " + value + " to " + to_ir);
         }
-        (void)to_unsigned;
         return tmp;
     }
 
@@ -2028,14 +2062,13 @@ namespace {
             emit_line(tmp + " = trunc i8 " + value + " to i1");
             return tmp;
         }
-        if (type.kind == TypeKind::Int) {
+        // 0.4.1 §2：整型条件的真假判定按位宽选择 i8/i32/i64
+        // 0.4.1 §2: integer truth values compare against zero at the matching width
+        if (type.integer_bit_width() > 0) {
             std::string tmp = new_temp("cond");
-            emit_line(tmp + " = icmp ne i32 " + value + ", 0");
-            return tmp;
-        }
-        if (type.kind == TypeKind::Char) {
-            std::string tmp = new_temp("cond");
-            emit_line(tmp + " = icmp ne i8 " + value + ", 0");
+            const int bits = type.integer_bit_width();
+            emit_line(tmp + " = icmp ne " + std::string(bits == 64 ? "i64" :
+                (bits == 32 ? "i32" : "i8")) + " " + value + ", 0");
             return tmp;
         }
         if (type.kind == TypeKind::Float) {
@@ -2064,8 +2097,12 @@ namespace {
         case AST::PrimaryExpression::Kind::Literal: {
             switch (expr->literal_token.type) {
             case TokenType::IntegerLiteral: {
-                std::string_view lexeme = expr->literal_token.lexeme;
-                long long value = 0;
+                // 0.4.1 §7：整数字面量可带 l/L、u/U、lu/Lu/lU/LU 后缀，
+                // 解析数值前必须先剥离后缀
+                // 0.4.1 §7: integer literals may carry l/L, u/U, lu/Lu/lU/LU suffixes,
+                // which must be stripped before the numeric value is parsed
+                std::string_view lexeme =
+                    AST::Type::strip_integer_suffix(expr->literal_token.lexeme);
                 int base = 10;
                 if (lexeme.size() > 2 && lexeme[0] == '0' &&
                     (lexeme[1] == 'x' || lexeme[1] == 'X')) {
@@ -2075,8 +2112,22 @@ namespace {
                     base = 8;
                     lexeme = lexeme.substr(1);
                 }
-                auto res = std::from_chars(lexeme.data(), lexeme.data() + lexeme.size(), value, base);
-                out.value = std::to_string(value);
+                long long value = 0;
+                auto res = std::from_chars(lexeme.data(), lexeme.data() + lexeme.size(),
+                    value, base);
+                if (res.ec == std::errc()) {
+                    out.value = std::to_string(value);
+                }
+                else {
+                    // 超出 int64 的 luint 字面量：按无符号 64 位重新解析
+                    // A luint literal beyond int64 range is re-parsed as unsigned 64-bit
+                    unsigned long long uvalue = 0;
+                    auto ures = std::from_chars(lexeme.data(),
+                        lexeme.data() + lexeme.size(), uvalue, base);
+                    out.value = (ures.ec == std::errc())
+                        ? std::to_string(uvalue)
+                        : "0";
+                }
                 break;
             }
             case TokenType::FloatLiteral: {
@@ -2472,12 +2523,20 @@ namespace {
                 emit_line(out.value + " = fneg " + type_text + " " + operand_value);
                 return out;
             }
-            // 整数取负：在 i32 上做 0 - x，再按结果类型截断（与二元算术一致）
-            // Integer negation: 0 - x in i32, then truncate to the result type
-            std::string operand_value = convert_value(v.value, v.type, Type::make_int());
+            // 整数取负：在操作数位宽上做 0 - x，再按结果类型转换（0.4.1 §7）
+            // Integer negation: 0 - x at the operand width, then convert to the result
+            // type (0.4.1 §7). 8-bit and 32-bit kinds keep the 0.4 i32 behaviour.
+            AST::Type neg_type = v.type;
+            if (neg_type.integer_bit_width() <= 0) {
+                neg_type = Type::make_int();
+            }
+            else if (neg_type.integer_bit_width() == 8) {
+                neg_type = Type::make_int();
+            }
+            std::string operand_value = convert_value(v.value, v.type, neg_type);
             std::string negated = new_temp("neg");
-            emit_line(negated + " = sub i32 0, " + operand_value);
-            out.value = convert_value(negated, Type::make_int(), out.type);
+            emit_line(negated + " = sub " + llvm_type(neg_type) + " 0, " + operand_value);
+            out.value = convert_value(negated, neg_type, out.type);
             return out;
         }
         if (expr->op == AST::UnaryExpression::Operator::Increment ||
@@ -3061,6 +3120,22 @@ namespace {
             case TypeKind::Int:
                 emit_line("call void @gallt_output_i32(i32 " + arg.value + ")");
                 break;
+            // 0.4.1 §2：uint/luint 按无符号输出，lint 按有符号 64 位输出，
+            // uchar 与 char 一样按字符输出（打印字节）
+            // 0.4.1 §2: uint/luint print as unsigned, lint prints as signed 64-bit, and
+            // uchar prints as a character byte like char
+            case TypeKind::Uint:
+                emit_line("call void @gallt_output_u32(i32 " + arg.value + ")");
+                break;
+            case TypeKind::Lint:
+                emit_line("call void @gallt_output_i64(i64 " + arg.value + ")");
+                break;
+            case TypeKind::Luint:
+                emit_line("call void @gallt_output_u64(i64 " + arg.value + ")");
+                break;
+            case TypeKind::Uchar:
+                emit_line("call void @gallt_output_char(i8 " + arg.value + ")");
+                break;
             case TypeKind::Float:
                 emit_line("call void @gallt_output_f32(float " + arg.value + ")");
                 break;
@@ -3112,6 +3187,18 @@ namespace {
         switch (arg.type.kind) {
         case TypeKind::Int:
             emit_line("call void @gallt_input_i32(ptr " + address + ")");
+            break;
+        case TypeKind::Uint:
+            emit_line("call void @gallt_input_u32(ptr " + address + ")");
+            break;
+        case TypeKind::Lint:
+            emit_line("call void @gallt_input_i64(ptr " + address + ")");
+            break;
+        case TypeKind::Luint:
+            emit_line("call void @gallt_input_u64(ptr " + address + ")");
+            break;
+        case TypeKind::Uchar:
+            emit_line("call void @gallt_input_uchar(ptr " + address + ")");
             break;
         case TypeKind::Float:
             emit_line("call void @gallt_input_f32(ptr " + address + ")");
@@ -3389,9 +3476,13 @@ namespace {
                     target = local->type;
                 } else {
                     if (id == "int") target = Type::make_int();
+                    else if (id == "lint") target = Type::make_lint();
+                    else if (id == "uint") target = Type::make_uint();
+                    else if (id == "luint") target = Type::make_luint();
                     else if (id == "float") target = Type::make_float();
                     else if (id == "double") target = Type::make_double();
                     else if (id == "char") target = Type::make_char();
+                    else if (id == "uchar") target = Type::make_uchar();
                     else if (id == "bool") target = Type::make_bool();
                     else if (id == "string") target = Type::make_string();
                     else if (id == "file") target = Type::make_file();
@@ -3457,6 +3548,20 @@ namespace {
             emit_line("call void @gallt_string_from_i32(ptr " + result +
                 ", i32 " + v.value + ")");
             break;
+        // 0.4.1 §2：新增整数类型的字符串转换
+        // 0.4.1 §2: string conversions for the added integer kinds
+        case TypeKind::Uint:
+            emit_line("call void @gallt_string_from_u32(ptr " + result +
+                ", i32 " + v.value + ")");
+            break;
+        case TypeKind::Lint:
+            emit_line("call void @gallt_string_from_i64(ptr " + result +
+                ", i64 " + v.value + ")");
+            break;
+        case TypeKind::Luint:
+            emit_line("call void @gallt_string_from_u64(ptr " + result +
+                ", i64 " + v.value + ")");
+            break;
         case TypeKind::Float:
             emit_line("call void @gallt_string_from_f32(ptr " + result +
                 ", float " + v.value + ")");
@@ -3466,6 +3571,10 @@ namespace {
                 ", double " + v.value + ")");
             break;
         case TypeKind::Char:
+            emit_line("call void @gallt_string_from_char(ptr " + result +
+                ", i8 " + v.value + ")");
+            break;
+        case TypeKind::Uchar:
             emit_line("call void @gallt_string_from_char(ptr " + result +
                 ", i8 " + v.value + ")");
             break;
@@ -3602,6 +3711,11 @@ void gallt_output_string(const gallt_string* s) {
 }
 
 void gallt_output_i32(int32_t v) { printf("%d", (int)v); fflush(stdout); }
+/* 0.4.1 新增类型的输出辅助（Gallt 0.4.1 §2） */
+/* Output helpers for the types added in 0.4.1 (Gallt 0.4.1 §2) */
+void gallt_output_u32(uint32_t v) { printf("%u", (unsigned)v); fflush(stdout); }
+void gallt_output_i64(int64_t v) { printf("%lld", (long long)v); fflush(stdout); }
+void gallt_output_u64(uint64_t v) { printf("%llu", (unsigned long long)v); fflush(stdout); }
 void gallt_output_f32(float v) {
     char buffer[80];
     int n = gallt_format_fp((double)v, buffer, sizeof(buffer));
@@ -3619,6 +3733,10 @@ void gallt_output_bool(unsigned char v) { fputs(v ? "true" : "false", stdout); f
 void gallt_output_ptr(const void* v) { printf("%p", v); fflush(stdout); }
 
 void gallt_input_i32(int32_t* p) { if (scanf("%d", p) != 1 && p) *p = 0; }
+void gallt_input_u32(uint32_t* p) { if (scanf("%u", p) != 1 && p) *p = 0; }
+void gallt_input_i64(int64_t* p) { if (scanf("%lld", (long long*)p) != 1 && p) *p = 0; }
+void gallt_input_u64(uint64_t* p) { if (scanf("%llu", (unsigned long long*)p) != 1 && p) *p = 0; }
+void gallt_input_uchar(unsigned char* p) { if (scanf(" %c", (char*)p) != 1 && p) *p = 0; }
 void gallt_input_f32(float* p) { if (scanf("%f", p) != 1 && p) *p = 0; }
 void gallt_input_f64(double* p) { if (scanf("%lf", p) != 1 && p) *p = 0; }
 void gallt_input_char(char* p) { if (scanf(" %c", p) != 1 && p) *p = 0; }
@@ -3650,6 +3768,23 @@ static gallt_string gallt_string_from_int64(int64_t v) {
 
 void gallt_string_from_i32(gallt_string* out, int32_t v) {
     if (out != NULL) *out = gallt_string_from_int64(v);
+}
+/* 0.4.1 新增类型的字符串转换（Gallt 0.4.1 §2） */
+/* String conversions for the types added in 0.4.1 (Gallt 0.4.1 §2) */
+void gallt_string_from_u32(gallt_string* out, uint32_t v) {
+    if (out == NULL) return;
+    char buffer[64];
+    int n = snprintf(buffer, sizeof(buffer), "%u", (unsigned)v);
+    *out = gallt_string_from_bytes_impl(buffer, n < 0 ? 0 : n);
+}
+void gallt_string_from_i64(gallt_string* out, int64_t v) {
+    if (out != NULL) *out = gallt_string_from_int64(v);
+}
+void gallt_string_from_u64(gallt_string* out, uint64_t v) {
+    if (out == NULL) return;
+    char buffer[64];
+    int n = snprintf(buffer, sizeof(buffer), "%llu", (unsigned long long)v);
+    *out = gallt_string_from_bytes_impl(buffer, n < 0 ? 0 : n);
 }
 void gallt_string_from_char(gallt_string* out, char v) {
     if (out != NULL) *out = gallt_string_from_bytes_impl(&v, 1);

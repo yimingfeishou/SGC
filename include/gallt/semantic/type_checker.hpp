@@ -260,6 +260,25 @@ namespace gallt {
         std::optional<size_t> evaluate_const_expression(AST::Expression* expr);
         bool is_constant_integer_expression(AST::Expression* expr, size_t* out_value = nullptr);
 
+        // ---- 0.4.1 const qualifier semantics (Gallt 0.4.1.txt sections 2 and 7) ----
+        // Integer values of const constants, layered by scope, used to evaluate
+        // constant integer expressions such as array lengths (0.4.1 sections 2 and 7).
+        std::vector<std::unordered_map<std::string, long long>> const_values_;
+        void enter_scope();
+        void exit_scope();
+        // Record the integer value of a const constant (0.4.1 section 2).
+        void record_const_value(const std::string& name, AST::Expression* initializer,
+            const AST::Type& type);
+        // Evaluate a constant integer expression, resolving const names (0.4.1 section 7).
+        std::optional<long long> evaluate_const_integer_expression(AST::Expression* expr);
+        // Validate a const object declaration: the initializer must be evaluable at
+        // compile time (ER 0116).
+        void check_const_declaration(AST::VariableDeclaration* decl);
+        // Decide whether an expression is a compile-time constant expression (section 19).
+        bool is_compile_time_constant_expression(AST::Expression* expr);
+        // Display name of an lvalue expression (the '[identifier]' of ER 0115).
+        static std::string expression_display_name(const AST::Expression* expr);
+
         // ---- 语句结束符（分号/换行）检查 ----
         // 已由语法分析器处理，语义层不需要再检查
     };
