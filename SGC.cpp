@@ -9,9 +9,9 @@
 
 // Gallt 语言标准 26.09 (Preview) 对应的编译器版本（Gallt 0.4 预览版本）
 // Compiler version matching Gallt Lang Standard 26.09 (Preview), per Gallt 0.4
-const std::string VERSION = "0.4.0 Preview";
+const std::string VERSION = "0.4.1 Preview";
 // 编译日期 / build date (Gallt 0.4 preview, 2026-09-13)
-const std::string BUILD_DATE = "2026-09-13";
+const std::string BUILD_DATE = "2026-09-15";
 
 int wmain(int argc, wchar_t* argv[]) {
     std::cout << "sgc Standard Gallt Compiler " << VERSION << "\n";
