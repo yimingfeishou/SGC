@@ -6,7 +6,7 @@
 
 SGC 是一个 Gallt 语言编译器前端。后端复用 LLVM 的 clang/lld，在 Windows 11 x64 上直接生成 PE 可执行文件。
 
-当前版本：`0.4.0 Preview`。
+当前版本：`0.4.1 Preview`。
 
 ### 目录结构
 
@@ -51,7 +51,7 @@ sgc --version
 
 SGC is a Gallt language compiler frontend. Its backend reuses LLVM's clang/lld and emits PE executables directly on Windows 11 x64.
 
-Current version: `0.4.0 Preview`.
+Current version: `0.4.1 Preview`.
 
 ### Layout
 
