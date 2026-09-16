@@ -1,11 +1,11 @@
-// math.glt
+// sl.glt
 // Gallt Standard Library
 // Naming Conventions: snake_case
 // All standard library statements are stored in the sl namespace
-// All standard libraries except for generics.glt itself, should import generics.glt and addition namespace sl
+// All standard libraries except for sl.glt itself, should import sl.glt and addition namespace sl
 // Copyright (c) Yimingfeishou
 
-guide "generics.glt"
+guide "sl.glt"
 
 addition namespace sl {
 
