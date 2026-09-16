@@ -2,11 +2,12 @@
 // Gallt Standard Library
 // Naming Conventions: snake_case
 // All standard library statements are stored in the sl namespace
+// All standard libraries except for generics.glt itself, should import generics.glt and addition namespace sl
 // Copyright (c) Yimingfeishou
 
 namespace sl {
 
-    generics dynamic_array_generic<T: int | float | double | char | bool> {
+    generics dynamic_array_generic<T: int | lint | uint | luint | float | double | char | uchar | bool> {
         struct dynamic_array {
             T* data
             int size
