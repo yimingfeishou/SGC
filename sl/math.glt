@@ -1,0 +1,378 @@
+// math.glt
+// Gallt Standard Library
+// Naming Conventions: snake_case
+// All standard library statements are stored in the sl namespace
+// All standard libraries except for sl.glt itself, should import sl.glt and addition namespace sl
+// Copyright (c) Yimingfeishou
+
+guide "sl.glt"
+
+addition namespace sl {
+
+    const double pi = 3.141592653589793
+    const double e = 2.718281828459045
+    const double ln2 = 0.6931471805599453
+    const double ln10 = 2.302585092994046
+    const double sqrt2 = 1.4142135623730951
+
+    luint rand_state = 123456789lu
+
+    double abs(double x) {
+        if (x < 0.0) {
+            return -x
+        }
+        return x
+    }
+
+    double fabs(double x) {
+        return abs(x)
+    }
+
+    double floor(double x) {
+        int i = int(x)
+        if (x < 0.0 && double(i) != x) {
+            i = i - 1
+        }
+        return double(i)
+    }
+
+    double ceil(double x) {
+        int i = int(x)
+        if (x > 0.0 && double(i) != x) {
+            i = i + 1
+        }
+        return double(i)
+    }
+
+    double round(double x) {
+        if (x >= 0.0) {
+            return floor(x + 0.5)
+        } else {
+            return ceil(x - 0.5)
+        }
+    }
+
+    double trunc(double x) {
+        return double(int(x))
+    }
+
+    double min(double a, double b) {
+        if (a < b) {
+            return a
+        }
+        return b
+    }
+
+    double max(double a, double b) {
+        if (a > b) {
+            return a
+        }
+        return b
+    }
+
+    double clamp(double x, double min_val, double max_val) {
+        if (x < min_val) {
+            return min_val
+        }
+        if (x > max_val) {
+            return max_val
+        }
+        return x
+    }
+
+    void srand(luint seed) {
+        rand_state = seed % 2147483647lu
+        if (rand_state == 0lu) {
+            rand_state = 1lu
+        }
+    }
+
+    int rand() {
+        rand_state = (rand_state * 1103515245lu + 12345lu) % 2147483647lu
+        return int(rand_state)
+    }
+
+    int random_int(int min_val, int max_val) {
+        if (min_val > max_val) {
+            int temp = min_val
+            min_val = max_val
+            max_val = temp
+        }
+        int range = max_val - min_val + 1
+        if (range <= 0) {
+            return min_val
+        }
+        return min_val + rand() % range
+    }
+
+    double random_double() {
+        return double(rand()) / 2147483647.0
+    }
+
+    double random_double_range(double min_val, double max_val) {
+        return min_val + random_double() * (max_val - min_val)
+    }
+
+    double sqrt(double x) {
+        if (x < 0.0) {
+            return 0.0
+        }
+        if (x == 0.0) {
+            return 0.0
+        }
+        double guess = x
+        if (guess < 1.0) {
+            guess = 1.0
+        }
+        for (int i = 0; i < 50; i = i + 1) {
+            double next = (guess + x / guess) / 2.0
+            if (abs(next - guess) < 0.000000000000001) {
+                return next
+            }
+            guess = next
+        }
+        return guess
+    }
+
+    double exp(double x) {
+        if (x == 0.0) {
+            return 1.0
+        }
+        bool negative = false
+        if (x < 0.0) {
+            negative = true
+            x = -x
+        }
+        int k = 0
+        while (x > 1.0) {
+            x = x / 2.0
+            k = k + 1
+        }
+        double result = 1.0
+        double term = 1.0
+        for (int i = 1; i < 100; i = i + 1) {
+            term = term * x / double(i)
+            result = result + term
+            if (abs(term) < 0.000000000000001) {
+                break
+            }
+        }
+        for (int i = 0; i < k; i = i + 1) {
+            result = result * result
+        }
+        if (negative) {
+            return 1.0 / result
+        }
+        return result
+    }
+
+    double log(double x) {
+        if (x <= 0.0) {
+            return 0.0
+        }
+        int k = 0
+        while (x >= 2.0) {
+            x = x / 2.0
+            k = k + 1
+        }
+        while (x < 1.0) {
+            x = x * 2.0
+            k = k - 1
+        }
+        double y = (x - 1.0) / (x + 1.0)
+        double y2 = y * y
+        double term = y
+        double result = 0.0
+        for (int i = 1; i < 200; i = i + 2) {
+            result = result + term / double(i)
+            term = term * y2
+            if (abs(term) < 0.000000000000001) {
+                break
+            }
+        }
+        result = result * 2.0
+        return result + double(k) * ln2
+    }
+
+    double log10(double x) {
+        return log(x) / ln10
+    }
+
+    double log2(double x) {
+        return log(x) / ln2
+    }
+
+    double pow(double base, double exponent) {
+        if (base == 0.0) {
+            if (exponent == 0.0) {
+                return 1.0
+            }
+            if (exponent > 0.0) {
+                return 0.0
+            }
+            return 0.0
+        }
+        if (base > 0.0) {
+            return exp(exponent * log(base))
+        }
+        int exp_int = int(exponent)
+        if (double(exp_int) != exponent) {
+            return 0.0
+        }
+        double result = 1.0
+        double b = base
+        int e = exp_int
+        bool negative = false
+        if (e < 0) {
+            negative = true
+            e = -e
+        }
+        while (e > 0) {
+            if (e % 2 == 1) {
+                result = result * b
+            }
+            b = b * b
+            e = e / 2
+        }
+        if (negative) {
+            return 1.0 / result
+        }
+        return result
+    }
+
+    double sin(double x) {
+        while (x > pi) {
+            x = x - 2.0 * pi
+        }
+        while (x < -pi) {
+            x = x + 2.0 * pi
+        }
+        double term = x
+        double result = x
+        double x2 = x * x
+        for (int i = 3; i < 100; i = i + 2) {
+            term = -term * x2 / (double(i - 1) * double(i))
+            result = result + term
+            if (abs(term) < 0.000000000000001) {
+                break
+            }
+        }
+        return result
+    }
+
+    double cos(double x) {
+        while (x > pi) {
+            x = x - 2.0 * pi
+        }
+        while (x < -pi) {
+            x = x + 2.0 * pi
+        }
+        double term = 1.0
+        double result = 1.0
+        double x2 = x * x
+        for (int i = 2; i < 100; i = i + 2) {
+            term = -term * x2 / (double(i - 1) * double(i))
+            result = result + term
+            if (abs(term) < 0.000000000000001) {
+                break
+            }
+        }
+        return result
+    }
+
+    double tan(double x) {
+        double c = cos(x)
+        if (abs(c) < 0.000000000000001) {
+            return 0.0
+        }
+        return sin(x) / c
+    }
+
+    double atan(double x) {
+        if (x > 1.0) {
+            return pi / 2.0 - atan(1.0 / x)
+        }
+        if (x < -1.0) {
+            return -pi / 2.0 - atan(1.0 / x)
+        }
+        double term = x
+        double result = x
+        double x2 = x * x
+        for (int i = 3; i < 200; i = i + 2) {
+            term = -term * x2
+            result = result + term / double(i)
+            if (abs(term) < 0.000000000000001) {
+                break
+            }
+        }
+        return result
+    }
+
+    double asin(double x) {
+        if (x > 1.0 || x < -1.0) {
+            return 0.0
+        }
+        if (x == 1.0) {
+            return pi / 2.0
+        }
+        if (x == -1.0) {
+            return -pi / 2.0
+        }
+        return atan(x / sqrt(1.0 - x * x))
+    }
+
+    double acos(double x) {
+        if (x > 1.0 || x < -1.0) {
+            return 0.0
+        }
+        return pi / 2.0 - asin(x)
+    }
+
+    double atan2(double y, double x) {
+        if (x > 0.0) {
+            return atan(y / x)
+        } else {
+            if (x < 0.0) {
+                if (y >= 0.0) {
+                    return atan(y / x) + pi
+                } else {
+                    return atan(y / x) - pi
+                }
+            } else {
+                if (y > 0.0) {
+                    return pi / 2.0
+                }
+                if (y < 0.0) {
+                    return -pi / 2.0
+                }
+                return 0.0
+            }
+        }
+    }
+
+    double sinh(double x) {
+        return (exp(x) - exp(-x)) / 2.0
+    }
+
+    double cosh(double x) {
+        return (exp(x) + exp(-x)) / 2.0
+    }
+
+    double tanh(double x) {
+        double s = sinh(x)
+        double c = cosh(x)
+        if (abs(c) < 0.000000000000001) {
+            return 0.0
+        }
+        return s / c
+    }
+
+    double fmod(double x, double y) {
+        if (y == 0.0) {
+            return 0.0
+        }
+        double q = trunc(x / y)
+        return x - q * y
+    }
+
+} // namespace sl

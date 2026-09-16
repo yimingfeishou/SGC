@@ -1,0 +1,564 @@
+// generics.glt
+// Gallt Standard Library
+// Naming Conventions: snake_case
+// All standard library statements are stored in the sl namespace
+// All standard libraries except for sl.glt itself, should import sl.glt and addition namespace sl
+// Copyright (c) Yimingfeishou
+
+guide "sl.glt"
+
+addition namespace sl {
+
+    generics dynamic_array_generic<T: int | lint | uint | luint | float | double | char | uchar | bool> {
+        struct dynamic_array {
+            T* data
+            int size
+            int capacity
+
+            constructor () {
+                data = null
+                size = 0
+                capacity = 0
+            }
+
+            constructor (int cap) {
+                if (cap <= 0) {
+                    data = null
+                    size = 0
+                    capacity = 0
+                    return
+                }
+
+                T* p = heap(T, cap)
+                if (p == null) {
+                    data = null
+                    size = 0
+                    capacity = 0
+                    return
+                }
+
+                data = p
+                size = 0
+                capacity = cap
+            }
+
+            destructor () {
+                if (data != null) {
+                    free(data)
+                    data = null
+                }
+                size = 0
+                capacity = 0
+            }
+
+            copy_constructor (dynamic_array* other) {
+                data = null
+                size = 0
+                capacity = 0
+
+                if (other == null) {
+                    return
+                }
+
+                if (other->capacity <= 0 || other->data == null) {
+                    return
+                }
+
+                if (other->size < 0 || other->size > other->capacity) {
+                    return
+                }
+
+                T* p = heap(T, other->capacity)
+                if (p == null) {
+                    return
+                }
+
+                for (int i = 0; i < other->size; i++) {
+                    p[i] = other->data[i]
+                }
+
+                data = p
+                size = other->size
+                capacity = other->capacity
+            }
+
+            move_constructor (dynamic_array* other) {
+                data = null
+                size = 0
+                capacity = 0
+
+                if (other == null) {
+                    return
+                }
+
+                if (other->data == null || other->size < 0 || other->size > other->capacity) {
+                    other->data = null
+                    other->size = 0
+                    other->capacity = 0
+                    return
+                }
+
+                data = other->data
+                size = other->size
+                capacity = other->capacity
+
+                other->data = null
+                other->size = 0
+                other->capacity = 0
+            }
+
+            copy_assignment (dynamic_array* other) {
+                if (other == null) {
+                    return
+                }
+
+                if (other->data == data) {
+                    size = other->size
+                    capacity = other->capacity
+                    return
+                }
+
+                if (other->capacity <= 0 || other->data == null || other->size < 0 || other->size > other->capacity) {
+                    if (data != null) {
+                        free(data)
+                        data = null
+                    }
+                    size = 0
+                    capacity = 0
+                    return
+                }
+
+                T* p = heap(T, other->capacity)
+                if (p == null) {
+                    return
+                }
+
+                for (int i = 0; i < other->size; i++) {
+                    p[i] = other->data[i]
+                }
+
+                if (data != null) {
+                    free(data)
+                }
+
+                data = p
+                size = other->size
+                capacity = other->capacity
+            }
+
+            move_assignment (dynamic_array* other) {
+                if (other == null) {
+                    return
+                }
+
+                if (other->data == data) {
+                    return
+                }
+
+                if (other->data == null || other->size < 0 || other->size > other->capacity) {
+                    if (data != null) {
+                        free(data)
+                        data = null
+                    }
+                    size = 0
+                    capacity = 0
+
+                    other->data = null
+                    other->size = 0
+                    other->capacity = 0
+                    return
+                }
+
+                if (data != null) {
+                    free(data)
+                    data = null
+                }
+
+                data = other->data
+                size = other->size
+                capacity = other->capacity
+
+                other->data = null
+                other->size = 0
+                other->capacity = 0
+            }
+        }
+
+        int length(dynamic_array* arr) {
+            if (arr == null) {
+                return 0
+            }
+            return arr->size
+        }
+
+        int get_capacity(dynamic_array* arr) {
+            if (arr == null) {
+                return 0
+            }
+            return arr->capacity
+        }
+
+        bool empty(dynamic_array* arr) {
+            if (arr == null) {
+                return true
+            }
+            return arr->size == 0
+        }
+
+        void clear(dynamic_array* arr) {
+            if (arr == null) {
+                return
+            }
+            arr->size = 0
+        }
+
+        T get(dynamic_array* arr, int index) {
+            if (arr == null || index < 0 || index >= arr->size) {
+                T dummy
+                if (T.is_bool == true) {
+                    dummy = false
+                } else {
+                    dummy = 0
+                }
+                return dummy
+            }
+            return arr->data[index]
+        }
+
+        void set(dynamic_array* arr, int index, T value) {
+            if (arr == null || index < 0 || index >= arr->size) {
+                return
+            }
+            arr->data[index] = value
+        }
+
+        T front(dynamic_array* arr) {
+            if (arr == null || arr->size == 0) {
+                T dummy
+                if (T.is_bool == true) {
+                    dummy = false
+                } else {
+                    dummy = 0
+                }
+                return dummy
+            }
+            return arr->data[0]
+        }
+
+        T back(dynamic_array* arr) {
+            if (arr == null || arr->size == 0) {
+                T dummy
+                if (T.is_bool == true) {
+                    dummy = false
+                } else {
+                    dummy = 0
+                }
+                return dummy
+            }
+            return arr->data[arr->size - 1]
+        }
+
+        T* data_ptr(dynamic_array* arr) {
+            if (arr == null) {
+                return null
+            }
+            return arr->data
+        }
+
+        bool reserve(dynamic_array* arr, int new_capacity) {
+            if (arr == null) {
+                return false
+            }
+
+            if (new_capacity < 0) {
+                return false
+            }
+
+            if (new_capacity <= arr->capacity) {
+                return true
+            }
+
+            if (new_capacity > 1073741823) {
+                return false
+            }
+
+            T* new_data = heap(T, new_capacity)
+            if (new_data == null) {
+                return false
+            }
+
+            for (int i = 0; i < arr->size; i++) {
+                new_data[i] = arr->data[i]
+            }
+
+            if (arr->data != null) {
+                free(arr->data)
+            }
+
+            arr->data = new_data
+            arr->capacity = new_capacity
+            return true
+        }
+
+        void push(dynamic_array* arr, T value) {
+            if (arr == null) {
+                return
+            }
+
+            if (arr->size >= arr->capacity) {
+                if (arr->capacity > 1073741823 / 2) {
+                    return
+                }
+
+                int new_capacity = 1
+                if (arr->capacity > 0) {
+                    new_capacity = arr->capacity * 2
+                }
+
+                if (!reserve(arr, new_capacity)) {
+                    return
+                }
+            }
+
+            arr->data[arr->size] = value
+            arr->size = arr->size + 1
+        }
+
+        T pop(dynamic_array* arr) {
+            if (arr == null || arr->size == 0) {
+                T dummy
+                if (T.is_bool == true) {
+                    dummy = false
+                } else {
+                    dummy = 0
+                }
+                return dummy
+            }
+
+            arr->size = arr->size - 1
+            return arr->data[arr->size]
+        }
+
+        bool insert(dynamic_array* arr, int index, T value) {
+            if (arr == null) {
+                return false
+            }
+            if (index < 0 || index > arr->size) {
+                return false
+            }
+
+            if (arr->size >= arr->capacity) {
+                if (arr->capacity > 1073741823 / 2) {
+                    return false
+                }
+
+                int new_capacity = 1
+                if (arr->capacity > 0) {
+                    new_capacity = arr->capacity * 2
+                }
+
+                if (!reserve(arr, new_capacity)) {
+                    return false
+                }
+            }
+
+            for (int i = arr->size; i > index; i--) {
+                arr->data[i] = arr->data[i - 1]
+            }
+
+            arr->data[index] = value
+            arr->size = arr->size + 1
+            return true
+        }
+
+        bool erase(dynamic_array* arr, int index) {
+            if (arr == null) {
+                return false
+            }
+            if (index < 0 || index >= arr->size) {
+                return false
+            }
+
+            for (int i = index; i < arr->size - 1; i++) {
+                arr->data[i] = arr->data[i + 1]
+            }
+
+            arr->size = arr->size - 1
+            return true
+        }
+
+        bool resize(dynamic_array* arr, int new_size) {
+            if (arr == null) {
+                return false
+            }
+            if (new_size < 0) {
+                return false
+            }
+            if (new_size == arr->size) {
+                return true
+            }
+
+            if (new_size > arr->capacity) {
+                if (!reserve(arr, new_size)) {
+                    return false
+                }
+            }
+
+            if (new_size > arr->size) {
+                for (int i = arr->size; i < new_size; i++) {
+                    if (T.is_bool == true) {
+                        arr->data[i] = false
+                    } else {
+                        arr->data[i] = 0
+                    }
+                }
+            }
+
+            arr->size = new_size
+            return true
+        }
+    }
+
+    generics swap_generic<T> {
+        bool swap(T* a, T* b) {
+            if (a == null || b == null) {
+                return false
+            }
+            if (a == b) {
+                return true
+            }
+
+            T temp = *a
+            *a = *b
+            *b = temp
+            return true
+        }
+    }
+
+    generics sort_generic<T> {
+        void insertion_sort_impl(T* data, int left, int right, int compare(T, T)*) {
+            for (int i = left + 1; i <= right; i++) {
+                T key = data[i]
+                int j = i - 1
+                while (j >= left && compare(data[j], key) > 0) {
+                    data[j + 1] = data[j]
+                    j = j - 1
+                }
+                data[j + 1] = key
+            }
+        }
+
+        void heap_sift_down_impl(T* data, int base, int start, int end, int compare(T, T)*) {
+            int root = start
+            while (root * 2 + 1 <= end) {
+                int child = root * 2 + 1
+                if (child + 1 <= end && compare(data[base + child], data[base + child + 1]) < 0) {
+                    child = child + 1
+                }
+                if (compare(data[base + root], data[base + child]) < 0) {
+                    T temp = data[base + root]
+                    data[base + root] = data[base + child]
+                    data[base + child] = temp
+                    root = child
+                } else {
+                    return
+                }
+            }
+        }
+
+        void heap_sort_impl(T* data, int left, int right, int compare(T, T)*) {
+            int n = right - left + 1
+
+            for (int i = (n - 2) / 2; i >= 0; i--) {
+                heap_sift_down_impl(data, left, i, n - 1, compare)
+            }
+
+            for (int i = n - 1; i > 0; i--) {
+                T temp = data[left]
+                data[left] = data[left + i]
+                data[left + i] = temp
+                heap_sift_down_impl(data, left, 0, i - 1, compare)
+            }
+        }
+
+        int median_of_three_impl(T* data, int a, int b, int c, int compare(T, T)*) {
+            if (compare(data[a], data[b]) < 0) {
+                if (compare(data[b], data[c]) < 0) {
+                    return b
+                }
+                if (compare(data[a], data[c]) < 0) {
+                    return c
+                }
+                return a
+            } else {
+                if (compare(data[a], data[c]) < 0) {
+                    return a
+                }
+                if (compare(data[b], data[c]) < 0) {
+                    return c
+                }
+                return b
+            }
+        }
+
+        int partition_impl(T* data, int left, int right, int compare(T, T)*) {
+            int mid = left + (right - left) / 2
+            int pivot_index = median_of_three_impl(data, left, mid, right, compare)
+
+            T temp = data[pivot_index]
+            data[pivot_index] = data[right]
+            data[right] = temp
+
+            int store = left
+            for (int i = left; i < right; i++) {
+                if (compare(data[i], data[right]) < 0) {
+                    T t = data[i]
+                    data[i] = data[store]
+                    data[store] = t
+                    store = store + 1
+                }
+            }
+
+            T t = data[store]
+            data[store] = data[right]
+            data[right] = t
+            return store
+        }
+
+        void intro_sort_impl(T* data, int left, int right, int depth_limit, int compare(T, T)*) {
+            int n = right - left + 1
+            if (n <= 16) {
+                insertion_sort_impl(data, left, right, compare)
+                return
+            }
+            if (depth_limit <= 0) {
+                heap_sort_impl(data, left, right, compare)
+                return
+            }
+
+            int pivot = partition_impl(data, left, right, compare)
+            intro_sort_impl(data, left, pivot - 1, depth_limit - 1, compare)
+            intro_sort_impl(data, pivot + 1, right, depth_limit - 1, compare)
+        }
+
+        bool sort(T* data, int size, int compare(T, T)*) {
+            if (data == null || compare == null) {
+                return false
+            }
+            if (size <= 1) {
+                return true
+            }
+            int depth_limit = 0
+            int n = size
+            while (n > 1) {
+                n = n / 2
+                depth_limit = depth_limit + 1
+            }
+            depth_limit = depth_limit * 2
+
+            intro_sort_impl(data, 0, size - 1, depth_limit, compare)
+            return true
+        }
+    }
+
+} // namespace sl
