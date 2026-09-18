@@ -291,6 +291,8 @@ namespace gallt {
             return parse_access_namespace();
         case TokenType::Keyword_Addition:
             return parse_addition_namespace();
+        case TokenType::At:
+            return parse_condition_statement();
         case TokenType::Keyword_Emit:
             report_error_template(ErrorCode::EmitOutsideGenericBlock, {});
             while (current_.type != TokenType::Newline &&
@@ -306,12 +308,38 @@ namespace gallt {
             report_error(ErrorCode::ElseWithoutIf, "else statement without matching if");
             advance();
             return nullptr;
+        case TokenType::Keyword_Return:
+            report_error_template(ErrorCode::ReturnOutsideFunction, {});
+            while (current_.type != TokenType::Newline &&
+                current_.type != TokenType::Semicolon &&
+                current_.type != TokenType::EndOfFile) {
+                advance();
+            }
+            advance();
+            return nullptr;
+        case TokenType::Keyword_If:
+        case TokenType::Keyword_For:
+        case TokenType::Keyword_While:
+        case TokenType::Keyword_Break:
+        case TokenType::Keyword_Output:
+        case TokenType::Keyword_Input: {
+            report_error_template(ErrorCode::StatementInGlobalScope, {});
+            while (current_.type != TokenType::Newline &&
+                current_.type != TokenType::EndOfFile) {
+                advance();
+            }
+            skip_newlines();
+            return nullptr;
+        }
         default: {
             TokenType tt = current_.type;
             if (at_struct_attribute()) {
                 return parse_struct_definition();
             }
             if (is_type_start_keyword(tt) || tt == TokenType::Identifier) {
+                if (looks_like_operator_definition()) {
+                    return parse_operator_definition();
+                }
                 if (tt == TokenType::Identifier && looks_like_generic_instantiation()) {
                     SourceLocation ref_loc = current_location();
                     GenericRef ref = parse_generic_reference(current_.lexeme);
@@ -331,6 +359,29 @@ namespace gallt {
                     return parse_variable_declaration_with_type(std::move(t));
                 }
                 return parse_function_definition();
+            }
+            switch (tt) {
+            case TokenType::IntegerLiteral:
+            case TokenType::FloatLiteral:
+            case TokenType::CharLiteral:
+            case TokenType::StringLiteral:
+            case TokenType::BoolLiteral:
+            case TokenType::LeftParen:
+            case TokenType::LogicalNot:
+            case TokenType::Keyword_Null:
+            case TokenType::Keyword_Heap:
+            case TokenType::Keyword_Free:
+            case TokenType::Keyword_Size:
+            case TokenType::Keyword_Align:
+                report_error_template(ErrorCode::StatementInGlobalScope, {});
+                while (current_.type != TokenType::Newline &&
+                    current_.type != TokenType::EndOfFile) {
+                    advance();
+                }
+                skip_newlines();
+                return nullptr;
+            default:
+                break;
             }
             report_error(ErrorCode::ExpressionSyntaxError, "unexpected token at top level");
             return nullptr;
@@ -455,6 +506,32 @@ namespace gallt {
             return nullptr;
         }
 
+        if (current_.type == TokenType::Star || current_.type == TokenType::Power) {
+            const bool double_pointer = current_.type == TokenType::Power;
+            advance();
+            Type declared = Type::make_function(
+                std::make_shared<Type>(std::move(ret_type)), std::move(param_types));
+            if (double_pointer) {
+                declared = Type::make_pointer(std::make_shared<Type>(std::move(declared)));
+            }
+            std::optional<Type> function_pointer_type = std::nullopt;
+            if (declared.kind == TypeKind::Function) {
+                function_pointer_type = declared;
+            }
+            std::unique_ptr<Initializer> init = nullptr;
+            if (match(TokenType::Assign)) {
+                init = parse_initializer();
+                if (init == nullptr) {
+                    report_error(ErrorCode::ExpressionSyntaxError,
+                        "invalid global function pointer initializer");
+                }
+            }
+            expect_stmt_end("global function pointer declaration");
+            return std::make_unique<VariableDeclaration>(
+                loc, std::move(declared), func_name, std::nullopt,
+                std::move(function_pointer_type), std::move(init));
+        }
+
         auto body = parse_block();
         if (body == nullptr) {
             report_error(ErrorCode::ExpressionSyntaxError, "expected function body");
@@ -465,6 +542,202 @@ namespace gallt {
             loc, std::move(ret_type), func_name,
             std::move(param_types), std::move(param_names),
             std::move(body));
+        func->param_defaults = std::move(param_defaults);
+        return func;
+    }
+
+    bool Parser::at_operator_definition() const {
+        if (current_.type != TokenType::Identifier || current_.lexeme != "operator") {
+            return false;
+        }
+        if (at_operator_symbol(lookahead_type(1))) {
+            return true;
+        }
+        return (lookahead_type(1) == TokenType::Identifier ||
+            is_type_start_keyword(lookahead_type(1))) &&
+            lookahead_type(2) == TokenType::LeftParen;
+    }
+
+    bool Parser::looks_like_operator_definition() const {
+        std::size_t offset = 0;
+        if (current_.type == TokenType::Identifier && current_.lexeme == "operator") {
+            offset = 0;
+        }
+        else if (current_.type == TokenType::Identifier ||
+            is_type_start_keyword(current_.type)) {
+            if (lookahead_type(1) == TokenType::Star ||
+                lookahead_type(1) == TokenType::Power) {
+                offset = 2;
+            }
+            else {
+                offset = 1;
+            }
+        }
+        else {
+            return false;
+        }
+        if (lookahead_type(offset) != TokenType::Identifier ||
+            lookahead(offset).lexeme != "operator") {
+            return false;
+        }
+        if (at_operator_symbol(lookahead_type(offset + 1)) ||
+            lookahead_type(offset + 1) == TokenType::RightBracket) {
+            return true;
+        }
+        return (lookahead_type(offset + 1) == TokenType::Identifier ||
+            is_type_start_keyword(lookahead_type(offset + 1))) &&
+            lookahead_type(offset + 2) == TokenType::LeftParen;
+    }
+
+    bool Parser::at_operator_parameter_list() const {
+        return at_operator_definition();
+    }
+
+    std::string Parser::operator_token_text() const {
+        return std::string(current_.lexeme);
+    }
+
+    std::string Parser::expression_argument_text(std::size_t from, std::size_t to) const {
+        std::string out;
+        if (from >= tokens_.size()) {
+            return out;
+        }
+        std::size_t end = to < tokens_.size() ? to : tokens_.size();
+        for (std::size_t i = from; i < end; ++i) {
+            if (tokens_[i].type == TokenType::Newline) {
+                out += ' ';
+                continue;
+            }
+            out += std::string(tokens_[i].lexeme);
+        }
+        return out;
+    }
+
+    bool Parser::at_operator_symbol(TokenType type) const {
+        switch (type) {
+        case TokenType::Plus:
+        case TokenType::Minus:
+        case TokenType::Star:
+        case TokenType::Slash:
+        case TokenType::Percent:
+        case TokenType::Power:
+        case TokenType::Equal:
+        case TokenType::NotEqual:
+        case TokenType::Greater:
+        case TokenType::Less:
+        case TokenType::GreaterEqual:
+        case TokenType::LessEqual:
+        case TokenType::LogicalAnd:
+        case TokenType::LogicalOr:
+        case TokenType::LogicalNot:
+        case TokenType::AddressOf:
+        case TokenType::Increment:
+        case TokenType::Decrement:
+        case TokenType::PlusAssign:
+        case TokenType::MinusAssign:
+        case TokenType::LeftBracket:
+        case TokenType::Arrow:
+        case TokenType::Dot:
+        case TokenType::Assign:
+            return true;
+        default:
+            return false;
+        }
+    }
+
+    std::unique_ptr<TopLevel> Parser::parse_operator_definition() {
+        SourceLocation loc = current_location();
+        Type return_type = Type::make_void();
+        if (current_.type != TokenType::Identifier || current_.lexeme != "operator") {
+            return_type = parse_type(true, false);
+            if (current_.type != TokenType::Identifier ||
+                current_.lexeme != "operator") {
+                report_error_at(loc, ErrorCode::ExpressionSyntaxError,
+                    "expected 'operator' in operator overload declaration");
+                return nullptr;
+            }
+        }
+        advance();
+        std::string op_text;
+        bool conversion = false;
+        if (at_operator_symbol(current_.type)) {
+            op_text = std::string(current_.lexeme);
+            advance();
+            if (op_text == "[") {
+                if (!expect(TokenType::RightBracket, "expected ']' in operator[]")) {
+                    return nullptr;
+                }
+                op_text = "[]";
+            }
+        }
+        else {
+            conversion = true;
+        }
+        Type conversion_target;
+        if (conversion) {
+            conversion_target = parse_type(true, false);
+            if (conversion_target.kind == TypeKind::Void) {
+                report_error_at(loc, ErrorCode::ConversionOperatorTargetInvalid,
+                    "invalid conversion operator target type");
+                return nullptr;
+            }
+            return_type = conversion_target;
+        }
+        if (!expect(TokenType::LeftParen, "expected '(' after operator name")) {
+            return nullptr;
+        }
+        std::vector<std::unique_ptr<Expression>> param_defaults;
+        auto [param_types, param_names] = parse_parameter_list(&param_defaults);
+        if (!expect(TokenType::RightParen, "expected ')' after parameter list")) {
+            return nullptr;
+        }
+        auto body = parse_block();
+        if (body == nullptr) {
+            report_error(ErrorCode::ExpressionSyntaxError, "expected operator body");
+            return nullptr;
+        }
+        std::string raw_name;
+        if (conversion) {
+            raw_name = std::string("conv_") + conversion_target.to_string();
+        }
+        else if (op_text == "[]") {
+            raw_name = "index";
+        }
+        else if (op_text == "->") {
+            raw_name = "arrow";
+        }
+        else if (op_text == "++") {
+            raw_name = param_types.size() == 2 ? "post_inc" : "pre_inc";
+        }
+        else if (op_text == "--") {
+            raw_name = param_types.size() == 2 ? "post_dec" : "pre_dec";
+        }
+        else {
+            raw_name = op_text;
+        }
+        std::string sanitized;
+        sanitized.reserve(raw_name.size());
+        for (char c : raw_name) {
+            if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                (c >= '0' && c <= '9') || c == '_') {
+                sanitized.push_back(c);
+            }
+            else {
+                sanitized.push_back('_');
+            }
+        }
+        if (sanitized.empty()) {
+            sanitized = "op";
+        }
+        std::string name = std::string("__glt_op_") + sanitized;
+        auto func = std::make_unique<FunctionDefinition>(
+            loc, std::move(return_type), name,
+            std::move(param_types), std::move(param_names),
+            std::move(body));
+        func->is_operator = true;
+        func->overloaded_operator = op_text;
+        func->is_conversion_operator = conversion;
+        func->conversion_target_type = conversion_target;
         func->param_defaults = std::move(param_defaults);
         return func;
     }
@@ -511,6 +784,27 @@ namespace gallt {
                 }
                 break;
             }
+            if (at_operator_definition()) {
+                SourceLocation op_loc = current_location();
+                report_error_template_at(op_loc, ErrorCode::OperatorOverloadInsideStruct,
+                    { std::string(lookahead(1).lexeme) });
+                auto skipped = parse_operator_definition();
+                (void)skipped;
+                skip_newlines();
+                continue;
+            }
+            if (looks_like_operator_definition()) {
+                SourceLocation op_loc = current_location();
+                std::string op_text = lookahead(1).lexeme == "operator"
+                    ? std::string(lookahead(2).lexeme)
+                    : std::string(lookahead(1).lexeme);
+                report_error_template_at(op_loc, ErrorCode::OperatorOverloadInsideStruct,
+                    { op_text });
+                auto skipped = parse_operator_definition();
+                (void)skipped;
+                skip_newlines();
+                continue;
+            }
             bool type_start_token = (current_.type == TokenType::Identifier ||
                 is_type_start_keyword(current_.type));
             if (type_start_token &&
@@ -530,6 +824,39 @@ namespace gallt {
                         continue;
                     }
                     break;
+                }
+                std::size_t scan = 2;
+                int paren_depth = 0;
+                while (true) {
+                    TokenType token = lookahead_type(scan);
+                    if (token == TokenType::EndOfFile) break;
+                    if (token == TokenType::LeftParen) {
+                        paren_depth++;
+                    }
+                    else if (token == TokenType::RightParen) {
+                        paren_depth--;
+                        if (paren_depth == 0) break;
+                    }
+                    scan++;
+                }
+                TokenType after_params = lookahead_type(scan + 1);
+                if (after_params != TokenType::Star &&
+                    after_params != TokenType::Power) {
+                    report_error_template(ErrorCode::StructMethodNotAllowed,
+                        { std::string(next.lexeme) });
+                    int brace_depth = 0;
+                    while (current_.type != TokenType::EndOfFile) {
+                        if (current_.type == TokenType::LeftBrace) {
+                            brace_depth++;
+                        }
+                        else if (current_.type == TokenType::RightBrace) {
+                            if (brace_depth == 0) break;
+                            brace_depth--;
+                        }
+                        advance();
+                    }
+                    skip_newlines();
+                    continue;
                 }
             }
             Type member_type = parse_type(true);
@@ -656,6 +983,10 @@ namespace gallt {
             if (member == nullptr && !in_error_recovery_) {
                 if (at_struct_attribute()) {
                     member = parse_struct_definition();
+                }
+                else if (current_.type == TokenType::Identifier &&
+                    at_operator_definition()) {
+                    member = parse_operator_definition();
                 }
                 else if (current_.type == TokenType::Identifier &&
                     looks_like_generic_instantiation() && !at_declaration_start()) {
@@ -821,6 +1152,154 @@ namespace gallt {
         return std::make_unique<EmitStatement>(loc, std::move(pieces));
     }
 
+    std::unique_ptr<TopLevel> Parser::parse_condition_statement() {
+        std::unique_ptr<Statement> node = parse_condition_node();
+        if (node == nullptr) {
+            return nullptr;
+        }
+        Statement* raw = node.release();
+        TopLevel* top = dynamic_cast<TopLevel*>(raw);
+        if (top == nullptr) {
+            delete raw;
+            return nullptr;
+        }
+        return std::unique_ptr<TopLevel>(top);
+    }
+
+    std::unique_ptr<Statement> Parser::parse_condition_node() {
+        SourceLocation loc = current_location();
+        if (!expect(TokenType::At, "expected '@'")) {
+            return nullptr;
+        }
+        if (current_.type != TokenType::Identifier &&
+            current_.type != TokenType::Keyword_If) {
+            report_error(ErrorCode::ExpressionSyntaxError,
+                "expected 'cond', 'uncond' or 'if' after '@'");
+            synchronize();
+            return nullptr;
+        }
+        std::string directive(current_.lexeme);
+        if (directive == "cond") {
+            advance();
+            if (current_.type != TokenType::Identifier) {
+                report_error(ErrorCode::ExpressionSyntaxError,
+                    "expected condition identifier after '@cond'");
+                synchronize();
+                return nullptr;
+            }
+            std::string name(current_.lexeme);
+            advance();
+            std::unique_ptr<Expression> value = nullptr;
+            if (current_.type == TokenType::Assign) {
+                advance();
+                skip_newlines();
+                value = parse_expression();
+                if (value == nullptr) {
+                    report_error(ErrorCode::ExpressionSyntaxError,
+                        "expected expression after '@cond' '='");
+                    synchronize();
+                    return nullptr;
+                }
+            }
+            expect_stmt_end("condition definition");
+            return std::make_unique<CondDefinition>(loc, name, std::move(value));
+        }
+        if (directive == "uncond") {
+            advance();
+            if (current_.type != TokenType::Identifier) {
+                report_error(ErrorCode::ExpressionSyntaxError,
+                    "expected condition identifier after '@uncond'");
+                synchronize();
+                return nullptr;
+            }
+            std::string name(current_.lexeme);
+            advance();
+            expect_stmt_end("condition removal");
+            return std::make_unique<UncondDefinition>(loc, name);
+        }
+        if (directive == "if") {
+            advance();
+            std::unique_ptr<ConditionalBlock> block = parse_conditional_block(true);
+            return std::unique_ptr<Statement>(block.release());
+        }
+        report_error(ErrorCode::ExpressionSyntaxError,
+            "expected 'cond', 'uncond' or 'if' after '@'");
+        synchronize();
+        return nullptr;
+    }
+
+    std::unique_ptr<Expression> Parser::parse_condition_expression() {
+        if (current_.type != TokenType::LeftParen) {
+            report_error(ErrorCode::ExpressionSyntaxError,
+                "expected '(' after '@if'");
+            return nullptr;
+        }
+        advance();
+        skip_newlines();
+        auto expr = parse_expression();
+        if (expr == nullptr) {
+            report_error(ErrorCode::ExpressionSyntaxError,
+                "expected condition expression after '('");
+            return nullptr;
+        }
+        skip_newlines();
+        if (!expect(TokenType::RightParen, "expected ')' after condition expression")) {
+            return nullptr;
+        }
+        return expr;
+    }
+
+    std::unique_ptr<ConditionalBlock> Parser::parse_conditional_block(bool top_level) {
+        SourceLocation loc = current_location();
+        auto condition = parse_condition_expression();
+        if (condition == nullptr) {
+            synchronize();
+            return nullptr;
+        }
+        skip_newlines();
+        std::unique_ptr<Statement> then_block;
+        if (current_.type == TokenType::LeftBrace) {
+            std::unique_ptr<AST::Block> block = parse_block();
+            then_block.reset(block.release());
+        }
+        else {
+            if (top_level) {
+                then_block = parse_declaration_or_statement();
+            }
+            else {
+                std::unique_ptr<AST::Statement> nested = parse_statement();
+                then_block = std::move(nested);
+            }
+        }
+        skip_newlines();
+        std::unique_ptr<Statement> else_block = nullptr;
+        if (current_.type == TokenType::At && lookahead(1).lexeme == "else") {
+            advance();
+            advance();
+            skip_newlines();
+            if (current_.type == TokenType::At && lookahead(1).lexeme == "if") {
+                advance();
+                std::unique_ptr<AST::ConditionalBlock> nested =
+                    parse_conditional_block(top_level);
+                else_block.reset(nested.release());
+            }
+            else if (current_.type == TokenType::LeftBrace) {
+                std::unique_ptr<AST::Block> block = parse_block();
+                else_block.reset(block.release());
+            }
+            else if (top_level) {
+                else_block = parse_declaration_or_statement();
+            }
+            else {
+                std::unique_ptr<AST::Statement> nested = parse_statement();
+                else_block = std::move(nested);
+            }
+            skip_newlines();
+        }
+        return std::make_unique<ConditionalBlock>(loc, std::move(condition),
+            std::move(then_block), std::move(else_block));
+    }
+
     std::unique_ptr<Statement> Parser::parse_generic_compile_time_item() {
         if (current_.type == TokenType::Keyword_Emit) {
             ++generic_ct_depth_;
@@ -983,8 +1462,23 @@ namespace gallt {
             return nullptr;
         default: {
             TokenType tt = current_.type;
+            if (tt == TokenType::At) {
+                return parse_condition_node();
+            }
             if (at_struct_attribute()) {
                 return parse_struct_definition();
+            }
+            if ((tt == TokenType::Identifier && at_operator_definition()) ||
+                (is_type_start_keyword(tt) && lookahead(1).lexeme == "operator" &&
+                    lookahead_type(1) == TokenType::Identifier)) {
+                report_error_template(ErrorCode::OperatorOverloadInsideStruct,
+                    { std::string(lookahead(1).lexeme) });
+                if (tt != TokenType::Identifier) {
+                    advance();
+                }
+                auto skipped = parse_operator_definition();
+                (void)skipped;
+                return nullptr;
             }
             if (tt == TokenType::Keyword_Emit) {
                 return parse_emit_statement(generic_ct_depth_ > 0);
@@ -1362,6 +1856,10 @@ namespace gallt {
                 advance();
                 base_type = Type::make_pointer(std::make_shared<Type>(
                     Type::make_pointer(std::make_shared<Type>(base_type))));
+            }
+            else if (current_.type == TokenType::Keyword_Const) {
+                advance();
+                base_type.is_const = true;
             }
             else {
                 break;
@@ -1784,6 +2282,9 @@ namespace gallt {
             current_.type == TokenType::NotEqual ||
             current_.type == TokenType::GreaterEqual ||
             current_.type == TokenType::LessEqual) {
+            if (in_expr_argument_ && current_.type == TokenType::Greater) {
+                break;
+            }
             SourceLocation loc = current_.location;
             ComparisonExpression::Operator op;
             switch (current_.type) {
@@ -2262,12 +2763,20 @@ namespace gallt {
     }
 
     bool Parser::is_stmt_end() const {
+        if (in_expr_argument_ &&
+            (current_.type == TokenType::Greater || current_.type == TokenType::Comma)) {
+            return true;
+        }
         return current_.type == TokenType::Semicolon ||
             current_.type == TokenType::Newline ||
             current_.type == TokenType::EndOfFile;
     }
 
     bool Parser::expect_stmt_end(const std::string& context) {
+        if (in_expr_argument_ &&
+            (current_.type == TokenType::Greater || current_.type == TokenType::Comma)) {
+            return true;
+        }
         if (current_.type == TokenType::Semicolon) {
             advance();
             return true;
@@ -2404,7 +2913,54 @@ namespace gallt {
             bool first_ident = first == TokenType::Identifier;
             bool first_type_keyword = is_type_start_keyword(first);
            if (first_ident) {
-               if (second == TokenType::Identifier) {
+               if (lookahead(i).lexeme == "expr" &&
+                   (second == TokenType::Identifier ||
+                       second == TokenType::LeftParen)) {
+                   i += 1;
+                   if (lookahead_type(i) == TokenType::Identifier) {
+                       ++i;
+                   }
+                   if (lookahead_type(i) == TokenType::LeftParen) {
+                       int depth = 0;
+                       for (;;) {
+                           TokenType t = lookahead_type(i);
+                           if (t == TokenType::EndOfFile) return false;
+                           if (t == TokenType::LeftParen) { ++depth; ++i; continue; }
+                           if (t == TokenType::RightParen) {
+                               --depth;
+                               ++i;
+                               if (depth == 0) break;
+                               continue;
+                           }
+                           ++i;
+                       }
+                   }
+                   if (lookahead_type(i) != TokenType::Arrow) {
+                       return false;
+                   }
+                   ++i;
+                   if (is_type_start_keyword(lookahead_type(i)) ||
+                       lookahead_type(i) == TokenType::Identifier) {
+                       ++i;
+                       while (lookahead_type(i) == TokenType::ColonColon &&
+                           lookahead_type(i + 1) == TokenType::Identifier) {
+                           i += 2;
+                       }
+                   }
+                   else {
+                       return false;
+                   }
+                   while (true) {
+                       TokenType t = lookahead_type(i);
+                       if (t == TokenType::Star || t == TokenType::Power ||
+                           t == TokenType::Keyword_Const) {
+                           ++i;
+                           continue;
+                       }
+                       break;
+                   }
+               }
+               else if (second == TokenType::Identifier) {
                    i += 2;                                  
                }
                 else if (second == TokenType::Colon) {
@@ -2569,8 +3125,69 @@ namespace gallt {
         }
     }
 
+    std::size_t Parser::scan_expr_argument_instantiation_end() const {
+        if (current_.type != TokenType::Identifier) return std::string::npos;
+        std::size_t i = 1;
+        while (lookahead_type(i) == TokenType::ColonColon &&
+            lookahead_type(i + 1) == TokenType::Identifier) {
+            i += 2;
+        }
+        if (lookahead_type(i) != TokenType::Less) return std::string::npos;
+
+        int angle = 0;
+        int paren = 0;
+        int brace = 0;
+        bool saw_expr_argument = false;
+        for (;; ++i) {
+            TokenType t = lookahead_type(i);
+            if (t == TokenType::EndOfFile) {
+                return std::string::npos;
+            }
+            if (t == TokenType::Identifier && lookahead(i).lexeme == "expr" &&
+                (lookahead_type(i + 1) == TokenType::Identifier ||
+                    lookahead_type(i + 1) == TokenType::LeftBrace ||
+                    lookahead_type(i + 1) == TokenType::LeftParen)) {
+                saw_expr_argument = true;
+            }
+            switch (t) {
+            case TokenType::Less:
+                ++angle;
+                break;
+            case TokenType::Greater:
+                if (paren == 0 && brace == 0) {
+                    --angle;
+                    if (angle == 0) {
+                        return saw_expr_argument ? i + 1 : std::string::npos;
+                    }
+                }
+                break;
+            case TokenType::LeftParen:
+                ++paren;
+                break;
+            case TokenType::RightParen:
+                if (paren == 0) return std::string::npos;
+                --paren;
+                break;
+            case TokenType::LeftBrace:
+                ++brace;
+                break;
+            case TokenType::RightBrace:
+                if (brace == 0) return std::string::npos;
+                --brace;
+                break;
+            case TokenType::Unknown:
+                return std::string::npos;
+            default:
+                break;
+            }
+        }
+    }
+
     bool Parser::looks_like_generic_instantiation() const {
-        std::size_t after = scan_generic_instantiation_end();
+        std::size_t after = scan_expr_argument_instantiation_end();
+        if (after == std::string::npos) {
+            after = scan_generic_instantiation_end();
+        }
         if (after == std::string::npos) return false;
         switch (lookahead_type(after)) {
         case TokenType::Dot:
@@ -2837,6 +3454,129 @@ namespace gallt {
             GenericArgument arg;
             bool parsed_type = false;
             TokenType tt = current_.type;
+            if (tt == TokenType::Identifier && current_.lexeme == "expr" &&
+                (lookahead_type(1) == TokenType::Identifier ||
+                    lookahead_type(1) == TokenType::LeftBrace)) {
+                advance();
+                arg.is_type = false;
+                arg.is_expr = true;
+                arg.constant_actual_type = Type::make_void();
+                if (current_.type == TokenType::Identifier) {
+                    arg.expr_name = std::string(current_.lexeme);
+                    advance();
+                }
+                if (current_.type == TokenType::LeftParen) {
+                    advance();
+                    std::vector<std::unique_ptr<Expression>> defaults;
+                    auto [types, names] = parse_parameter_list(&defaults);
+                    arg.expr_param_types = std::move(types);
+                    arg.expr_param_names = std::move(names);
+                    if (!expect(TokenType::RightParen,
+                        "expected ')' after expression parameter list")) {
+                        return args;
+                    }
+                }
+                else {
+                    arg.expr_shorthand = true;
+                }
+                if (current_.type != TokenType::Arrow) {
+                    report_error(ErrorCode::ExpressionSyntaxError,
+                        "expected '->' and a return type in expression argument");
+                    return args;
+                }
+                advance();
+                arg.expr_return_type = parse_type(true, false);
+                std::size_t body_start = mark();
+                bool block_form = false;
+                if (current_.type == TokenType::Assign) {
+                    advance();
+                }
+                else if (current_.type == TokenType::LeftBrace) {
+                    block_form = true;
+                    advance();
+                }
+                else {
+                    report_error(ErrorCode::ExpressionSyntaxError,
+                        "expected '=' or '{' in expression argument");
+                    return args;
+                }
+                auto body = std::make_shared<ExpressionParameterBody>();
+                body->location = current_location();
+                const bool outer_expr_argument = in_expr_argument_;
+                in_expr_argument_ = !block_form;
+                if (block_form) {
+                    while (current_.type != TokenType::RightBrace &&
+                        current_.type != TokenType::EndOfFile) {
+                        skip_newlines();
+                        if (current_.type == TokenType::RightBrace) break;
+                        auto stmt = parse_statement();
+                        if (stmt != nullptr) {
+                            body->statements.push_back(std::move(stmt));
+                        }
+                        else {
+                            synchronize();
+                        }
+                    }
+                    if (!expect(TokenType::RightBrace,
+                        "expected '}' to close expression argument block")) {
+                        return args;
+                    }
+                }
+                else {
+                    while (true) {
+                        skip_newlines();
+                        auto stmt = parse_statement();
+                        if (stmt != nullptr) {
+                            body->statements.push_back(std::move(stmt));
+                        }
+                        else {
+                            break;
+                        }
+                        skip_newlines();
+                        if (current_.type == TokenType::Comma ||
+                            current_.type == TokenType::Greater ||
+                            current_.type == TokenType::EndOfFile) {
+                            break;
+                        }
+                        if (current_.type == TokenType::Semicolon) {
+                            advance();
+                            skip_newlines();
+                            if (current_.type == TokenType::Comma ||
+                                current_.type == TokenType::Greater) {
+                                break;
+                            }
+                            if (current_.type == TokenType::RightBrace ||
+                                current_.type == TokenType::EndOfFile) {
+                                break;
+                            }
+                        }
+                    }
+                    while (current_.type == TokenType::Semicolon) {
+                        advance();
+                        skip_newlines();
+                    }
+                }
+                in_expr_argument_ = outer_expr_argument;
+                skip_newlines();
+                if (!block_form && !body->statements.empty()) {
+                    Statement* last = body->statements.back().get();
+                    if (auto* expr_stmt = dynamic_cast<ExpressionStatement*>(last)) {
+                        auto ret = std::make_unique<ReturnStatement>(
+                            expr_stmt->location, std::move(expr_stmt->expr));
+                        body->statements.pop_back();
+                        body->statements.push_back(std::move(ret));
+                    }
+                }
+                arg.expr_body = body;
+                arg.text = expression_argument_text(body_start, mark());
+                args.push_back(std::move(arg));
+                if (current_.type == TokenType::Comma) {
+                    advance();
+                    skip_newlines();
+                    continue;
+                }
+                break;
+            }
             bool type_start = (is_builtin_or_void_type_keyword(tt) ||
                 tt == TokenType::Identifier);
             if (type_start) {
@@ -2916,6 +3656,7 @@ namespace gallt {
             args.push_back(std::move(arg));
             if (current_.type == TokenType::Comma) {
                 advance();
+                skip_newlines();
                 continue;
             }
             break;
@@ -3026,7 +3767,35 @@ namespace gallt {
                 if (!is_specialization) {
                     GenericParameter param;
                     param.location = current_location();
-                    if (current_.type == TokenType::Identifier) {
+                    if (current_.type == TokenType::Identifier &&
+                        current_.lexeme == "expr" &&
+                        lookahead_type(1) == TokenType::Identifier) {
+                        advance();
+                        param.is_type = false;
+                        param.is_expr = true;
+                        param.name = std::string(current_.lexeme);
+                        advance();
+                        if (current_.type == TokenType::LeftParen) {
+                            advance();
+                            std::vector<std::unique_ptr<Expression>> defaults;
+                            auto [types, names] = parse_parameter_list(&defaults);
+                            param.expr_param_types = std::move(types);
+                            param.expr_param_names = std::move(names);
+                            if (!expect(TokenType::RightParen,
+                                "expected ')' after expression parameter list")) {
+                                return nullptr;
+                            }
+                        }
+                        if (current_.type != TokenType::Arrow) {
+                            report_error(ErrorCode::ExpressionSyntaxError,
+                                "expected '->' and a return type in expression parameter declaration");
+                            return nullptr;
+                        }
+                        advance();
+                        param.expr_return_type = parse_type(true, false);
+                        def->parameters.push_back(std::move(param));
+                    }
+                    else if (current_.type == TokenType::Identifier) {
                         std::string first(current_.lexeme);
                         if (lookahead_type(1) == TokenType::Identifier) {
                             param.is_type = false;
@@ -3068,6 +3837,14 @@ namespace gallt {
                 }
                 else {
                     GenericPatternArg pattern;
+                    if (current_.type == TokenType::Identifier &&
+                        current_.lexeme == "expr" &&
+                        (lookahead_type(1) == TokenType::Identifier ||
+                            lookahead_type(1) == TokenType::LeftParen)) {
+                        report_error_template(ErrorCode::ExprParameterInSpecializationPattern,
+                            { std::string(lookahead(1).lexeme) });
+                        return nullptr;
+                    }
                     bool type_like = (is_builtin_type_keyword(current_.type) ||
                         current_.type == TokenType::Identifier);
                     if (type_like) {

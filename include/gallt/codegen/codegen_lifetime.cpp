@@ -85,7 +85,7 @@ namespace gallt {
                 const AST::StructDefinition* def = it->second;
                 const std::string& user_fn = is_assignment ? def->copy_assignment_name
                                                            : def->copy_constructor_name;
-                if (!user_fn.empty()) {
+                if (!user_fn.empty() && lifecycle_owner_ != def) {
                     std::string callee = function_reference(user_fn);
                     if (!callee.empty()) {
                         emit_line("call void " + callee + "(ptr " + dst + ", ptr " + src + ")");
@@ -144,7 +144,7 @@ namespace gallt {
                 const AST::StructDefinition* def = it->second;
                 const std::string& user_fn = is_assignment ? def->move_assignment_name
                                                            : def->move_constructor_name;
-                if (!user_fn.empty()) {
+                if (!user_fn.empty() && lifecycle_owner_ != def) {
                     std::string callee = function_reference(user_fn);
                     if (!callee.empty()) {
                         emit_line("call void " + callee + "(ptr " + dst + ", ptr " + src + ")");

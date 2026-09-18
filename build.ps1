@@ -21,6 +21,7 @@ $Sources = @(
     'include\gallt\parser\ast.cpp',
     'include\gallt\parser\parser.cpp',
     'include\gallt\semantic\generic_expander.cpp',
+    'include\gallt\semantic\condition_compiler.cpp',
     'include\gallt\semantic\constant_folding.cpp',
     'include\gallt\semantic\lifecycle.cpp',
     'include\gallt\semantic\namespace_lowering.cpp',

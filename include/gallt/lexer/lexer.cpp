@@ -610,6 +610,8 @@ namespace gallt {
             return Token{ TokenType::Colon, start_loc, ":" };
         case '.':
             return Token{ TokenType::Dot, start_loc, "." };
+        case '@':
+            return Token{ TokenType::At, start_loc, "@" };
 
         default: {
             std::string msg = "unexpected character '";

@@ -86,6 +86,7 @@ namespace gallt {
         Colon,              
         Newline,            
         EndOfFile,          
+        At,                 
         Unknown,            
     };
 

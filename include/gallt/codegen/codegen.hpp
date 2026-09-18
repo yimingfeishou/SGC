@@ -3,6 +3,7 @@
 #include "../common/diagnostics.hpp"
 #include "../parser/ast.hpp"
 #include <string>
+#include <deque>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -16,7 +17,9 @@ namespace gallt {
             const std::unordered_map<const AST::PrimaryExpression*,
                 const AST::FunctionDefinition*>& resolved_functions = {},
             const std::unordered_map<const AST::PrimaryExpression*,
-                const AST::ExternDeclaration*>& resolved_externs = {});
+                const AST::ExternDeclaration*>& resolved_externs = {},
+            const std::unordered_map<const AST::Expression*,
+                AST::FunctionDefinition*>& resolved_operators = {});
 
         bool generate();
 
@@ -28,11 +31,13 @@ namespace gallt {
 
     private:
         AST::Program* program_;
-        const std::unordered_map<const AST::Expression*, AST::Type>& expression_types_;
-        const std::unordered_map<const AST::PrimaryExpression*, const AST::FunctionDefinition*>&
+        std::unordered_map<const AST::Expression*, AST::Type> expression_types_;
+        std::unordered_map<const AST::PrimaryExpression*, const AST::FunctionDefinition*>
             resolved_functions_;
         const std::unordered_map<const AST::PrimaryExpression*, const AST::ExternDeclaration*>&
             resolved_externs_;
+        const std::unordered_map<const AST::Expression*, AST::FunctionDefinition*>&
+            resolved_operators_;
         std::string ir_;
         std::vector<std::string> link_libraries_;
         std::vector<AST::StructDefinition*> struct_defs_;
@@ -40,12 +45,34 @@ namespace gallt {
         struct LocalInfo {
             AST::Type type;
             std::string address;
+            bool is_constant = false;
+            std::string constant_text;
+            const AST::Expression* constant_expr = nullptr;
+        };
+        struct ConstantNumeric {
+            long long int_value = 0;
+            double float_value = 0.0;
+            bool is_float = false;
         };
         struct CleanupRecord {
             AST::Type type;
             std::string address;
         };
         std::vector<AST::VariableDeclaration*> global_vars_;
+        std::vector<AST::VariableDeclaration*> const_globals_;
+        std::unordered_map<std::string, ConstantNumeric> constant_values_;
+        enum class LifecycleKind {
+            Constructor,
+            Destructor,
+            CopyConstructor,
+            MoveConstructor,
+            CopyAssignment,
+            MoveAssignment
+        };
+        bool emitting_lifecycle_body_ = false;
+        const AST::StructDefinition* lifecycle_owner_ = nullptr;
+        std::unordered_set<std::string> lifecycle_symbols_;
+        std::unordered_set<std::string> emitted_lifecycle_bodies_;
         std::vector<CleanupRecord> statement_temporaries_;
         std::unordered_map<std::string, LocalInfo> global_symbols_;
         std::unordered_map<std::string, AST::FunctionDefinition*> function_by_name_;
@@ -56,6 +83,8 @@ namespace gallt {
         };
         std::vector<StringLiteralConstant> string_literals_;
         std::unordered_map<std::string, std::string> string_literal_ids_;
+        std::vector<std::unique_ptr<AST::Expression>> operator_extra_nodes_;
+        std::deque<std::string> lexeme_pool_;
 
         std::vector<std::string> lines_;
         unsigned temp_counter_ = 0;
@@ -92,6 +121,13 @@ namespace gallt {
         void emit_runtime_declarations();
         void emit_function_declarations();
         void emit_functions();
+        void emit_lifecycle_functions();
+        void register_lifecycle_symbols();
+        void emit_lifecycle_body(AST::StructDefinition* def, LifecycleKind kind,
+            const std::string& name);
+        std::string lifecycle_symbol(const AST::StructDefinition* def,
+            LifecycleKind kind) const;
+        bool ast_function_exists(const std::string& name) const;
         void collect_global_variables();
         void collect_function_signatures();
         void emit_global_variables();
@@ -117,6 +153,7 @@ namespace gallt {
         void destroy_statement_temporaries();
         void emit_block(AST::Block* block, bool new_scope);
         void emit_variable_declaration(AST::VariableDeclaration* decl);
+        bool fold_constant_declaration(AST::VariableDeclaration* decl, LocalInfo& info);
         void emit_expression_statement(AST::ExpressionStatement* stmt);
 
         std::vector<std::unordered_map<std::string, LocalInfo>> scopes_;
@@ -137,6 +174,12 @@ namespace gallt {
         };
 
         ExprValue gen_expr(AST::Expression* expr);
+        bool gen_operator_call(AST::Expression* expr, ExprValue& out);
+        ExprValue emit_operator_invocation(AST::FunctionDefinition* callee,
+            std::vector<AST::Expression*>& final_arguments, bool postfix_dummy,
+            SourceLocation loc);
+        ExprValue gen_operator_argument(AST::Expression* expr, bool need_address,
+            const AST::Type& parameter_type);
         ExprValue gen_primary(AST::PrimaryExpression* expr);
         ExprValue gen_unary(AST::UnaryExpression* expr);
         ExprValue gen_postfix(AST::PostfixExpression* expr);

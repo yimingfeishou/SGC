@@ -14,12 +14,36 @@ namespace gallt {
 
     class GenericExpander {
     public:
+        struct ExpressionCallSite {
+            std::string name;
+            AST::Type declared_return_type;
+            std::vector<AST::Type> declared_parameter_types;
+            SourceLocation location;
+            int depth = 0;
+        };
+
         explicit GenericExpander(DiagnosticEngine& diag);
 
         bool expand(AST::Program* program);
 
         const std::unordered_map<std::string, AST::StructDefinition*>& instantiated_structs() const {
             return instantiated_structs_;
+        }
+
+        const std::unordered_map<const AST::Expression*, ExpressionCallSite>&
+            expression_call_sites() const {
+            return expression_call_sites_;
+        }
+
+        const std::unordered_map<const AST::Expression*, std::string>&
+            expression_free_identifiers() const {
+            return expression_free_identifiers_;
+        }
+
+        const std::unordered_map<const AST::Expression*,
+            std::tuple<std::string, std::size_t, AST::Type>>&
+            expression_argument_casts() const {
+            return expression_argument_casts_;
         }
 
     private:
@@ -41,6 +65,18 @@ namespace gallt {
             std::unordered_map<std::string, ConstantValue> constants;
             std::unordered_map<std::string, AST::Type> constant_types;
             std::unordered_map<std::string, std::string> members;
+            struct ExpressionBinding {
+                std::string name;
+                std::vector<AST::Type> parameter_types;
+                std::vector<std::string> parameter_names;
+                AST::Type return_type;
+                std::shared_ptr<AST::ExpressionParameterBody> body;
+                std::string normalized;
+            };
+            std::unordered_map<std::string, ExpressionBinding> expressions;
+            std::unordered_map<std::string, std::string> renames;
+            std::unordered_map<std::string, const AST::Expression*> expr_arguments;
+            std::unordered_map<std::string, AST::Type> expr_argument_types;
             AST::GenericRef instance;
         };
 
@@ -58,6 +94,19 @@ namespace gallt {
         std::unordered_map<std::string, AST::FunctionDefinition*> func_defs_;
         std::unordered_map<std::string, AST::ExternDeclaration*> extern_defs_;
         std::unordered_map<std::string, AST::StructDefinition*> instantiated_structs_;
+        std::unordered_map<const AST::Expression*, ExpressionCallSite> expression_call_sites_;
+        int expression_expansion_depth_ = 0;
+        const AST::FunctionDefinition* current_function_ = nullptr;
+        std::vector<std::unique_ptr<AST::Statement>>* pending_hoisted_ = nullptr;
+        std::vector<std::unique_ptr<AST::Expression>> expr_argument_storage_;
+        int expr_temp_counter_ = 0;
+        bool in_expression_body_ = false;
+        std::unordered_map<const AST::Expression*, std::string>
+            expression_free_identifiers_;
+        std::unordered_map<const AST::Expression*,
+            std::tuple<std::string, std::size_t, AST::Type>>
+            expression_argument_casts_;
+        std::unordered_map<std::string, std::size_t> expression_parameter_index_;
 
         std::unordered_set<std::string> instantiated_members_;
         std::unordered_set<std::string> instantiated_blocks_;
@@ -90,6 +139,15 @@ namespace gallt {
 
         std::unique_ptr<AST::Statement> clone_statement(const AST::Statement* stmt,
             const Substitution& sub);
+        std::unique_ptr<AST::Statement> clone_statement_impl(const AST::Statement* stmt,
+            const Substitution& sub);
+        std::unique_ptr<AST::Statement> clone_substatement(const AST::Statement* stmt,
+            const Substitution& sub);
+        bool emit_body_into_temp(const std::vector<std::unique_ptr<AST::Statement>>& stmts,
+            const Substitution& sub, const std::string& temp_name,
+            const AST::Type& result_type,
+            std::vector<std::unique_ptr<AST::Statement>>& out);
+        bool body_always_returns(const AST::Statement* stmt) const;
         std::unique_ptr<AST::Expression> clone_expression(const AST::Expression* expr,
             const Substitution& sub);
         std::unique_ptr<AST::Expression> make_constant_literal(SourceLocation loc,
@@ -101,6 +159,8 @@ namespace gallt {
             const std::string& name);
         AST::StructDefinition::Member clone_member(const AST::StructDefinition::Member& member,
             const Substitution& sub);
+        AST::StructDefinition::Member clone_member_impl(
+            const AST::StructDefinition::Member& member, const Substitution& sub);
         std::unique_ptr<AST::SpecialMemberFunction> clone_special_member(
             const AST::SpecialMemberFunction* member, const Substitution& sub);
 
@@ -174,6 +234,45 @@ namespace gallt {
             const AST::PostfixExpression* expr, const Substitution& sub);
 
         void add_top_level(std::unique_ptr<AST::TopLevel> node);
+
+        static std::string signature_text(const std::vector<AST::Type>& types);
+        static constexpr int kMaxExpressionExpansionDepth = 64;
+        std::unique_ptr<AST::Expression> expand_expression_body(
+            const AST::FunctionDefinition* owner, const Substitution& sub,
+            const Substitution::ExpressionBinding& binding,
+            const std::unordered_map<std::string, const AST::Expression*>& parameter_arguments,
+            const std::unordered_map<std::string, AST::Type>& parameter_types,
+            const std::unordered_set<std::string>& locals);
+        std::unique_ptr<AST::Expression> substitute_expression_with_bindings(
+            const AST::Expression* expr, const Substitution& sub,
+            const std::unordered_map<std::string, const AST::Expression*>& parameter_arguments,
+            const std::unordered_map<std::string, AST::Type>& parameter_types,
+            const std::unordered_map<std::string, const AST::Expression*>& local_values,
+            const std::unordered_set<std::string>& locals);
+        bool expand_statement_sequence(
+            const std::vector<std::unique_ptr<AST::Statement>>& statements,
+            const Substitution& sub,
+            const std::unordered_map<std::string, const AST::Expression*>& parameter_arguments,
+            const std::unordered_map<std::string, AST::Type>& parameter_types,
+            const std::unordered_set<std::string>& locals,
+            std::unordered_map<std::string, const AST::Expression*>& local_values,
+            std::unique_ptr<AST::Expression>& out, SourceLocation& out_loc);
+        bool validate_expression_body(const AST::GenericParameter& param,
+            const Substitution::ExpressionBinding& binding, SourceLocation loc);
+        bool statement_is_allowed_in_expression_body(const AST::Statement* stmt,
+            SourceLocation& bad_loc, ErrorCode& code, std::string& detail);
+        void collect_declared_names(const AST::Statement* stmt,
+            std::unordered_set<std::string>& out) const;
+        void collect_free_identifiers(const AST::Expression* expr,
+            const std::unordered_set<std::string>& bound,
+            std::unordered_set<std::string>& out) const;
+        void collect_free_identifiers_in_statement(const AST::Statement* stmt,
+            std::unordered_set<std::string>& out) const;
+        std::unique_ptr<AST::Expression> expand_expression_call(
+            const AST::FunctionDefinition* owner, const Substitution& sub,
+            const std::string& name,
+            std::vector<std::unique_ptr<AST::Expression>>& arguments,
+            SourceLocation loc, bool& ok);
     };
 
 } 

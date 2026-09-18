@@ -7,6 +7,7 @@
 #include "../parser/ast.hpp"
 #include "../parser/parser.hpp"
 #include "../semantic/generic_expander.hpp"
+#include "../semantic/condition_compiler.hpp"
 #include "../semantic/lifecycle.hpp"
 #include "../semantic/namespace_lowering.hpp"
 #include "../semantic/type_checker.hpp"
@@ -345,6 +346,12 @@ namespace {
         SourceLocation fake_start;
         AST::Program combined(fake_start, std::move(all_nodes));
 
+        ConditionCompiler conditions(diag);
+        if (!conditions.run(&combined) || diag.has_errors()) {
+            diag.print_all(std::cerr);
+            return 1;
+        }
+
         NamespaceLowering namespaces(diag);
         if (!namespaces.run(&combined) || diag.has_errors()) {
             diag.print_all(std::cerr);
@@ -363,14 +370,16 @@ namespace {
             return 1;
         }
 
-        TypeChecker checker(diag);
+        TypeChecker checker(diag, expander.expression_free_identifiers(),
+            expander.expression_argument_casts());
         if (!checker.check_program(&combined)) {
             diag.print_all(std::cerr);
             return 1;
         }
 
         CodeGenerator generator(&combined, checker.expression_types(),
-            checker.resolved_functions(), checker.resolved_externs());
+            checker.resolved_functions(), checker.resolved_externs(),
+            checker.resolved_operators());
         generator.generate();
         if (diag.has_errors()) {
             diag.print_all(std::cerr);
@@ -419,6 +428,14 @@ namespace {
             L"-o", output_path,
         };
 
+        if (options.debug_symbols_level == 1) {
+            tool_args.push_back(L"-gline-tables-only");
+        } else if (options.debug_symbols_level >= 2) {
+            tool_args.push_back(L"-gcodeview");
+            tool_args.push_back(L"-g");
+            tool_args.push_back(L"-Wl,/DEBUG");
+        }
+
         bool reset_language = false;
         for (const std::string& lib : generator.link_libraries()) {
             std::string ref = normalize_library_reference(lib);
@@ -448,6 +465,8 @@ namespace {
         if (link_result != 0) {
             std::cerr << "sgc: LLVM backend failed with exit code "
                 << link_result << '\n';
+        } else {
+            std::cout << "Compilation successful\n";
         }
 
         if (::GetEnvironmentVariableW(L"SGC_KEEP_TEMP", nullptr, 0) == 0) {

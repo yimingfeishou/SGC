@@ -123,6 +123,7 @@ namespace gallt {
         case TokenType::Colon: return ":";
         case TokenType::Newline: return "newline";
         case TokenType::EndOfFile: return "end of file";
+        case TokenType::At: return "@";
         case TokenType::Unknown: return "unknown token";
         }
         return "token";

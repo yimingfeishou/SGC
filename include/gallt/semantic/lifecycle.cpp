@@ -250,7 +250,207 @@ namespace gallt {
             if (info.move_constructor) scan_return(info.move_constructor->body.get());
             if (info.copy_assignment) scan_return(info.copy_assignment->body.get());
             if (info.move_assignment) scan_return(info.move_assignment->body.get());
+
+            check_copy_constructor_source(info);
         }
+    }
+
+    void LifecycleLowering::check_copy_constructor_source(const StructInfo& info) {
+        const SpecialMemberFunction* copy_constructor = info.copy_constructor;
+        if (copy_constructor == nullptr || copy_constructor->body == nullptr) return;
+        const std::string source = copy_constructor->parameter_name;
+        if (source.empty()) return;
+
+        std::unordered_set<std::string> shadowed;
+
+        std::function<bool(const Expression*)> targets_source =
+            [&](const Expression* expr) -> bool {
+            if (expr == nullptr) return false;
+            if (auto* prim = dynamic_cast<const PrimaryExpression*>(expr)) {
+                if (prim->kind == PrimaryExpression::Kind::Parens) {
+                    return targets_source(prim->paren_expr.get());
+                }
+                return prim->kind == PrimaryExpression::Kind::Identifier &&
+                    prim->identifier == source && shadowed.count(source) == 0;
+            }
+            if (auto* post = dynamic_cast<const PostfixExpression*>(expr)) {
+                switch (post->op) {
+                case PostfixExpression::Operator::Dot:
+                case PostfixExpression::Operator::Arrow:
+                case PostfixExpression::Operator::Subscript:
+                case PostfixExpression::Operator::Increment:
+                case PostfixExpression::Operator::Decrement:
+                    return targets_source(post->base.get());
+                default:
+                    return false;
+                }
+            }
+            if (auto* un = dynamic_cast<const UnaryExpression*>(expr)) {
+                if (un->op == UnaryExpression::Operator::Dereference) {
+                    return targets_source(un->operand.get());
+                }
+                return false;
+            }
+            return false;
+        };
+
+        auto report_source_write = [&](SourceLocation loc) {
+            report(loc, ErrorCode::ConstModification,
+                "copy constructor must not modify its source object '" + source + "'");
+        };
+
+        std::function<void(const Expression*)> scan_expression =
+            [&](const Expression* expr) {
+            if (expr == nullptr) return;
+            if (auto* assign = dynamic_cast<const AssignmentExpression*>(expr)) {
+                if (targets_source(assign->left.get())) report_source_write(assign->location);
+            }
+            if (auto* prim = dynamic_cast<const PrimaryExpression*>(expr)) {
+                scan_expression(prim->paren_expr.get());
+                scan_expression(prim->heap_size.get());
+                scan_expression(prim->placement_target.get());
+                for (const auto& arg : prim->construct_args) scan_expression(arg.get());
+                return;
+            }
+            if (auto* post = dynamic_cast<const PostfixExpression*>(expr)) {
+                if ((post->op == PostfixExpression::Operator::Increment ||
+                    post->op == PostfixExpression::Operator::Decrement) &&
+                    targets_source(post->base.get())) {
+                    report_source_write(post->location);
+                }
+                scan_expression(post->base.get());
+                scan_expression(post->subscript_expr.get());
+                for (const auto& arg : post->arguments) scan_expression(arg.get());
+                return;
+            }
+            if (auto* un = dynamic_cast<const UnaryExpression*>(expr)) {
+                if ((un->op == UnaryExpression::Operator::Increment ||
+                    un->op == UnaryExpression::Operator::Decrement) &&
+                    targets_source(un->operand.get())) {
+                    report_source_write(un->location);
+                }
+                scan_expression(un->operand.get());
+                return;
+            }
+            if (auto* e = dynamic_cast<const LogicalOrExpression*>(expr)) {
+                scan_expression(e->left.get());
+                scan_expression(e->right.get());
+                return;
+            }
+            if (auto* e = dynamic_cast<const LogicalAndExpression*>(expr)) {
+                scan_expression(e->left.get());
+                scan_expression(e->right.get());
+                return;
+            }
+            if (auto* e = dynamic_cast<const ComparisonExpression*>(expr)) {
+                scan_expression(e->left.get());
+                scan_expression(e->right.get());
+                return;
+            }
+            if (auto* e = dynamic_cast<const AdditiveExpression*>(expr)) {
+                scan_expression(e->left.get());
+                scan_expression(e->right.get());
+                return;
+            }
+            if (auto* e = dynamic_cast<const MultiplicativeExpression*>(expr)) {
+                scan_expression(e->left.get());
+                scan_expression(e->right.get());
+                return;
+            }
+            if (auto* e = dynamic_cast<const PowerExpression*>(expr)) {
+                scan_expression(e->left.get());
+                scan_expression(e->right.get());
+                return;
+            }
+            if (auto* e = dynamic_cast<const CompileTimePropertyExpression*>(expr)) {
+                scan_expression(e->receiver.get());
+                for (const auto& arg : e->arguments) scan_expression(arg.get());
+                return;
+            }
+        };
+
+        std::function<void(const Initializer*)> scan_initializer =
+            [&](const Initializer* init) {
+            if (init == nullptr) return;
+            if (auto* expr_init = dynamic_cast<const ExpressionInitializer*>(init)) {
+                scan_expression(expr_init->expr.get());
+                return;
+            }
+            if (auto* arr_init = dynamic_cast<const ArrayInitializer*>(init)) {
+                for (const auto& element : arr_init->elements) {
+                    scan_initializer(element.get());
+                }
+            }
+        };
+
+        std::function<void(const Statement*)> scan_statement =
+            [&](const Statement* stmt) {
+            if (stmt == nullptr) return;
+            if (auto* block = dynamic_cast<const Block*>(stmt)) {
+                std::vector<std::string> introduced;
+                for (const auto& child : block->statements) {
+                    if (auto* decl = dynamic_cast<const VariableDeclaration*>(child.get())) {
+                        if (shadowed.insert(decl->name).second) {
+                            introduced.push_back(decl->name);
+                        }
+                    }
+                    scan_statement(child.get());
+                }
+                for (const std::string& name : introduced) shadowed.erase(name);
+                return;
+            }
+            if (auto* decl = dynamic_cast<const VariableDeclaration*>(stmt)) {
+                scan_initializer(decl->initializer.get());
+                scan_expression(decl->array_size_expr.get());
+                return;
+            }
+            if (auto* expr_stmt = dynamic_cast<const ExpressionStatement*>(stmt)) {
+                scan_expression(expr_stmt->expr.get());
+                return;
+            }
+            if (auto* if_stmt = dynamic_cast<const IfStatement*>(stmt)) {
+                scan_expression(if_stmt->condition.get());
+                scan_statement(if_stmt->then_block.get());
+                scan_statement(if_stmt->else_block.get());
+                return;
+            }
+            if (auto* for_stmt = dynamic_cast<const ForStatement*>(stmt)) {
+                std::vector<std::string> introduced;
+                if (for_stmt->init != nullptr) {
+                    if (auto* init_decl =
+                        dynamic_cast<const VariableDeclaration*>(for_stmt->init.get())) {
+                        if (shadowed.insert(init_decl->name).second) {
+                            introduced.push_back(init_decl->name);
+                        }
+                    }
+                    scan_statement(for_stmt->init.get());
+                }
+                scan_expression(for_stmt->condition.get());
+                scan_expression(for_stmt->step.get());
+                scan_statement(for_stmt->body.get());
+                for (const std::string& name : introduced) shadowed.erase(name);
+                return;
+            }
+            if (auto* while_stmt = dynamic_cast<const WhileStatement*>(stmt)) {
+                scan_expression(while_stmt->condition.get());
+                scan_statement(while_stmt->body.get());
+                return;
+            }
+            if (auto* return_stmt = dynamic_cast<const ReturnStatement*>(stmt)) {
+                scan_expression(return_stmt->value.get());
+                return;
+            }
+            if (auto* destruct_stmt = dynamic_cast<const DestructStatement*>(stmt)) {
+                scan_expression(destruct_stmt->target.get());
+                return;
+            }
+            if (auto* emit_stmt = dynamic_cast<const EmitStatement*>(stmt)) {
+                for (const auto& piece : emit_stmt->pieces) scan_expression(piece.get());
+                return;
+            }
+        };
+
+        scan_statement(copy_constructor->body.get());
     }
 
     void LifecycleLowering::collect_declarations() {

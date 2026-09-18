@@ -166,6 +166,8 @@ namespace gallt {
             std::string to_string() const;
         };
 
+        struct ExpressionParameterBody;
+
         struct GenericArgument {
             bool is_type = true;              
             Type type;                        
@@ -177,8 +179,20 @@ namespace gallt {
             std::string text;                 
             Type constant_actual_type;
             std::shared_ptr<Expression> expression;
+            bool is_expr = false;
+            std::string expr_name;
+            std::vector<Type> expr_param_types;
+            std::vector<std::string> expr_param_names;
+            Type expr_return_type;
+            std::shared_ptr<ExpressionParameterBody> expr_body;
+            bool expr_shorthand = false;
 
             std::string normalize() const;
+        };
+
+        struct ExpressionParameterBody {
+            SourceLocation location;
+            std::vector<std::unique_ptr<Statement>> statements;
         };
 
         struct GenericRef {
@@ -195,6 +209,16 @@ namespace gallt {
         };
 
         inline std::string GenericArgument::normalize() const {
+            if (is_expr) {
+                std::string out = "expr " + expr_name + "(";
+                for (std::size_t i = 0; i < expr_param_types.size(); ++i) {
+                    if (i != 0) out += ",";
+                    out += expr_param_types[i].to_string();
+                }
+                out += ")";
+                out += text;
+                return out;
+            }
             if (is_type) {
                 return type.to_string();
             }
@@ -367,6 +391,11 @@ namespace gallt {
             std::vector<std::string> param_names;
             std::vector<std::unique_ptr<Expression>> param_defaults;
             std::unique_ptr<Statement> body;
+            bool is_operator = false;
+            std::string overloaded_operator;
+            bool is_conversion_operator = false;
+            Type conversion_target_type;
+            bool operator_postfix_dummy = false;
 
             FunctionDefinition(SourceLocation loc, Type ret, std::string_view n,
                 std::vector<Type> params, std::vector<std::string> pnames,
@@ -485,6 +514,10 @@ namespace gallt {
             std::string constant_type_parameter;
             GenericConstraint constraint;     
             SourceLocation location;
+            bool is_expr = false;
+            std::vector<Type> expr_param_types;
+            std::vector<std::string> expr_param_names;
+            Type expr_return_type;
         };
 
         struct GenericPatternArg {
@@ -560,6 +593,47 @@ namespace gallt {
                 : Node(loc), TopLevel(loc), Statement(loc), name(n), location(loc) {
             }
             virtual ~AdditionNamespaceStatement() noexcept = default;
+        };
+
+        class CondDefinition : public TopLevel, public Statement {
+        public:
+            std::string name;
+            std::unique_ptr<Expression> value;
+
+            CondDefinition(SourceLocation loc, std::string_view n,
+                std::unique_ptr<Expression> v)
+                : Node(loc), TopLevel(loc), Statement(loc), name(n),
+                value(std::move(v)) {
+            }
+            virtual ~CondDefinition() noexcept = default;
+        };
+
+        class UncondDefinition : public TopLevel, public Statement {
+        public:
+            std::string name;
+
+            UncondDefinition(SourceLocation loc, std::string_view n)
+                : Node(loc), TopLevel(loc), Statement(loc), name(n) {
+            }
+            virtual ~UncondDefinition() noexcept = default;
+        };
+
+        class ConditionalBlock : public TopLevel, public Statement {
+        public:
+            std::unique_ptr<Expression> condition;
+            std::unique_ptr<Statement> then_block;
+            std::unique_ptr<Statement> else_block;
+
+            ConditionalBlock(SourceLocation loc,
+                std::unique_ptr<Expression> cond,
+                std::unique_ptr<Statement> then_stmt,
+                std::unique_ptr<Statement> else_stmt)
+                : Node(loc), TopLevel(loc), Statement(loc),
+                condition(std::move(cond)),
+                then_block(std::move(then_stmt)),
+                else_block(std::move(else_stmt)) {
+            }
+            virtual ~ConditionalBlock() noexcept = default;
         };
 
         class Program : public Node {
@@ -868,6 +942,7 @@ namespace gallt {
             std::unique_ptr<Expression> subscript_expr;
             std::vector<std::unique_ptr<Expression>> arguments;
             std::vector<Expression*> appended_defaults;
+            std::vector<Expression*> borrowed_arguments;
             Type cast_type;
             std::string member_name;
 

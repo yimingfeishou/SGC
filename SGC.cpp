@@ -2,8 +2,8 @@
 #include "include/gallt/driver/compiler.hpp"
 #include <iostream>
 
-const std::string VERSION = "0.4.1 Preview";
-const std::string BUILD_DATE = "2026-09-16";
+const std::string VERSION = "0.4.2-0918 Preview";
+const std::string BUILD_DATE = "2026-09-18";
 
 int wmain(int argc, wchar_t* argv[]) {
     std::cout << "sgc Standard Gallt Compiler " << VERSION << "\n";

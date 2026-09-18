@@ -3,6 +3,7 @@
 #include "../lexer/lexer.hpp"
 #include "../parser/parser.hpp"
 #include <algorithm>
+#include <cstdlib>
 #include <cstdio>
 #include <functional>
 #include <map>
@@ -34,7 +35,10 @@ namespace gallt {
             for (std::size_t i = 0; i < ref.arguments.size(); ++i) {
                 const GenericArgument& arg = ref.arguments[i];
                 out += "|";
-                if (arg.is_type) {
+                if (arg.is_expr) {
+                    out += "E:" + arg.text;
+                }
+                else if (arg.is_type) {
                     out += "T:" + arg.type.to_string();
                 }
                 else if (arg.is_string_constant) {
@@ -52,6 +56,312 @@ namespace gallt {
     } 
 
     GenericExpander::GenericExpander(DiagnosticEngine& diag) : diag_(diag) {}
+
+    std::string GenericExpander::signature_text(const std::vector<AST::Type>& types) {
+        std::string out;
+        for (std::size_t i = 0; i < types.size(); ++i) {
+            if (i != 0) out += ", ";
+            out += types[i].to_string();
+        }
+        return out;
+    }
+
+    bool GenericExpander::statement_is_allowed_in_expression_body(const AST::Statement* stmt,
+        SourceLocation& bad_loc, ErrorCode& code, std::string& detail) {
+        if (stmt == nullptr) {
+            return true;
+        }
+        if (dynamic_cast<const StructDefinition*>(stmt) != nullptr) {
+            bad_loc = stmt->location;
+            code = ErrorCode::ExprParameterBlockDisallowedDeclaration;
+            detail = "struct";
+            return false;
+        }
+        if (dynamic_cast<const GenericDefinition*>(stmt) != nullptr) {
+            bad_loc = stmt->location;
+            code = ErrorCode::ExprParameterBlockDisallowedDeclaration;
+            detail = "generic";
+            return false;
+        }
+        if (dynamic_cast<const NamespaceDefinition*>(stmt) != nullptr ||
+            dynamic_cast<const AdditionNamespaceStatement*>(stmt) != nullptr) {
+            bad_loc = stmt->location;
+            code = ErrorCode::ExprParameterBlockDisallowedDeclaration;
+            detail = "namespace";
+            return false;
+        }
+        if (dynamic_cast<const EmitStatement*>(stmt) != nullptr) {
+            bad_loc = stmt->location;
+            code = ErrorCode::ExprParameterBlockDisallowedConstruct;
+            detail = "emit";
+            return false;
+        }
+        if (dynamic_cast<const GuideStatement*>(stmt) != nullptr) {
+            bad_loc = stmt->location;
+            code = ErrorCode::ExprParameterBlockDisallowedConstruct;
+            detail = "guide";
+            return false;
+        }
+        if (dynamic_cast<const ClibStatement*>(stmt) != nullptr) {
+            bad_loc = stmt->location;
+            code = ErrorCode::ExprParameterBlockDisallowedConstruct;
+            detail = "clib";
+            return false;
+        }
+        if (dynamic_cast<const ExternDeclaration*>(stmt) != nullptr) {
+            bad_loc = stmt->location;
+            code = ErrorCode::ExprParameterBlockDisallowedConstruct;
+            detail = "extern";
+            return false;
+        }
+        if (dynamic_cast<const CondDefinition*>(stmt) != nullptr ||
+            dynamic_cast<const UncondDefinition*>(stmt) != nullptr ||
+            dynamic_cast<const ConditionalBlock*>(stmt) != nullptr) {
+            bad_loc = stmt->location;
+            code = ErrorCode::ExprParameterBlockDisallowedConstruct;
+            detail = "condition";
+            return false;
+        }
+        if (auto* block = dynamic_cast<const Block*>(stmt)) {
+            for (const auto& inner : block->statements) {
+                if (!statement_is_allowed_in_expression_body(inner.get(), bad_loc, code,
+                    detail)) {
+                    return false;
+                }
+            }
+            return true;
+        }
+        if (auto* if_stmt = dynamic_cast<const IfStatement*>(stmt)) {
+            if (!statement_is_allowed_in_expression_body(if_stmt->then_block.get(), bad_loc,
+                code, detail)) {
+                return false;
+            }
+            return statement_is_allowed_in_expression_body(if_stmt->else_block.get(),
+                bad_loc, code, detail);
+        }
+        if (auto* for_stmt = dynamic_cast<const ForStatement*>(stmt)) {
+            return statement_is_allowed_in_expression_body(for_stmt->body.get(), bad_loc,
+                code, detail);
+        }
+        if (auto* while_stmt = dynamic_cast<const WhileStatement*>(stmt)) {
+            return statement_is_allowed_in_expression_body(while_stmt->body.get(), bad_loc,
+                code, detail);
+        }
+        return true;
+    }
+
+    void GenericExpander::collect_declared_names(const AST::Statement* stmt,
+        std::unordered_set<std::string>& out) const {
+        if (stmt == nullptr) {
+            return;
+        }
+        if (auto* decl = dynamic_cast<const VariableDeclaration*>(stmt)) {
+            out.insert(decl->name);
+            return;
+        }
+        if (auto* block = dynamic_cast<const Block*>(stmt)) {
+            for (const auto& inner : block->statements) {
+                collect_declared_names(inner.get(), out);
+            }
+            return;
+        }
+        if (auto* if_stmt = dynamic_cast<const IfStatement*>(stmt)) {
+            collect_declared_names(if_stmt->then_block.get(), out);
+            collect_declared_names(if_stmt->else_block.get(), out);
+            return;
+        }
+        if (auto* for_stmt = dynamic_cast<const ForStatement*>(stmt)) {
+            collect_declared_names(for_stmt->init.get(), out);
+            collect_declared_names(for_stmt->body.get(), out);
+            return;
+        }
+        if (auto* while_stmt = dynamic_cast<const WhileStatement*>(stmt)) {
+            collect_declared_names(while_stmt->body.get(), out);
+            return;
+        }
+    }
+
+    void GenericExpander::collect_free_identifiers(const Expression* expr,
+        const std::unordered_set<std::string>& bound,
+        std::unordered_set<std::string>& out) const {
+        if (expr == nullptr) {
+            return;
+        }
+        if (auto* prim = dynamic_cast<const PrimaryExpression*>(expr)) {
+            if (prim->kind == PrimaryExpression::Kind::Identifier) {
+                if (bound.count(prim->identifier) == 0) {
+                    out.insert(prim->identifier);
+                }
+                return;
+            }
+            collect_free_identifiers(prim->paren_expr.get(), bound, out);
+            collect_free_identifiers(prim->heap_size.get(), bound, out);
+            collect_free_identifiers(prim->placement_target.get(), bound, out);
+            for (const auto& arg : prim->construct_args) {
+                collect_free_identifiers(arg.get(), bound, out);
+            }
+            return;
+        }
+        if (auto* post = dynamic_cast<const PostfixExpression*>(expr)) {
+            collect_free_identifiers(post->base.get(), bound, out);
+            collect_free_identifiers(post->subscript_expr.get(), bound, out);
+            for (const auto& arg : post->arguments) {
+                collect_free_identifiers(arg.get(), bound, out);
+            }
+            return;
+        }
+        if (auto* e = dynamic_cast<const AssignmentExpression*>(expr)) {
+            collect_free_identifiers(e->left.get(), bound, out);
+            collect_free_identifiers(e->right.get(), bound, out);
+            return;
+        }
+        if (auto* e = dynamic_cast<const LogicalOrExpression*>(expr)) {
+            collect_free_identifiers(e->left.get(), bound, out);
+            collect_free_identifiers(e->right.get(), bound, out);
+            return;
+        }
+        if (auto* e = dynamic_cast<const LogicalAndExpression*>(expr)) {
+            collect_free_identifiers(e->left.get(), bound, out);
+            collect_free_identifiers(e->right.get(), bound, out);
+            return;
+        }
+        if (auto* e = dynamic_cast<const ComparisonExpression*>(expr)) {
+            collect_free_identifiers(e->left.get(), bound, out);
+            collect_free_identifiers(e->right.get(), bound, out);
+            return;
+        }
+        if (auto* e = dynamic_cast<const AdditiveExpression*>(expr)) {
+            collect_free_identifiers(e->left.get(), bound, out);
+            collect_free_identifiers(e->right.get(), bound, out);
+            return;
+        }
+        if (auto* e = dynamic_cast<const MultiplicativeExpression*>(expr)) {
+            collect_free_identifiers(e->left.get(), bound, out);
+            collect_free_identifiers(e->right.get(), bound, out);
+            return;
+        }
+        if (auto* e = dynamic_cast<const PowerExpression*>(expr)) {
+            collect_free_identifiers(e->left.get(), bound, out);
+            collect_free_identifiers(e->right.get(), bound, out);
+            return;
+        }
+        if (auto* e = dynamic_cast<const UnaryExpression*>(expr)) {
+            collect_free_identifiers(e->operand.get(), bound, out);
+            return;
+        }
+    }
+
+    void GenericExpander::collect_free_identifiers_in_statement(const Statement* stmt,
+        std::unordered_set<std::string>& out) const {
+        if (stmt == nullptr) {
+            return;
+        }
+        std::unordered_set<std::string> bound;
+        if (auto* decl = dynamic_cast<const VariableDeclaration*>(stmt)) {
+            bound.insert(decl->name);
+            if (decl->initializer != nullptr && decl->initializer->is_expression()) {
+                collect_free_identifiers(
+                    static_cast<const ExpressionInitializer*>(decl->initializer.get())
+                        ->expr.get(),
+                    bound, out);
+            }
+            collect_free_identifiers(decl->array_size_expr.get(), bound, out);
+            return;
+        }
+        if (auto* ret = dynamic_cast<const ReturnStatement*>(stmt)) {
+            collect_free_identifiers(ret->value.get(), bound, out);
+            return;
+        }
+        if (auto* expr_stmt = dynamic_cast<const ExpressionStatement*>(stmt)) {
+            collect_free_identifiers(expr_stmt->expr.get(), bound, out);
+            return;
+        }
+        if (auto* block = dynamic_cast<const Block*>(stmt)) {
+            for (const auto& inner : block->statements) {
+                collect_free_identifiers_in_statement(inner.get(), out);
+            }
+            return;
+        }
+        if (auto* if_stmt = dynamic_cast<const IfStatement*>(stmt)) {
+            collect_free_identifiers(if_stmt->condition.get(), bound, out);
+            collect_free_identifiers_in_statement(if_stmt->then_block.get(), out);
+            collect_free_identifiers_in_statement(if_stmt->else_block.get(), out);
+            return;
+        }
+        if (auto* for_stmt = dynamic_cast<const ForStatement*>(stmt)) {
+            collect_free_identifiers(for_stmt->condition.get(), bound, out);
+            collect_free_identifiers(for_stmt->step.get(), bound, out);
+            collect_free_identifiers_in_statement(for_stmt->init.get(), out);
+            collect_free_identifiers_in_statement(for_stmt->body.get(), out);
+            return;
+        }
+        if (auto* while_stmt = dynamic_cast<const WhileStatement*>(stmt)) {
+            collect_free_identifiers(while_stmt->condition.get(), bound, out);
+            collect_free_identifiers_in_statement(while_stmt->body.get(), out);
+            return;
+        }
+    }
+
+    bool GenericExpander::validate_expression_body(const GenericParameter& param,
+        const Substitution::ExpressionBinding& binding, SourceLocation loc) {
+        if (binding.body == nullptr || binding.body->statements.empty()) {
+            report(loc, ErrorCode::ExprParameterBlockMissingReturn,
+                std::vector<std::string>{ param.name });
+            return false;
+        }
+        SourceLocation bad_loc;
+        ErrorCode bad_code = ErrorCode::ExprParameterDisallowedSyntax;
+        std::string detail;
+        for (const auto& stmt : binding.body->statements) {
+            if (!statement_is_allowed_in_expression_body(stmt.get(), bad_loc, bad_code,
+                detail)) {
+                report(bad_loc, bad_code, std::vector<std::string>{ detail });
+                return false;
+            }
+        }
+        const Statement* last = binding.body->statements.back().get();
+        while (auto* block = dynamic_cast<const Block*>(last)) {
+            if (block->statements.empty()) {
+                break;
+            }
+            last = block->statements.back().get();
+        }
+        const bool void_return = binding.return_type.kind == TypeKind::Void;
+        if (!void_return && dynamic_cast<const ReturnStatement*>(last) == nullptr) {
+            report(loc, ErrorCode::ExprParameterBlockMissingReturn,
+                std::vector<std::string>{ param.name });
+            return false;
+        }
+        if (void_return && dynamic_cast<const ReturnStatement*>(last) == nullptr &&
+            dynamic_cast<const ExpressionStatement*>(last) == nullptr) {
+            report(loc, ErrorCode::ExprParameterBlockMissingReturn,
+                std::vector<std::string>{ param.name });
+            return false;
+        }
+        std::unordered_set<std::string> declared;
+        for (const auto& stmt : binding.body->statements) {
+            collect_declared_names(stmt.get(), declared);
+        }
+        for (const std::string& local : declared) {
+            for (const std::string& pname : binding.parameter_names) {
+                if (!pname.empty() && pname == local) {
+                    report(loc, ErrorCode::ExprParameterBlockLocalConflictsParameter,
+                        std::vector<std::string>{ local, pname });
+                    return false;
+                }
+            }
+        }
+        for (const auto& stmt : binding.body->statements) {
+            if (auto* decl = dynamic_cast<const VariableDeclaration*>(stmt.get())) {
+                if (decl->type.kind == TypeKind::Void) {
+                    report(decl->location, ErrorCode::ExprParameterDisallowedSyntax,
+                        std::vector<std::string>{});
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
 
     void GenericExpander::report(SourceLocation loc, ErrorCode code,
         const std::vector<std::string>& values) {
@@ -257,18 +567,45 @@ namespace gallt {
                         if (!pattern.is_constant) verify(pattern.type);
                     }
                 }
-                std::set<std::string> member_names;
+                std::set<std::string> struct_member_names;
+                std::set<std::string> function_member_names;
+                std::set<std::string> function_signatures;
                 for (auto& member : def->members) {
                     std::string member_name;
-                    if (auto* sd = dynamic_cast<StructDefinition*>(member.get())) member_name = sd->name;
-                    else if (auto* fd = dynamic_cast<FunctionDefinition*>(member.get())) member_name = fd->name;
-                    if (member_name.empty()) continue;
-                    if (!member_names.insert(member_name).second) {
-                        report(def->location, ErrorCode::RedefinedFunction, std::vector<std::string>{ member_name });
+                    if (auto* sd = dynamic_cast<StructDefinition*>(member.get())) {
+                        member_name = sd->name;
+                        if (!struct_member_names.insert(member_name).second ||
+                            function_member_names.count(member_name) != 0) {
+                            report(def->location, ErrorCode::RedefinedFunction,
+                                std::vector<std::string>{ member_name });
+                        }
                     }
+                    else if (auto* fd = dynamic_cast<FunctionDefinition*>(member.get())) {
+                        member_name = fd->name;
+                        std::string signature = member_name + "(";
+                        for (const Type& p : fd->parameters) {
+                            signature += p.to_string();
+                            signature += ",";
+                        }
+                        signature += ")";
+                        function_member_names.insert(member_name);
+                        if (struct_member_names.count(member_name) != 0 ||
+                            !function_signatures.insert(signature).second) {
+                            report(def->location, ErrorCode::RedefinedFunction,
+                                std::vector<std::string>{ member_name });
+                        }
+                    }
+                    if (member_name.empty()) continue;
                     for (const GenericParameter& p : def->parameters) {
                         if (p.name == member_name) {
-                            report(def->location, ErrorCode::GenericMemberNameConflictsParameter, std::vector<std::string>{ member_name, p.name });
+                            if (p.is_expr) {
+                                report(def->location,
+                                    ErrorCode::ExprParameterNameConflict,
+                                    std::vector<std::string>{ p.name });
+                            }
+                            else {
+                                report(def->location, ErrorCode::GenericMemberNameConflictsParameter, std::vector<std::string>{ member_name, p.name });
+                            }
                         }
                     }
                 }
@@ -277,6 +614,52 @@ namespace gallt {
                     entry.primary = def;
                 }
                 else if (def->primary_shaped) {
+                    bool same_shape = false;
+                    if (entry.primary != nullptr) {
+                        std::vector<GenericPatternArg> primary_patterns =
+                            entry.primary->patterns.empty()
+                            ? parameters_as_free_patterns(entry.primary)
+                            : entry.primary->patterns;
+                        std::vector<GenericPatternArg> def_patterns = def->patterns;
+                        if (def_patterns.empty() && !def->parameters.empty()) {
+                            def_patterns = parameters_as_free_patterns(def);
+                        }
+                        if (!primary_patterns.empty() &&
+                            primary_patterns.size() == def_patterns.size()) {
+                            std::function<std::string(const GenericPatternArg&)>
+                                raw_signature = [&](const GenericPatternArg& pattern) -> std::string {
+                                const Type& t = pattern.type;
+                                if (pattern.is_constant) {
+                                    return "C=" + pattern.text;
+                                }
+                                if (t.kind == TypeKind::Struct) {
+                                    return t.struct_name;
+                                }
+                                if (t.kind == TypeKind::Pointer) {
+                                    return (t.pointee_type ? raw_signature(GenericPatternArg{ false, false, *t.pointee_type })
+                                                           : std::string("?")) + "*";
+                                }
+                                if (t.kind == TypeKind::Array) {
+                                    return (t.element_type ? raw_signature(GenericPatternArg{ false, false, *t.element_type })
+                                                           : std::string("?")) + "[]";
+                                }
+                                return t.to_string();
+                            };
+                            same_shape = true;
+                            for (std::size_t i = 0; i < def_patterns.size(); ++i) {
+                                if (raw_signature(primary_patterns[i]) !=
+                                    raw_signature(def_patterns[i])) {
+                                    same_shape = false;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    if (same_shape) {
+                        report(def->location, ErrorCode::GenericPrimaryRedefined,
+                            std::vector<std::string>{ name });
+                        continue;
+                    }
                     def->is_specialization = true;
                     if (def->patterns.empty()) {
                         def->patterns = parameters_as_free_patterns(def);
@@ -345,6 +728,103 @@ namespace gallt {
             }
         }
         (void)scan_top;
+    }
+
+    std::unique_ptr<Expression> GenericExpander::expand_expression_call(
+        const FunctionDefinition* owner, const Substitution& sub,
+        const std::string& name,
+        std::vector<std::unique_ptr<Expression>>& arguments,
+        SourceLocation loc, bool& ok) {
+        (void)owner;
+        ok = false;
+        auto found = sub.expressions.find(name);
+        if (found == sub.expressions.end()) {
+            return nullptr;
+        }
+        const Substitution::ExpressionBinding& binding = found->second;
+        if (binding.body == nullptr) {
+            return nullptr;
+        }
+        if (arguments.size() != binding.parameter_types.size()) {
+            report(loc, ErrorCode::ExprParameterCallArgCountMismatch,
+                std::vector<std::string>{ name,
+                    std::to_string(binding.parameter_types.size()),
+                    std::to_string(arguments.size()) });
+            return nullptr;
+        }
+        if (expression_expansion_depth_ >= kMaxExpressionExpansionDepth) {
+            report(loc, ErrorCode::ExprParameterRecursionLimitExceeded,
+                std::vector<std::string>{ name });
+            return nullptr;
+        }
+        if (pending_hoisted_ == nullptr) {
+            report(loc, ErrorCode::ExprParameterDisallowedSyntax,
+                std::vector<std::string>{ name });
+            return nullptr;
+        }
+        Substitution body_sub = sub;
+        body_sub.renames.clear();
+        body_sub.expr_arguments.clear();
+        body_sub.expr_argument_types.clear();
+        for (std::size_t i = 0; i < arguments.size(); ++i) {
+            expr_argument_storage_.push_back(std::move(arguments[i]));
+        }
+        std::size_t first_new = expr_argument_storage_.size() - arguments.size();
+        for (std::size_t i = 0; i < binding.parameter_types.size(); ++i) {
+            if (i >= binding.parameter_names.size() ||
+                binding.parameter_names[i].empty()) {
+                continue;
+            }
+            body_sub.expr_arguments[binding.parameter_names[i]] =
+                expr_argument_storage_[first_new + i].get();
+            body_sub.expr_argument_types[binding.parameter_names[i]] =
+                binding.parameter_types[i];
+            expression_parameter_index_[binding.parameter_names[i]] = i;
+        }
+        std::unordered_set<std::string> locals;
+        for (const auto& stmt : binding.body->statements) {
+            collect_declared_names(stmt.get(), locals);
+        }
+        const std::string suffix = "$expr" + std::to_string(++expr_temp_counter_);
+        for (const std::string& local : locals) {
+            body_sub.renames[local] = local + suffix;
+        }
+        const bool void_result = binding.return_type.kind == TypeKind::Void;
+        std::string temp_name;
+        if (!void_result) {
+            temp_name = "__glt_expr" + std::to_string(expr_temp_counter_);
+        }
+        std::vector<std::unique_ptr<Statement>> emitted;
+        const bool outer_in_expression_body = in_expression_body_;
+        in_expression_body_ = true;
+        ++expression_expansion_depth_;
+        bool body_ok = emit_body_into_temp(binding.body->statements, body_sub,
+            temp_name, binding.return_type, emitted);
+        --expression_expansion_depth_;
+        in_expression_body_ = outer_in_expression_body;
+        if (!body_ok) {
+            report(binding.body->location, ErrorCode::ExprParameterDisallowedSyntax,
+                std::vector<std::string>{ name });
+            return nullptr;
+        }
+        if (void_result) {
+            for (auto& stmt : emitted) {
+                pending_hoisted_->push_back(std::move(stmt));
+            }
+            ok = true;
+            lexeme_pool_.push_back("0");
+            Token placeholder(TokenType::IntegerLiteral, loc,
+                std::string_view(lexeme_pool_.back()));
+            return std::make_unique<PrimaryExpression>(loc, placeholder);
+        }
+        auto declaration = std::make_unique<VariableDeclaration>(loc,
+            binding.return_type, temp_name, std::nullopt, std::nullopt, nullptr);
+        pending_hoisted_->push_back(std::move(declaration));
+        for (auto& stmt : emitted) {
+            pending_hoisted_->push_back(std::move(stmt));
+        }
+        ok = true;
+        return std::make_unique<PrimaryExpression>(loc, temp_name);
     }
 
     bool GenericExpander::substitute_type(const Type& in, const Substitution& sub, Type& out) {
@@ -880,6 +1360,129 @@ namespace gallt {
         for (std::size_t i = 0; i < expected; ++i) {
             const GenericParameter& param = entry.primary->parameters[i];
             const GenericArgument& arg = ref.arguments[i];
+            if (param.is_expr) {
+                if (!arg.is_expr) {
+                    report(ref.location, ErrorCode::ExprParameterSignatureMismatch,
+                        std::vector<std::string>{ param.name, "expr", arg.normalize() });
+                    return std::nullopt;
+                }
+                if (!arg.expr_name.empty() && arg.expr_name != param.name) {
+                    report(ref.location, ErrorCode::ExprParameterUndefined,
+                        std::vector<std::string>{ arg.expr_name });
+                    return std::nullopt;
+                }
+                std::vector<AST::Type> declared_parameter_types;
+                for (const AST::Type& declared : param.expr_param_types) {
+                    AST::Type resolved = declared;
+                    AST::Type substituted = AST::Type::make_void();
+                    if (substitute_type(declared, primary_sub, substituted)) {
+                        resolved = substituted;
+                    }
+                    declared_parameter_types.push_back(resolved);
+                }
+                AST::Type declared_return_type = param.expr_return_type;
+                {
+                    AST::Type substituted = AST::Type::make_void();
+                    if (substitute_type(param.expr_return_type, primary_sub, substituted)) {
+                        declared_return_type = substituted;
+                    }
+                }
+                Substitution::ExpressionBinding binding;
+                binding.name = param.name;
+                binding.body = arg.expr_body;
+                binding.normalized = arg.text;
+                if (arg.expr_shorthand) {
+                    bool all_named = !declared_parameter_types.empty() &&
+                        param.expr_param_names.size() == declared_parameter_types.size();
+                    for (const std::string& pname : param.expr_param_names) {
+                        if (pname.empty()) all_named = false;
+                    }
+                    if (declared_parameter_types.empty()) {
+                        all_named = true;
+                    }
+                    if (!all_named) {
+                        report(ref.location, ErrorCode::ExprParameterShorthandRequiresParameterNames,
+                            std::vector<std::string>{ param.name });
+                        return std::nullopt;
+                    }
+                    binding.parameter_types = declared_parameter_types;
+                    binding.parameter_names = param.expr_param_names;
+                    binding.return_type = declared_return_type;
+                }
+                else {
+                    if (arg.expr_param_types.size() != declared_parameter_types.size()) {
+                        report(ref.location, ErrorCode::ExprParameterSignatureMismatch,
+                            std::vector<std::string>{ param.name,
+                                signature_text(declared_parameter_types),
+                                signature_text(arg.expr_param_types) });
+                        return std::nullopt;
+                    }
+                    for (std::size_t k = 0; k < arg.expr_param_types.size(); ++k) {
+                        if (!(arg.expr_param_types[k] == declared_parameter_types[k])) {
+                            report(ref.location, ErrorCode::ExprParameterSignatureMismatch,
+                                std::vector<std::string>{ param.name,
+                                    signature_text(declared_parameter_types),
+                                    signature_text(arg.expr_param_types) });
+                            return std::nullopt;
+                        }
+                    }
+                    binding.parameter_types = declared_parameter_types;
+                    binding.parameter_names = arg.expr_param_names;
+                    if (binding.parameter_names.size() != binding.parameter_types.size()) {
+                        binding.parameter_names = param.expr_param_names;
+                    }
+                    binding.return_type = declared_return_type;
+                    if (!(arg.expr_return_type == declared_return_type)) {
+                        report(ref.location, ErrorCode::ExprParameterReturnTypeMismatch,
+                            std::vector<std::string>{ param.name,
+                                declared_return_type.to_string(),
+                                arg.expr_return_type.to_string() });
+                        return std::nullopt;
+                    }
+                }
+                if (!validate_expression_body(param, binding, ref.location)) {
+                    return std::nullopt;
+                }
+                if (primary_sub.types.count(param.name) != 0 ||
+                    primary_sub.constants.count(param.name) != 0 ||
+                    primary_sub.expressions.count(param.name) != 0) {
+                    report(ref.location, ErrorCode::ExprParameterNameConflict,
+                        std::vector<std::string>{ param.name });
+                    return std::nullopt;
+                }
+                {
+                    bool conflicts = false;
+                    for (std::size_t k = 0; k < entry.primary->parameters.size(); ++k) {
+                        const GenericParameter& other = entry.primary->parameters[k];
+                        if (k != i && other.name == param.name) {
+                            conflicts = true;
+                            break;
+                        }
+                    }
+                    if (!conflicts) {
+                        for (auto& member : entry.primary->members) {
+                            std::string member_name;
+                            if (auto* sd = dynamic_cast<StructDefinition*>(member.get())) {
+                                member_name = sd->name;
+                            }
+                            else if (auto* fd = dynamic_cast<FunctionDefinition*>(member.get())) {
+                                member_name = fd->name;
+                            }
+                            if (!member_name.empty() && member_name == param.name) {
+                                conflicts = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (conflicts) {
+                        report(ref.location, ErrorCode::ExprParameterNameConflict,
+                            std::vector<std::string>{ param.name });
+                        return std::nullopt;
+                    }
+                }
+                primary_sub.expressions[param.name] = std::move(binding);
+                continue;
+            }
             if (param.is_type) {
                 if (!arg.is_type) {
                     report(ref.location, ErrorCode::GenericNonTypeArgTypeMismatch, std::vector<std::string>{ param.name, arg.normalize() });
@@ -901,9 +1504,30 @@ namespace gallt {
             }
             else {
                 if (arg.is_type) {
-                    report(ref.location, ErrorCode::GenericNonTypeArgTypeMismatch, std::vector<std::string>{ param.constant_type_is_parameter ? param.constant_type_parameter
-                                                           : param.constant_type.to_string(),
-                          arg.type.to_string() });
+                    const std::string type_text = arg.type.to_string();
+                    bool parameter_name = false;
+                    if (entry.primary != nullptr) {
+                        for (const GenericParameter& candidate : entry.primary->parameters) {
+                            if (candidate.name == type_text) {
+                                parameter_name = true;
+                                break;
+                            }
+                        }
+                    }
+                    const bool known_type = is_builtin_type_name(type_text) ||
+                        struct_defs_.find(type_text) != struct_defs_.end() ||
+                        parameter_name;
+                    if (!known_type) {
+                        report(ref.location, ErrorCode::GenericNonTypeArgNotConstant,
+                            std::vector<std::string>{ arg.text.empty()
+                                ? arg.normalize() : arg.text });
+                    }
+                    else {
+                        report(ref.location, ErrorCode::GenericNonTypeArgTypeMismatch,
+                            std::vector<std::string>{ param.constant_type_is_parameter ? param.constant_type_parameter
+                                                       : param.constant_type.to_string(),
+                              arg.type.to_string() });
+                    }
                     return std::nullopt;
                 }
                 if (arg.constant_actual_type.kind != TypeKind::Void) {
@@ -999,6 +1623,28 @@ namespace gallt {
             if (best >= 0) {
                 block = candidates[static_cast<std::size_t>(best)];
                 sub = candidate_subs[static_cast<std::size_t>(best)];
+                for (const auto& binding_entry : primary_sub.expressions) {
+                    if (sub.expressions.count(binding_entry.first) == 0) {
+                        sub.expressions[binding_entry.first] = binding_entry.second;
+                    }
+                }
+            }
+        }
+
+        for (const auto& binding_entry : sub.expressions) {
+            for (auto& member : block->members) {
+                std::string member_name;
+                if (auto* sd = dynamic_cast<StructDefinition*>(member.get())) {
+                    member_name = sd->name;
+                }
+                else if (auto* fd = dynamic_cast<FunctionDefinition*>(member.get())) {
+                    member_name = fd->name;
+                }
+                if (!member_name.empty() && member_name == binding_entry.first) {
+                    report(ref.location, ErrorCode::ExprParameterNameConflict,
+                        std::vector<std::string>{ binding_entry.first });
+                    return std::nullopt;
+                }
             }
         }
 
@@ -1011,8 +1657,21 @@ namespace gallt {
             instantiated_kind_signatures_[instance_key] = kind_signature;
         }
         else if (kind_it->second != kind_signature) {
-            report(ref.location, ErrorCode::GenericNormalizationConflict,
-                std::vector<std::string>{});
+            bool has_expression_argument = false;
+            for (const GenericArgument& arg : ref.arguments) {
+                if (arg.is_expr) {
+                    has_expression_argument = true;
+                    break;
+                }
+            }
+            if (has_expression_argument) {
+                report(ref.location, ErrorCode::ExprParameterNormalizationConflict,
+                    std::vector<std::string>{});
+            }
+            else {
+                report(ref.location, ErrorCode::GenericNormalizationConflict,
+                    std::vector<std::string>{});
+            }
             return std::nullopt;
         }
 
@@ -1080,6 +1739,7 @@ namespace gallt {
         }
 
         auto materialize = [&](const std::string& member_name, bool register_short) -> std::string {
+            std::string first_target;
             for (TopLevel* member : block_member_ptrs) {
                 if (auto* sd = dynamic_cast<StructDefinition*>(member)) {
                     if (!member_name.empty() && sd->name != member_name) continue;
@@ -1108,12 +1768,20 @@ namespace gallt {
                         binding.instance = instance_key;
                         register_short_name(sd->name, binding, ref.generic_name, sd->location);
                     }
-                    if (!member_name.empty()) return mangled;
+                    if (!member_name.empty() && first_target.empty()) {
+                        first_target = mangled;
+                    }
                 }
                 else if (auto* fd = dynamic_cast<FunctionDefinition*>(member)) {
                     if (!member_name.empty() && fd->name != member_name) continue;
                     std::string mangled = instance_key + "$" + fd->name;
-                    if (instantiated_members_.insert(mangled).second) {
+                    std::string member_key = mangled + "(";
+                    for (const Type& p : fd->parameters) {
+                        member_key += p.to_string();
+                        member_key += ",";
+                    }
+                    member_key += ")";
+                    if (instantiated_members_.insert(member_key).second) {
                         auto clone = clone_function(fd, sub, mangled);
                         func_defs_[mangled] = clone.get();
                         add_top_level(std::move(clone));
@@ -1125,30 +1793,20 @@ namespace gallt {
                         binding.instance = instance_key;
                         register_short_name(fd->name, binding, ref.generic_name, fd->location);
                     }
-                    if (!member_name.empty()) return mangled;
+                    if (!member_name.empty() && first_target.empty()) {
+                        first_target = mangled;
+                    }
                 }
             }
-            return std::string();
+            return first_target;
         };
 
         if (whole_block) {
             if (instantiated_blocks_.insert(instance_key).second) {
-                for (TopLevel* member : block_member_ptrs) {
-                    if (auto* sd = dynamic_cast<StructDefinition*>(member)) {
-                        materialize(sd->name, true);
-                    }
-                    else if (auto* fd = dynamic_cast<FunctionDefinition*>(member)) {
-                        materialize(fd->name, true);
-                    }
-                }
+                materialize(std::string(), true);
             }
             else {
-                for (TopLevel* member : block_member_ptrs) {
-                    std::string member_name;
-                    if (auto* sd = dynamic_cast<StructDefinition*>(member)) member_name = sd->name;
-                    else if (auto* fd = dynamic_cast<FunctionDefinition*>(member)) member_name = fd->name;
-                    if (!member_name.empty()) materialize(member_name, false);
-                }
+                materialize(std::string(), false);
             }
             return instance_key;
         }
@@ -1180,6 +1838,11 @@ namespace gallt {
 
 
     AST::StructDefinition::Member GenericExpander::clone_member(
+        const StructDefinition::Member& member, const Substitution& sub) {
+        return clone_member_impl(member, sub);
+    }
+
+    AST::StructDefinition::Member GenericExpander::clone_member_impl(
         const StructDefinition::Member& member, const Substitution& sub) {
         Type type = member.type;
         Type substituted = Type::make_void();
@@ -1335,6 +1998,25 @@ namespace gallt {
                 clone_expression(e->operand.get(), sub));
         }
         if (auto* e = dynamic_cast<const PostfixExpression*>(expr)) {
+            if (e->op == PostfixExpression::Operator::FunctionCall) {
+                if (auto* callee = dynamic_cast<const PrimaryExpression*>(e->base.get())) {
+                    if (callee->kind == PrimaryExpression::Kind::Identifier &&
+                        sub.expressions.count(callee->identifier) != 0) {
+                        std::vector<std::unique_ptr<Expression>> arg_clones;
+                        for (const auto& arg : e->arguments) {
+                            arg_clones.push_back(clone_expression(arg.get(), sub));
+                        }
+                        bool ok = true;
+                        auto expanded = expand_expression_call(current_function_, sub,
+                            callee->identifier, arg_clones, e->location, ok);
+                        if (ok) {
+                            return expanded;
+                        }
+                        return make_constant_literal(e->location,
+                            ConstantValue{ 0LL, 0.0, false, false, std::string() });
+                    }
+                }
+            }
             if (e->op == PostfixExpression::Operator::Cast) {
                 if (auto* prim = dynamic_cast<const PrimaryExpression*>(e->base.get())) {
                     if (prim->kind == PrimaryExpression::Kind::Identifier) {
@@ -1367,6 +2049,58 @@ namespace gallt {
             case PrimaryExpression::Kind::Literal:
                 return std::make_unique<PrimaryExpression>(e->location, e->literal_token);
             case PrimaryExpression::Kind::Identifier: {
+                if (sub.expressions.count(e->identifier) != 0 &&
+                    sub.expr_arguments.count(e->identifier) == 0) {
+                    report(e->location, ErrorCode::ExprParameterCannotBeUsedAsValue,
+                        std::vector<std::string>{ e->identifier });
+                    return make_constant_literal(e->location,
+                        ConstantValue{ 0LL, 0.0, false, false, std::string() });
+                }
+                auto argument = sub.expr_arguments.find(e->identifier);
+                if (argument != sub.expr_arguments.end() && argument->second != nullptr) {
+                    Substitution neutral;
+                    auto cloned_argument = clone_expression(argument->second, neutral);
+                    auto declared = sub.expr_argument_types.find(e->identifier);
+                    if (cloned_argument != nullptr && declared != sub.expr_argument_types.end()) {
+                        Type declared_type = declared->second;
+                        bool wrap = false;
+                        switch (declared_type.kind) {
+                        case TypeKind::Int:
+                        case TypeKind::Lint:
+                        case TypeKind::Uint:
+                        case TypeKind::Luint:
+                        case TypeKind::Float:
+                        case TypeKind::Double:
+                        case TypeKind::Char:
+                        case TypeKind::Uchar:
+                        case TypeKind::Bool:
+                            wrap = true;
+                            break;
+                        default:
+                            break;
+                        }
+                        if (wrap) {
+                            auto cast = std::make_unique<PostfixExpression>(e->location,
+                                std::move(cloned_argument),
+                                PostfixExpression::Operator::Cast);
+                            cast->cast_type = declared_type;
+                            auto index_it =
+                                expression_parameter_index_.find(e->identifier);
+                            if (index_it != expression_parameter_index_.end()) {
+                                expression_argument_casts_[cast.get()] =
+                                    std::make_tuple(e->identifier, index_it->second,
+                                        declared_type);
+                            }
+                            return cast;
+                        }
+                    }
+                    return cloned_argument;
+                }
+                auto renamed = sub.renames.find(e->identifier);
+                if (renamed != sub.renames.end()) {
+                    return std::make_unique<PrimaryExpression>(e->location,
+                        renamed->second);
+                }
                 auto found = sub.types.find(e->identifier);
                 if (found != sub.types.end()) {
                     return std::make_unique<PrimaryExpression>(e->location,
@@ -1399,7 +2133,14 @@ namespace gallt {
                         break;
                     }
                 }
-                return std::make_unique<PrimaryExpression>(e->location, e->identifier);
+                {
+                    auto plain = std::make_unique<PrimaryExpression>(e->location,
+                        e->identifier);
+                    if (in_expression_body_) {
+                        expression_free_identifiers_[plain.get()] = e->identifier;
+                    }
+                    return plain;
+                }
             }
             case PrimaryExpression::Kind::Parens:
                 return std::make_unique<PrimaryExpression>(e->location,
@@ -1464,19 +2205,200 @@ namespace gallt {
 
     std::unique_ptr<Statement> GenericExpander::clone_statement(
         const Statement* stmt, const Substitution& sub) {
+        bool outermost = pending_hoisted_ == nullptr;
+        std::vector<std::unique_ptr<Statement>> hoisted;
+        if (outermost) {
+            pending_hoisted_ = &hoisted;
+        }
+        auto cloned = clone_statement_impl(stmt, sub);
+        if (outermost) {
+            pending_hoisted_ = nullptr;
+            if (!hoisted.empty()) {
+                hoisted.push_back(std::move(cloned));
+                return std::make_unique<Block>(stmt->location, std::move(hoisted));
+            }
+        }
+        return cloned;
+    }
+
+    std::unique_ptr<Statement> GenericExpander::clone_substatement(
+        const Statement* stmt, const Substitution& sub) {
+        if (stmt == nullptr) {
+            return nullptr;
+        }
+        if (pending_hoisted_ != nullptr) {
+            return clone_statement_impl(stmt, sub);
+        }
+        std::vector<std::unique_ptr<Statement>> hoisted;
+        pending_hoisted_ = &hoisted;
+        auto cloned = clone_statement_impl(stmt, sub);
+        pending_hoisted_ = nullptr;
+        if (hoisted.empty()) {
+            return cloned;
+        }
+        hoisted.push_back(std::move(cloned));
+        return std::make_unique<Block>(stmt->location, std::move(hoisted));
+    }
+
+    bool GenericExpander::body_always_returns(const Statement* stmt) const {
+        if (stmt == nullptr) {
+            return false;
+        }
+        if (dynamic_cast<const ReturnStatement*>(stmt) != nullptr) {
+            return true;
+        }
+        if (auto* block = dynamic_cast<const Block*>(stmt)) {
+            for (auto it = block->statements.rbegin(); it != block->statements.rend(); ++it) {
+                if (dynamic_cast<const EmptyStatement*>(it->get()) != nullptr) {
+                    continue;
+                }
+                return body_always_returns(it->get());
+            }
+            return false;
+        }
+        if (auto* if_stmt = dynamic_cast<const IfStatement*>(stmt)) {
+            return if_stmt->else_block != nullptr &&
+                body_always_returns(if_stmt->then_block.get()) &&
+                body_always_returns(if_stmt->else_block.get());
+        }
+        return false;
+    }
+
+    bool GenericExpander::emit_body_into_temp(
+        const std::vector<std::unique_ptr<Statement>>& stmts,
+        const Substitution& sub, const std::string& temp_name,
+        const Type& result_type,
+        std::vector<std::unique_ptr<Statement>>& out) {
+        if (stmts.empty()) {
+            return false;
+        }
+        std::size_t last_index = stmts.size();
+        while (last_index > 0 &&
+            dynamic_cast<const EmptyStatement*>(stmts[last_index - 1].get()) != nullptr) {
+            --last_index;
+        }
+        if (last_index == 0) {
+            return false;
+        }
+        for (std::size_t i = 0; i + 1 < last_index; ++i) {
+            const Statement* stmt = stmts[i].get();
+            if (dynamic_cast<const EmptyStatement*>(stmt) != nullptr) {
+                continue;
+            }
+            if (body_always_returns(stmt)) {
+                if (auto* if_stmt = dynamic_cast<const IfStatement*>(stmt)) {
+                    std::vector<std::unique_ptr<Statement>> then_body;
+                    std::vector<std::unique_ptr<Statement>> else_body;
+                    const Statement* then_stmt = if_stmt->then_block.get();
+                    if (auto* block = dynamic_cast<const Block*>(then_stmt)) {
+                        for (const auto& s : block->statements) {
+                            then_body.push_back(clone_statement(s.get(), sub));
+                        }
+                    }
+                    else {
+                        then_body.push_back(clone_statement(then_stmt, sub));
+                    }
+                    const Statement* else_stmt = if_stmt->else_block.get();
+                    else_body.push_back(std::make_unique<Block>(if_stmt->location,
+                        std::vector<std::unique_ptr<Statement>>{}));
+                    std::vector<std::unique_ptr<Statement>> rest;
+                    for (std::size_t k = i + 1; k < last_index; ++k) {
+                        rest.push_back(clone_statement(stmts[k].get(), sub));
+                    }
+                    std::vector<std::unique_ptr<Statement>> then_result;
+                    std::vector<std::unique_ptr<Statement>> rest_result;
+                    if (!emit_body_into_temp(then_body, sub, temp_name, result_type,
+                        then_result)) {
+                        return false;
+                    }
+                    if (!emit_body_into_temp(rest, sub, temp_name, result_type,
+                        rest_result)) {
+                        return false;
+                    }
+                    if (else_stmt != nullptr) {
+                        std::vector<std::unique_ptr<Statement>> explicit_else;
+                        if (auto* eb = dynamic_cast<const Block*>(else_stmt)) {
+                            for (const auto& s : eb->statements) {
+                                explicit_else.push_back(clone_statement(s.get(), sub));
+                            }
+                        }
+                        else {
+                            explicit_else.push_back(clone_statement(else_stmt, sub));
+                        }
+                        std::vector<std::unique_ptr<Statement>> else_result;
+                        if (!emit_body_into_temp(explicit_else, sub, temp_name, result_type,
+                            else_result)) {
+                            return false;
+                        }
+                        for (auto& s : else_result) rest_result.push_back(std::move(s));
+                    }
+                    out.push_back(std::make_unique<IfStatement>(if_stmt->location,
+                        clone_expression(if_stmt->condition.get(), sub),
+                        std::make_unique<Block>(if_stmt->location, std::move(then_result)),
+                        std::make_unique<Block>(if_stmt->location, std::move(rest_result))));
+                    return true;
+                }
+                return false;
+            }
+            out.push_back(clone_statement(stmt, sub));
+        }
+        const Statement* tail = stmts[last_index - 1].get();
+        auto make_assign = [&](const Expression* value) -> std::unique_ptr<Statement> {
+            auto target = std::make_unique<PrimaryExpression>(tail->location, temp_name);
+            auto assignment = std::make_unique<AssignmentExpression>(tail->location,
+                std::move(target), AssignmentExpression::Operator::Assign,
+                clone_expression(value, sub));
+            return std::make_unique<ExpressionStatement>(tail->location,
+                std::move(assignment));
+        };
+        if (auto* ret = dynamic_cast<const ReturnStatement*>(tail)) {
+            if (ret->value == nullptr) {
+                return result_type.kind == TypeKind::Void;
+            }
+            if (result_type.kind != TypeKind::Void) {
+                out.push_back(make_assign(ret->value.get()));
+            }
+            return true;
+        }
+        if (auto* expr_stmt = dynamic_cast<const ExpressionStatement*>(tail)) {
+            if (result_type.kind != TypeKind::Void) {
+                out.push_back(make_assign(expr_stmt->expr.get()));
+            }
+            else {
+                out.push_back(clone_statement(tail, sub));
+            }
+            return true;
+        }
+        if (auto* block = dynamic_cast<const Block*>(tail)) {
+            std::vector<std::unique_ptr<Statement>> tail_stmts;
+            for (const auto& s : block->statements) {
+                tail_stmts.push_back(clone_statement(s.get(), sub));
+            }
+            return emit_body_into_temp(tail_stmts, sub, temp_name, result_type, out);
+        }
+        return false;
+    }
+
+    std::unique_ptr<Statement> GenericExpander::clone_statement_impl(
+        const Statement* stmt, const Substitution& sub) {
         if (stmt == nullptr) return nullptr;
         if (auto* s = dynamic_cast<const Block*>(stmt)) {
             std::vector<std::unique_ptr<Statement>> statements;
             for (const auto& child : s->statements) {
-                statements.push_back(clone_statement(child.get(), sub));
+                statements.push_back(clone_substatement(child.get(), sub));
             }
             return std::make_unique<Block>(s->location, std::move(statements));
         }
         if (auto* s = dynamic_cast<const VariableDeclaration*>(stmt)) {
             Type type = Type::make_void();
             substitute_type(s->type, sub, type);
+            std::string declared_name = s->name;
+            auto renamed = sub.renames.find(s->name);
+            if (renamed != sub.renames.end()) {
+                declared_name = renamed->second;
+            }
             auto clone = std::make_unique<VariableDeclaration>(s->location, std::move(type),
-                s->name, s->array_size, std::nullopt,
+                declared_name, s->array_size, std::nullopt,
                 s->initializer ? clone_initializer(s->initializer.get(), sub) : nullptr);
             if (s->function_pointer_type.has_value()) {
                 Type fp = Type::make_void();
@@ -1499,20 +2421,20 @@ namespace gallt {
         if (auto* s = dynamic_cast<const IfStatement*>(stmt)) {
             return std::make_unique<IfStatement>(s->location,
                 clone_expression(s->condition.get(), sub),
-                clone_statement(s->then_block.get(), sub),
-                clone_statement(s->else_block.get(), sub));
+                clone_substatement(s->then_block.get(), sub),
+                clone_substatement(s->else_block.get(), sub));
         }
         if (auto* s = dynamic_cast<const ForStatement*>(stmt)) {
             return std::make_unique<ForStatement>(s->location,
-                clone_statement(s->init.get(), sub),
+                clone_substatement(s->init.get(), sub),
                 clone_expression(s->condition.get(), sub),
                 clone_expression(s->step.get(), sub),
-                clone_statement(s->body.get(), sub));
+                clone_substatement(s->body.get(), sub));
         }
         if (auto* s = dynamic_cast<const WhileStatement*>(stmt)) {
             return std::make_unique<WhileStatement>(s->location,
                 clone_expression(s->condition.get(), sub),
-                clone_statement(s->body.get(), sub));
+                clone_substatement(s->body.get(), sub));
         }
         if (auto* s = dynamic_cast<const BreakStatement*>(stmt)) {
             return std::make_unique<BreakStatement>(s->location);
@@ -1540,6 +2462,32 @@ namespace gallt {
 
     std::unique_ptr<FunctionDefinition> GenericExpander::clone_function(
         const FunctionDefinition* func, const Substitution& sub, const std::string& name) {
+        Substitution body_sub = sub;
+        if (!sub.expressions.empty()) {
+            std::unordered_set<std::string> free_names;
+            for (const auto& entry : sub.expressions) {
+                std::unordered_set<std::string> bound_names(
+                    entry.second.parameter_names.begin(),
+                    entry.second.parameter_names.end());
+                if (entry.second.body != nullptr) {
+                    for (const auto& stmt : entry.second.body->statements) {
+                        collect_free_identifiers_in_statement(stmt.get(), free_names);
+                    }
+                }
+                for (const std::string& bound_name : bound_names) {
+                    free_names.erase(bound_name);
+                }
+            }
+            if (!free_names.empty()) {
+                std::unordered_set<std::string> locals;
+                collect_declared_names(func->body.get(), locals);
+                for (const std::string& local : locals) {
+                    if (free_names.count(local) != 0) {
+                        body_sub.renames[local] = local + "$" + name;
+                    }
+                }
+            }
+        }
         Type ret = Type::make_void();
         substitute_type(func->return_type, sub, ret);
         std::vector<Type> params;
@@ -1549,14 +2497,15 @@ namespace gallt {
             params.push_back(std::move(substituted));
         }
         auto clone = std::make_unique<FunctionDefinition>(func->location, std::move(ret), name,
-            params, func->param_names, clone_statement(func->body.get(), sub));
+            params, func->param_names, clone_statement(func->body.get(), body_sub));
         clone->param_defaults.reserve(func->param_defaults.size());
         for (const auto& default_value : func->param_defaults) {
             if (default_value == nullptr) {
                 clone->param_defaults.push_back(nullptr);
             }
             else {
-                clone->param_defaults.push_back(clone_expression(default_value.get(), sub));
+                clone->param_defaults.push_back(
+                    clone_expression(default_value.get(), body_sub));
             }
         }
         return clone;
@@ -1921,6 +2870,15 @@ namespace gallt {
         }
 
         auto matches = [&](TypeKind kind) { out = (type.kind == kind); return true; };
+        const bool type_property = property == "is_integer" || property == "is_float" ||
+            property == "is_double" || property == "is_char" || property == "is_bool" ||
+            property == "is_struct" || property == "is_string" ||
+            property == "is_pointer" || property == "is_array";
+        if (type_property && !is_type_param) {
+            report(receiver->location, ErrorCode::CompileTimePropertyNotApplicable,
+                std::vector<std::string>{ property, parameter });
+            return false;
+        }
         if (property == "is_integer") {
             out = type.kind == TypeKind::Int || type.kind == TypeKind::Lint ||
                 type.kind == TypeKind::Uint || type.kind == TypeKind::Luint;
@@ -2010,6 +2968,54 @@ namespace gallt {
             };
             std::string left_text;
             std::string right_text;
+            auto typename_operand = [&](const Expression* side, std::string& value) -> bool {
+                const Expression* receiver = nullptr;
+                std::string property;
+                if (auto* post = dynamic_cast<const PostfixExpression*>(side)) {
+                    if (post->op == PostfixExpression::Operator::Dot) {
+                        receiver = post->base.get();
+                        property = post->member_name;
+                    }
+                }
+                else if (auto* prop = dynamic_cast<const CompileTimePropertyExpression*>(side)) {
+                    receiver = prop->receiver.get();
+                    property = prop->property;
+                }
+                if (receiver == nullptr || property != "typename") return false;
+                auto* prim = dynamic_cast<const PrimaryExpression*>(receiver);
+                if (prim == nullptr || prim->kind != PrimaryExpression::Kind::Identifier) {
+                    return false;
+                }
+                if (sub.types.find(prim->identifier) == sub.types.end()) return false;
+                value = sub.types.at(prim->identifier).to_string();
+                return true;
+            };
+            if (typename_operand(e->left.get(), left_text)) {
+                if (!string_operand(e->right.get(), right_text)) return false;
+                switch (e->op) {
+                case ComparisonExpression::Operator::Equal:
+                    out = (left_text == right_text);
+                    return true;
+                case ComparisonExpression::Operator::NotEqual:
+                    out = (left_text != right_text);
+                    return true;
+                default:
+                    return false;
+                }
+            }
+            if (typename_operand(e->right.get(), right_text)) {
+                if (!string_operand(e->left.get(), left_text)) return false;
+                switch (e->op) {
+                case ComparisonExpression::Operator::Equal:
+                    out = (left_text == right_text);
+                    return true;
+                case ComparisonExpression::Operator::NotEqual:
+                    out = (left_text != right_text);
+                    return true;
+                default:
+                    return false;
+                }
+            }
             if (string_operand(e->left.get(), left_text) &&
                 string_operand(e->right.get(), right_text)) {
                 switch (e->op) {

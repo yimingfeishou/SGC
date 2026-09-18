@@ -18,6 +18,13 @@ namespace gallt {
         std::string input;       
         std::string output;      
         int optimization_level = 2;
+        int debug_symbols_level = 0;
+        bool debug_mode = false;
+        bool release_mode = false;
+        bool optimization_level_explicit = false;
+        bool debug_symbols_explicit = false;
+        bool debug_mode_explicit = false;
+        bool release_mode_explicit = false;
         std::vector<std::string> positional;
         std::string error_message;
     };

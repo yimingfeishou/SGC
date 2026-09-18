@@ -1,5 +1,6 @@
 #include "codegen.hpp"
 #include "../runtime/crt_embedded.hpp"
+#include "../semantic/constant_folding.hpp"
 #include <algorithm>
 #include <charconv>
 #include <cmath>
@@ -25,6 +26,23 @@ namespace {
             "filemkdir", "fileremovedir",
         };
         return names.find(name) != names.end();
+    }
+
+    bool builtin_type_by_name(const std::string& name, AST::Type& out) {
+        if (name == "int") out = AST::Type::make_int();
+        else if (name == "lint") out = AST::Type::make_lint();
+        else if (name == "uint") out = AST::Type::make_uint();
+        else if (name == "luint") out = AST::Type::make_luint();
+        else if (name == "float") out = AST::Type::make_float();
+        else if (name == "double") out = AST::Type::make_double();
+        else if (name == "char") out = AST::Type::make_char();
+        else if (name == "uchar") out = AST::Type::make_uchar();
+        else if (name == "bool") out = AST::Type::make_bool();
+        else if (name == "string") out = AST::Type::make_string();
+        else if (name == "file") out = AST::Type::make_file();
+        else if (name == "void") out = AST::Type::make_void();
+        else return false;
+        return true;
     }
 
     int hex_value(char c) {
@@ -146,9 +164,12 @@ namespace {
         const std::unordered_map<const AST::PrimaryExpression*,
             const AST::FunctionDefinition*>& resolved_functions,
         const std::unordered_map<const AST::PrimaryExpression*,
-            const AST::ExternDeclaration*>& resolved_externs)
+            const AST::ExternDeclaration*>& resolved_externs,
+        const std::unordered_map<const AST::Expression*,
+            AST::FunctionDefinition*>& resolved_operators)
         : program_(program), expression_types_(expression_types),
-        resolved_functions_(resolved_functions), resolved_externs_(resolved_externs) {
+        resolved_functions_(resolved_functions), resolved_externs_(resolved_externs),
+        resolved_operators_(resolved_operators) {
     }
 
     std::string CodeGenerator::new_temp(const char* hint) {
@@ -297,6 +318,7 @@ namespace {
         collect_structs();
         collect_global_variables();
         collect_function_signatures();
+        register_lifecycle_symbols();
         lines_.clear();
         temp_counter_ = 0;
         label_counter_ = 0;
@@ -316,6 +338,7 @@ namespace {
         emit_function_declarations();
         emit_global_variables();
         emit_functions();
+        emit_lifecycle_functions();
         emit_global_initializer();
         emit_main_wrapper();
         emit_string_constants();
@@ -468,9 +491,15 @@ namespace {
 
     void CodeGenerator::collect_global_variables() {
         global_vars_.clear();
+        const_globals_.clear();
         for (const auto& top : program_->top_levels) {
             if (auto* var = dynamic_cast<AST::VariableDeclaration*>(top.get())) {
-                global_vars_.push_back(var);
+                if (var->type.is_const) {
+                    const_globals_.push_back(var);
+                }
+                else {
+                    global_vars_.push_back(var);
+                }
             }
         }
     }
@@ -489,6 +518,13 @@ namespace {
 
     void CodeGenerator::emit_global_variables() {
         global_symbols_.clear();
+        for (AST::VariableDeclaration* var : const_globals_) {
+            LocalInfo info;
+            if (!fold_constant_declaration(var, info)) {
+                continue;
+            }
+            global_symbols_[var->name] = std::move(info);
+        }
         for (AST::VariableDeclaration* var : global_vars_) {
             std::string address = "@glt_g_" + var->name;
             std::string type_text = llvm_type(var->type);
@@ -720,6 +756,13 @@ namespace {
                     emit_line("call void " + callee + "(ptr " + address + ")");
                 }
                 return;
+            }
+            if (lifecycle_owner_ != def) {
+                std::string callee = function_reference("__sgc_dtor$" + def->name);
+                if (!callee.empty()) {
+                    emit_line("call void " + callee + "(ptr " + address + ")");
+                    return;
+                }
             }
             for (std::size_t i = 0; i < def->members.size(); ++i) {
                 std::string field = new_temp("cleanup_field");
@@ -1028,7 +1071,109 @@ namespace {
         }
     }
 
+    bool CodeGenerator::fold_constant_declaration(AST::VariableDeclaration* decl,
+        LocalInfo& info) {
+        if (decl == nullptr || decl->initializer == nullptr) {
+            return false;
+        }
+        auto* expr_init = dynamic_cast<AST::ExpressionInitializer*>(decl->initializer.get());
+        if (expr_init == nullptr || expr_init->expr == nullptr) {
+            return false;
+        }
+        AST::Expression* expr = expr_init->expr.get();
+        info = LocalInfo{};
+        info.type = decl->type;
+        info.is_constant = true;
+
+        if (decl->type.kind == TypeKind::String || decl->type.kind == TypeKind::File ||
+            decl->type.kind == TypeKind::Pointer || decl->type.kind == TypeKind::Function) {
+            info.constant_expr = expr;
+            return true;
+        }
+        if (!decl->type.is_scalar()) {
+            info.is_constant = false;
+            return false;
+        }
+
+        ConstantEvaluationContext ctx;
+        ctx.type_layout = [this](const std::string& name, std::size_t& size,
+            std::size_t& align) {
+            AST::Type type;
+            if (!builtin_type_by_name(name, type)) return false;
+            size = type_size(type);
+            align = type_align(type);
+            return true;
+        };
+        ctx.lookup_constant = [this](const std::string& name, long long& int_value,
+            double& float_value, bool& is_float) {
+            auto found = constant_values_.find(name);
+            if (found == constant_values_.end()) return false;
+            int_value = found->second.int_value;
+            float_value = found->second.float_value;
+            is_float = found->second.is_float;
+            return true;
+        };
+        long long int_value = 0;
+        double float_value = 0.0;
+        bool is_float = false;
+        if (!evaluate_constant_expression(expr, int_value, float_value, is_float, ctx)) {
+            info.is_constant = false;
+            return false;
+        }
+        ConstantNumeric value;
+        if (decl->type.is_floating()) {
+            double result = is_float ? float_value : static_cast<double>(int_value);
+            if (decl->type.kind == TypeKind::Float) {
+                result = static_cast<double>(static_cast<float>(result));
+            }
+            value.is_float = true;
+            value.float_value = result;
+            value.int_value = static_cast<long long>(result);
+            std::ostringstream format;
+            format.precision(17);
+            format << result;
+            info.constant_text = llvm_float_constant_text(format.str());
+        }
+        else {
+            long long result = is_float ? static_cast<long long>(float_value) : int_value;
+            switch (decl->type.kind) {
+            case TypeKind::Char:
+            case TypeKind::Uchar:
+                result = static_cast<long long>(static_cast<unsigned char>(result));
+                break;
+            case TypeKind::Bool:
+                result = (result != 0) ? 1 : 0;
+                break;
+            case TypeKind::Int:
+            case TypeKind::Uint:
+                result = static_cast<long long>(static_cast<int>(
+                    static_cast<unsigned int>(result)));
+                break;
+            case TypeKind::Luint:
+                result = static_cast<long long>(
+                    static_cast<unsigned long long>(result));
+                break;
+            default:
+                break;
+            }
+            value.is_float = false;
+            value.int_value = result;
+            value.float_value = static_cast<double>(result);
+            info.constant_text = std::to_string(result);
+        }
+        constant_values_[decl->name] = value;
+        return true;
+    }
+
     void CodeGenerator::emit_variable_declaration(AST::VariableDeclaration* decl) {
+        if (decl->type.is_const) {
+            LocalInfo constant;
+            if (fold_constant_declaration(decl, constant)) {
+                if (scopes_.empty()) push_scope();
+                scopes_.back()[decl->name] = std::move(constant);
+                return;
+            }
+        }
         std::string type_text = llvm_type(decl->type);
         std::string address = emit_alloca(type_text, ("alloca_" + decl->name).c_str());
         LocalInfo info;
@@ -1278,6 +1423,14 @@ namespace {
         auto it = struct_by_name_.find(struct_type.struct_name);
         if (it == struct_by_name_.end() || it->second == nullptr) return;
         AST::StructDefinition* def = it->second;
+        if (init != nullptr && init->elements.empty() &&
+            def->constructor_names.empty() && lifecycle_owner_ != def) {
+            std::string callee = function_reference("__sgc_ctor$" + def->name);
+            if (!callee.empty()) {
+                emit_line("call void " + callee + "(ptr " + address + ")");
+                return;
+            }
+        }
         std::string struct_ir_type = llvm_type(struct_type);
         for (size_t i = 0; i < init->elements.size(); ++i) {
             if (i >= def->members.size()) break;
@@ -1299,13 +1452,47 @@ namespace {
         }
         for (size_t i = init->elements.size(); i < def->members.size(); ++i) {
             const AST::StructDefinition::Member& member = def->members[i];
-            if (!member.initializer) continue;
             std::string field_ptr = new_temp("defaultfield");
             emit_line(field_ptr + " = getelementptr " + struct_ir_type +
                 ", ptr " + address + ", i32 0, i32 " + std::to_string(i));
-            if (auto* e = dynamic_cast<AST::ExpressionInitializer*>(member.initializer.get())) {
-                ExprValue value = gen_expr(e->expr.get());
-                emit_aggregate_assign(field_ptr, member.type, value);
+            bool handled = false;
+            if (member.initializer != nullptr) {
+                if (auto* nested = dynamic_cast<AST::ArrayInitializer*>(member.initializer.get())) {
+                    if (member.type.kind == TypeKind::Array) {
+                        emit_array_brace_initialization(field_ptr, member.type, nested);
+                        handled = true;
+                    }
+                    else if (member.type.kind == TypeKind::Struct) {
+                        emit_struct_brace_initialization(field_ptr, member.type, nested);
+                        handled = true;
+                    }
+                }
+                else if (auto* e =
+                    dynamic_cast<AST::ExpressionInitializer*>(member.initializer.get())) {
+                    ExprValue value = gen_expr(e->expr.get());
+                    emit_aggregate_assign(field_ptr, member.type, value);
+                    handled = true;
+                }
+            }
+            if (!handled) {
+                if (member.type.kind == TypeKind::Struct) {
+                    auto member_def = struct_by_name_.find(member.type.struct_name);
+                    if (member_def != struct_by_name_.end() &&
+                        member_def->second != nullptr &&
+                        member_def->second->constructor_names.empty() &&
+                        member_def->second != lifecycle_owner_) {
+                        std::string callee = function_reference(
+                            "__sgc_ctor$" + member_def->second->name);
+                        if (!callee.empty()) {
+                            emit_line("call void " + callee + "(ptr " + field_ptr + ")");
+                            handled = true;
+                        }
+                    }
+                }
+            }
+            if (!handled) {
+                emit_line("store " + llvm_type(member.type) +
+                    " zeroinitializer, ptr " + field_ptr);
             }
         }
     }
@@ -1335,11 +1522,148 @@ namespace {
                 emit_aggregate_assign(element_ptr, element_type, value);
             }
         }
+        const size_t total = array_type.array_size.value_or(count);
+        for (size_t i = count; i < total; ++i) {
+            std::string element_ptr = new_temp("arrayfill");
+            emit_line(element_ptr + " = getelementptr " + array_ir +
+                ", ptr " + address + ", i64 0, i64 " + std::to_string(i));
+            if (element_type.kind == TypeKind::Struct) {
+                AST::ArrayInitializer empty(init->location,
+                    std::vector<std::unique_ptr<AST::Initializer>>{});
+                emit_struct_brace_initialization(element_ptr, element_type, &empty);
+            }
+            else {
+                emit_line("store " + llvm_type(element_type) +
+                    " zeroinitializer, ptr " + element_ptr);
+            }
+        }
+    }
+
+    bool CodeGenerator::gen_operator_call(AST::Expression* expr, ExprValue& out) {
+        auto found = resolved_operators_.find(expr);
+        if (found == resolved_operators_.end() || found->second == nullptr) {
+            return false;
+        }
+        AST::FunctionDefinition* callee = found->second;
+        std::vector<AST::Expression*> final_arguments;
+        bool postfix_dummy = false;
+        if (auto* comp = dynamic_cast<AST::ComparisonExpression*>(expr)) {
+            final_arguments = { comp->left.get(), comp->right.get() };
+        }
+        else if (auto* add = dynamic_cast<AST::AdditiveExpression*>(expr)) {
+            final_arguments = { add->left.get(), add->right.get() };
+        }
+        else if (auto* mul = dynamic_cast<AST::MultiplicativeExpression*>(expr)) {
+            final_arguments = { mul->left.get(), mul->right.get() };
+        }
+        else if (auto* pow = dynamic_cast<AST::PowerExpression*>(expr)) {
+            final_arguments = { pow->left.get(), pow->right.get() };
+        }
+        else if (auto* land = dynamic_cast<AST::LogicalAndExpression*>(expr)) {
+            final_arguments = { land->left.get(), land->right.get() };
+        }
+        else if (auto* lor = dynamic_cast<AST::LogicalOrExpression*>(expr)) {
+            final_arguments = { lor->left.get(), lor->right.get() };
+        }
+        else if (auto* unary = dynamic_cast<AST::UnaryExpression*>(expr)) {
+            final_arguments = { unary->operand.get() };
+        }
+        else if (auto* post = dynamic_cast<AST::PostfixExpression*>(expr)) {
+            final_arguments = { post->base.get() };
+            postfix_dummy = post->op == AST::PostfixExpression::Operator::Increment ||
+                post->op == AST::PostfixExpression::Operator::Decrement;
+        }
+        else if (auto* assign = dynamic_cast<AST::AssignmentExpression*>(expr)) {
+            if (assign->op == AST::AssignmentExpression::Operator::Assign) {
+                return false;
+            }
+            final_arguments = { assign->left.get(), assign->right.get() };
+        }
+        else {
+            return false;
+        }
+        out = emit_operator_invocation(callee, final_arguments, postfix_dummy,
+            expr->location);
+        return true;
+    }
+
+    CodeGenerator::ExprValue CodeGenerator::emit_operator_invocation(
+        AST::FunctionDefinition* callee,
+        std::vector<AST::Expression*>& final_arguments, bool postfix_dummy,
+        SourceLocation loc) {
+        if (postfix_dummy && callee->parameters.size() != 2) {
+            postfix_dummy = false;
+        }
+        std::vector<std::unique_ptr<AST::Expression>> address_wrappers;
+        std::vector<AST::UnaryExpression*> borrowed_wrappers;
+        for (std::size_t i = 0; i < final_arguments.size(); ++i) {
+            AST::Expression* operand = final_arguments[i];
+            if (operand == nullptr || i >= callee->parameters.size()) {
+                continue;
+            }
+            if (callee->parameters[i].kind != TypeKind::Pointer) {
+                continue;
+            }
+            AST::Type operand_type = resolved_type(operand);
+            if (operand_type.kind == TypeKind::Pointer ||
+                operand_type.kind == TypeKind::Array ||
+                operand_type.kind == TypeKind::Void) {
+                continue;
+            }
+            if (!operand->is_lvalue()) {
+                continue;
+            }
+            auto wrapper = std::make_unique<AST::UnaryExpression>(operand->location,
+                AST::UnaryExpression::Operator::AddressOf,
+                std::unique_ptr<AST::Expression>(operand));
+            AST::UnaryExpression* wrapper_ptr = wrapper.get();
+            expression_types_[wrapper_ptr] = AST::Type::make_pointer(
+                std::make_shared<AST::Type>(operand_type));
+            final_arguments[i] = wrapper_ptr;
+            borrowed_wrappers.push_back(wrapper_ptr);
+            address_wrappers.push_back(std::move(wrapper));
+        }
+        if (postfix_dummy) {
+            lexeme_pool_.push_back("0");
+            Token dummy(TokenType::IntegerLiteral, loc,
+                std::string_view(lexeme_pool_.back()));
+            auto dummy_node = std::make_unique<AST::PrimaryExpression>(loc, dummy);
+            final_arguments.push_back(dummy_node.get());
+            address_wrappers.push_back(std::move(dummy_node));
+        }
+        lexeme_pool_.push_back(callee->name);
+        auto callee_name = std::make_unique<AST::PrimaryExpression>(loc,
+            std::string_view(lexeme_pool_.back()));
+        auto* callee_ptr = callee_name.get();
+        auto call = std::make_unique<AST::PostfixExpression>(loc,
+            std::unique_ptr<AST::Expression>(callee_name.release()),
+            AST::PostfixExpression::Operator::FunctionCall);
+        call->borrowed_arguments = final_arguments;
+        AST::PostfixExpression* call_ptr = call.get();
+        operator_extra_nodes_.push_back(std::move(call));
+        for (auto& wrapper : address_wrappers) {
+            operator_extra_nodes_.push_back(std::move(wrapper));
+        }
+        resolved_functions_[callee_ptr] = callee;
+        expression_types_[call_ptr] = callee->return_type;
+        ExprValue result = gen_postfix(call_ptr);
+        for (AST::UnaryExpression* wrapper : borrowed_wrappers) {
+            if (wrapper->operand != nullptr) {
+                wrapper->operand.release();
+            }
+        }
+        return result;
     }
 
     CodeGenerator::ExprValue CodeGenerator::gen_expr(AST::Expression* expr) {
         if (expr == nullptr) {
             return ExprValue{};
+        }
+        {
+            ExprValue operator_value;
+            if (gen_operator_call(expr, operator_value)) {
+                return operator_value;
+            }
         }
         if (auto* assign = dynamic_cast<AST::AssignmentExpression*>(expr)) {
             ExprValue left = gen_expr(assign->left.get());
@@ -1941,6 +2265,14 @@ namespace {
         case AST::PrimaryExpression::Kind::Identifier: {
             LocalInfo* local = lookup_local(expr->identifier);
             if (local != nullptr) {
+                if (local->is_constant) {
+                    out.type = local->type;
+                    if (local->constant_expr != nullptr) {
+                        return gen_expr(const_cast<AST::Expression*>(local->constant_expr));
+                    }
+                    out.value = local->constant_text;
+                    return out;
+                }
                 out.is_lvalue = true;
                 out.address = local->address;
                 if (local->type.kind == TypeKind::Array) {
@@ -2133,7 +2465,26 @@ namespace {
             }
             if (post->op == AST::PostfixExpression::Operator::Dot ||
                 post->op == AST::PostfixExpression::Operator::Arrow) {
-                ExprValue base = gen_expr(post->base.get());
+                ExprValue base;
+                bool operator_arrow = false;
+                if (post->op == AST::PostfixExpression::Operator::Arrow) {
+                    auto arrow_it = resolved_operators_.find(post->base.get());
+                    if (arrow_it != resolved_operators_.end() &&
+                        arrow_it->second != nullptr) {
+                        std::vector<AST::Expression*> arrow_arguments = {
+                            post->base.get()
+                        };
+                        ExprValue arrow_result = emit_operator_invocation(
+                            arrow_it->second, arrow_arguments, false, post->location);
+                        if (arrow_result.type.kind == TypeKind::Pointer) {
+                            base = arrow_result;
+                            operator_arrow = true;
+                        }
+                    }
+                }
+                if (!operator_arrow) {
+                    base = gen_expr(post->base.get());
+                }
                 AST::Type struct_type;
                 std::string base_addr;
                 if (post->op == AST::PostfixExpression::Operator::Arrow) {
@@ -2296,7 +2647,171 @@ namespace {
                 if (e->name == name) return "@" + extern_ir_symbol(e);
             }
         }
+        if (lifecycle_symbols_.count(name) != 0) {
+            return "@glt_" + name;
+        }
         return std::string();
+    }
+
+    bool CodeGenerator::ast_function_exists(const std::string& name) const {
+        if (name.empty()) return false;
+        for (const auto& top : program_->top_levels) {
+            if (auto* f = dynamic_cast<AST::FunctionDefinition*>(top.get())) {
+                if (f->name == name) return true;
+            }
+        }
+        return false;
+    }
+
+    std::string CodeGenerator::lifecycle_symbol(const AST::StructDefinition* def,
+        LifecycleKind kind) const {
+        if (def == nullptr) return std::string();
+        switch (kind) {
+        case LifecycleKind::Constructor:
+            return def->constructor_names.empty()
+                ? ("__sgc_ctor$" + def->name) : std::string();
+        case LifecycleKind::Destructor:
+            return def->destructor_name.empty()
+                ? ("__sgc_dtor$" + def->name) : std::string();
+        case LifecycleKind::CopyConstructor:
+            if (def->no_copy || ast_function_exists(def->copy_constructor_name)) {
+                return std::string();
+            }
+            return "__sgc_copyctor$" + def->name;
+        case LifecycleKind::MoveConstructor:
+            if (def->no_move || ast_function_exists(def->move_constructor_name)) {
+                return std::string();
+            }
+            return "__sgc_movector$" + def->name;
+        case LifecycleKind::CopyAssignment:
+            if (def->no_copy || ast_function_exists(def->copy_assignment_name)) {
+                return std::string();
+            }
+            return "__sgc_copyassign$" + def->name;
+        case LifecycleKind::MoveAssignment:
+            if (def->no_move || ast_function_exists(def->move_assignment_name)) {
+                return std::string();
+            }
+            return "__sgc_moveassign$" + def->name;
+        }
+        return std::string();
+    }
+
+    void CodeGenerator::emit_lifecycle_functions() {
+        const LifecycleKind kinds[] = {
+            LifecycleKind::Constructor,
+            LifecycleKind::Destructor,
+            LifecycleKind::CopyConstructor,
+            LifecycleKind::MoveConstructor,
+            LifecycleKind::CopyAssignment,
+            LifecycleKind::MoveAssignment,
+        };
+        for (AST::StructDefinition* def : struct_defs_) {
+            if (def == nullptr) continue;
+            for (LifecycleKind kind : kinds) {
+                const std::string symbol = lifecycle_symbol(def, kind);
+                if (symbol.empty() || lifecycle_symbols_.count(symbol) == 0) continue;
+                emit_lifecycle_body(def, kind, symbol);
+            }
+        }
+    }
+
+    void CodeGenerator::register_lifecycle_symbols() {
+        const LifecycleKind kinds[] = {
+            LifecycleKind::Constructor,
+            LifecycleKind::Destructor,
+            LifecycleKind::CopyConstructor,
+            LifecycleKind::MoveConstructor,
+            LifecycleKind::CopyAssignment,
+            LifecycleKind::MoveAssignment,
+        };
+        for (AST::StructDefinition* def : struct_defs_) {
+            if (def == nullptr) continue;
+            const AST::Type struct_type = AST::Type::make_struct(def->name);
+            for (LifecycleKind kind : kinds) {
+                std::string symbol = lifecycle_symbol(def, kind);
+                if (symbol.empty()) continue;
+                if (kind == LifecycleKind::CopyConstructor ||
+                    kind == LifecycleKind::CopyAssignment) {
+                    if (!type_is_copyable(struct_type)) continue;
+                }
+                if (kind == LifecycleKind::MoveConstructor ||
+                    kind == LifecycleKind::MoveAssignment) {
+                    if (!type_is_movable(struct_type)) continue;
+                }
+                lifecycle_symbols_.insert(symbol);
+            }
+        }
+    }
+
+    void CodeGenerator::emit_lifecycle_body(AST::StructDefinition* def,
+        LifecycleKind kind, const std::string& name) {
+        const AST::Type struct_type = AST::Type::make_struct(def->name);
+        scopes_.clear();
+        cleanup_scopes_.clear();
+        push_scope();
+        emitted_labels_.clear();
+        current_label_.clear();
+        break_labels_.clear();
+        current_function_ = nullptr;
+        hoisted_allocas_.clear();
+        hoist_insert_index_ = 0;
+        current_block_terminated_ = true;
+        current_sret_pointer_.clear();
+        pending_sret_destination_.clear();
+        statement_temporaries_.clear();
+
+        const bool two_parameters = kind != LifecycleKind::Constructor &&
+            kind != LifecycleKind::Destructor;
+        std::string header = "define void @glt_" + name + "(ptr %this";
+        if (two_parameters) header += ", ptr %source";
+        header += ") {";
+        emit_line(header);
+        start_block(new_label("entry"));
+        hoist_insert_index_ = lines_.size();
+
+        emitting_lifecycle_body_ = true;
+        lifecycle_owner_ = def;
+        switch (kind) {
+        case LifecycleKind::Constructor: {
+            AST::ArrayInitializer empty(def->location,
+                std::vector<std::unique_ptr<AST::Initializer>>{});
+            emit_struct_brace_initialization("%this", struct_type, &empty);
+            break;
+        }
+        case LifecycleKind::Destructor: {
+            const std::string ir = llvm_type(struct_type);
+            for (std::size_t i = 0; i < def->members.size(); ++i) {
+                std::string field = new_temp("dtor_field");
+                emit_line(field + " = getelementptr " + ir + ", ptr %this, i32 0, i32 " +
+                    std::to_string(i));
+                emit_destroy_string_at(def->members[i].type, field);
+            }
+            break;
+        }
+        case LifecycleKind::CopyConstructor:
+            emit_memberwise_copy(struct_type, "%this", "%source", false);
+            break;
+        case LifecycleKind::MoveConstructor:
+            emit_memberwise_move(struct_type, "%this", "%source", false);
+            break;
+        case LifecycleKind::CopyAssignment:
+            emit_memberwise_copy(struct_type, "%this", "%source", true);
+            break;
+        case LifecycleKind::MoveAssignment:
+            emit_memberwise_move(struct_type, "%this", "%source", true);
+            break;
+        }
+        lifecycle_owner_ = nullptr;
+        emitting_lifecycle_body_ = false;
+
+        if (!current_block_terminated_) {
+            emit_line("ret void");
+        }
+        flush_hoisted_allocas();
+        emit_line("}");
+        pop_scope();
+        emitted_lifecycle_bodies_.insert(name);
     }
 
     std::string CodeGenerator::extern_ir_symbol(const AST::ExternDeclaration* ext) const {
@@ -2635,11 +3150,16 @@ namespace {
             return_type = *func_type.return_type;
 
            std::vector<std::string> ir_args;
-           std::vector<std::string> owned_args;
+            std::vector<std::string> owned_args;
             std::vector<AST::Expression*> all_args;
-            all_args.reserve(expr->arguments.size() + expr->appended_defaults.size());
-            for (auto& a : expr->arguments) all_args.push_back(a.get());
-            for (AST::Expression* d : expr->appended_defaults) all_args.push_back(d);
+            if (!expr->arguments.empty() || !expr->appended_defaults.empty()) {
+                all_args.reserve(expr->arguments.size() + expr->appended_defaults.size());
+                for (auto& a : expr->arguments) all_args.push_back(a.get());
+                for (AST::Expression* d : expr->appended_defaults) all_args.push_back(d);
+            }
+            else {
+                all_args = expr->borrowed_arguments;
+            }
             for (size_t i = 0; i < all_args.size(); ++i) {
                 ExprValue arg = gen_expr(all_args[i]);
                 if (!arg.owned_string.empty()) {

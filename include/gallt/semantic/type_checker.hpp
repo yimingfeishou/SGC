@@ -14,7 +14,12 @@ namespace gallt {
 
     class TypeChecker {
     public:
-        TypeChecker(DiagnosticEngine& diag);
+        TypeChecker(DiagnosticEngine& diag,
+            const std::unordered_map<const AST::Expression*, std::string>&
+                expression_free_identifiers = {},
+            const std::unordered_map<const AST::Expression*,
+                std::tuple<std::string, std::size_t, AST::Type>>&
+                expression_argument_casts = {});
         ~TypeChecker() = default;
 
         TypeChecker(const TypeChecker&) = delete;
@@ -35,8 +40,16 @@ namespace gallt {
         const std::unordered_map<const AST::PrimaryExpression*, const AST::ExternDeclaration*>&
             resolved_externs() const { return resolved_externs_; }
 
+        const std::unordered_map<const AST::Expression*, AST::FunctionDefinition*>&
+            resolved_operators() const { return resolved_operators_; }
+
     private:
         DiagnosticEngine& diag_;
+        const std::unordered_map<const AST::Expression*, std::string>&
+            expression_free_identifiers_;
+        const std::unordered_map<const AST::Expression*,
+            std::tuple<std::string, std::size_t, AST::Type>>&
+            expression_argument_casts_;
         SymbolTable sym_table_;
         AST::Program* program_ = nullptr;
 
@@ -54,6 +67,15 @@ namespace gallt {
             resolved_functions_;
         std::unordered_map<const AST::PrimaryExpression*, const AST::ExternDeclaration*>
             resolved_externs_;
+        std::unordered_map<const AST::Expression*, AST::FunctionDefinition*> resolved_operators_;
+        std::unordered_map<std::string, std::vector<AST::FunctionDefinition*>> operator_overloads_;
+
+        void collect_operator_overloads();
+        bool validate_operator_definition(AST::FunctionDefinition* node);
+        bool is_custom_type(const AST::Type& type) const;
+        AST::FunctionDefinition* resolve_user_operator(const std::string& op,
+            const std::vector<AST::Type>& operand_types, SourceLocation loc);
+        bool try_user_defined_operator(AST::Expression* expr, AST::Type& out);
         std::unordered_map<const AST::FunctionDefinition*, std::string> mangled_functions_;
         std::unordered_map<const AST::ExternDeclaration*, std::string> mangled_externs_;
         std::unordered_set<std::string> used_mangled_names_;
@@ -114,6 +136,11 @@ namespace gallt {
 
         bool is_array_type(const AST::Type& type) const;
 
+        static AST::Type decay_array_type(const AST::Type& type);
+
+        static bool function_signatures_match(const AST::Type& expected,
+            const AST::Type& actual);
+
         bool is_void_type(const AST::Type& type) const;
 
         bool is_file_type(const AST::Type& type) const;
@@ -149,6 +176,7 @@ namespace gallt {
         bool type_is_copyable(const AST::Type& type) const;
         bool type_is_movable(const AST::Type& type) const;
         static bool is_move_expression(const AST::Expression* expr);
+        static bool is_expression_parameter_temp(const AST::Initializer* init);
 
         void verify_main_function();
 
@@ -163,7 +191,13 @@ namespace gallt {
         std::optional<size_t> evaluate_const_expression(AST::Expression* expr);
         bool is_constant_integer_expression(AST::Expression* expr, size_t* out_value = nullptr);
 
-        std::vector<std::unordered_map<std::string, long long>> const_values_;
+        struct ConstValue {
+            long long int_value = 0;
+            double float_value = 0.0;
+            bool is_float = false;
+        };
+
+        std::vector<std::unordered_map<std::string, ConstValue>> const_values_;
         void enter_scope();
         void exit_scope();
         void record_const_value(const std::string& name, AST::Expression* initializer,

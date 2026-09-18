@@ -35,9 +35,20 @@ namespace {
                 out.mode = CommandMode::Compile;
                 continue;
             }
+            if (arg == L"--debug") {
+                out.debug_mode = true;
+                out.debug_mode_explicit = true;
+                continue;
+            }
+            if (arg == L"--release") {
+                out.release_mode = true;
+                out.release_mode_explicit = true;
+                continue;
+            }
             auto require_value = [&](const wchar_t* name) -> std::string* {
                 if (i + 1 >= argc) {
                     out.error_message = "missing value after " + narrow_utf8(arg);
+                    out.mode = CommandMode::Invalid;
                     return nullptr;
                 }
                 ++i;
@@ -63,6 +74,18 @@ namespace {
                     return false;
                 }
                 out.optimization_level = static_cast<int>((*v)[0] - '0');
+                out.optimization_level_explicit = true;
+            } else if (arg == L"--debug-symbols" || arg == L"-DS") {
+                std::string* v = require_value(L"--debug-symbols");
+                if (!v) return false;
+                if (v->size() != 1 || (*v)[0] < '0' || (*v)[0] > '2') {
+                    out.mode = CommandMode::Invalid;
+                    out.error_message = "invalid debug information level: " + *v +
+                        " (expected 0-2)";
+                    return false;
+                }
+                out.debug_symbols_level = static_cast<int>((*v)[0] - '0');
+                out.debug_symbols_explicit = true;
             } else if (!arg.empty() && arg[0] == L'-') {
                 out.mode = CommandMode::Invalid;
                 out.error_message = "unknown option: " + narrow_utf8(arg);
@@ -70,6 +93,39 @@ namespace {
             } else {
                 out.positional.push_back(narrow_utf8(arg));
             }
+        }
+        if (out.mode == CommandMode::Invalid) {
+            return false;
+        }
+        if (out.debug_mode_explicit && out.release_mode_explicit) {
+            out.mode = CommandMode::Invalid;
+            out.error_message = "--debug and --release are mutually exclusive";
+            return false;
+        }
+        if (out.optimization_level_explicit && out.debug_symbols_explicit) {
+            out.mode = CommandMode::Invalid;
+            out.error_message =
+                "--optimization-level and --debug-symbols are mutually exclusive";
+            return false;
+        }
+        if (out.debug_mode && out.optimization_level_explicit) {
+            out.mode = CommandMode::Invalid;
+            out.error_message =
+                "--debug mode does not allow --optimization-level";
+            return false;
+        }
+        if (out.release_mode && out.debug_symbols_explicit) {
+            out.mode = CommandMode::Invalid;
+            out.error_message =
+                "--release mode does not allow --debug-symbols";
+            return false;
+        }
+        if (out.debug_mode) {
+            if (!out.optimization_level_explicit) out.optimization_level = 0;
+            if (!out.debug_symbols_explicit) out.debug_symbols_level = 2;
+        } else if (out.release_mode) {
+            if (!out.optimization_level_explicit) out.optimization_level = 3;
+            if (!out.debug_symbols_explicit) out.debug_symbols_level = 0;
         }
         return true;
     }
@@ -82,6 +138,11 @@ namespace {
             "  sgc --compile --input \"file.glt\" --output \"program.exe\" "
             "--optimization-level <0-4>\n"
             "  sgc --compile --input \"file.glt\" --output \"program.exe\" -OL <0-4>\n"
+            "  sgc --compile --input \"file.glt\" --output \"program.exe\" "
+            "--debug-symbols <0-2>\n"
+            "  sgc --compile --input \"file.glt\" --output \"program.exe\" -DS <0-2>\n"
+            "  sgc --compile --input \"file.glt\" --output \"program.exe\" --debug\n"
+            "  sgc --compile --input \"file.glt\" --output \"program.exe\" --release\n"
             "  sgc --help\n"
             "  sgc --version\n"
             "Options:\n"
@@ -93,15 +154,27 @@ namespace {
             "                                1 basic\n"
             "                                2 medium (default)\n"
             "                                3 aggressive\n"
-            "                                4 size-oriented\n";
+            "                                4 size-oriented\n"
+            "  --debug-symbols, -DS <n>      debug information level:\n"
+            "                                0 no debug information (default)\n"
+            "                                1 line number tables only\n"
+            "                                2 type information, symbol information "
+            "and line number tables\n"
+            "  --debug                       enable debug mode\n"
+            "  --release                     enable release mode\n"
+            "Conflicts:\n"
+            "  --optimization-level and --debug-symbols cannot be combined\n"
+            "  --debug and --release cannot be combined\n"
+            "  --debug does not allow --optimization-level\n"
+            "  --release does not allow --debug-symbols\n";
     }
 
     std::string version_text() {
         return
-            "sgc Standard Gallt Compiler 0.4.1 Preview (LLVM backend, x86-64 Windows)\n"
+            "sgc Standard Gallt Compiler 0.4.2-0918 Preview (LLVM backend, x86-64 Windows)\n"
             "Gallt Lang Standard Version 26.09 (Preview)\n"
-            "Build date: 2026-09-16\n"
-            "The compiler is an early preview version, and support for certain syntax and edge cases may not be fully covered. We appreciate your understanding.";
+            "Build date: 2026-09-18\n"
+            "The compiler is an early preview version, and support for certain syntax and edge cases may not be fully covered. We appreciate your understanding";
     }
 
 } 

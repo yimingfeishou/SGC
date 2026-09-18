@@ -96,8 +96,14 @@ namespace gallt {
 
     } 
 
-    TypeChecker::TypeChecker(DiagnosticEngine& diag)
-        : diag_(diag) {
+    TypeChecker::TypeChecker(DiagnosticEngine& diag,
+        const std::unordered_map<const AST::Expression*, std::string>&
+            expression_free_identifiers,
+        const std::unordered_map<const AST::Expression*,
+            std::tuple<std::string, std::size_t, AST::Type>>&
+            expression_argument_casts)
+        : diag_(diag), expression_free_identifiers_(expression_free_identifiers),
+        expression_argument_casts_(expression_argument_casts) {
     }
 
     bool TypeChecker::check_program(AST::Program* program) {
@@ -126,6 +132,8 @@ namespace gallt {
                 }
             }
         }
+
+        collect_operator_overloads();
 
         for (auto& top : program->top_levels) {
             check_top_level(top.get());
@@ -611,6 +619,11 @@ namespace gallt {
                     decl->type.array_size = arr_init->elements.size();
                     decl->array_size = arr_init->elements.size();
                 }
+                else {
+                    report_error(decl->location, ErrorCode::EmptyArrayInitializer,
+                        "cannot infer array size from an empty initializer");
+                    return;
+                }
             }
         }
         if (!is_complete_type(decl->type) && decl->type.kind != TypeKind::Void) {
@@ -627,6 +640,15 @@ namespace gallt {
             report_error(decl->location, ErrorCode::RedefinedIdentifier,
                 "variable '" + decl->name + "' already declared in this scope");
             return;
+        }
+        if (const std::vector<Symbol>* set =
+                sym_table_.current_scope().overloads(decl->name)) {
+            if (!set->empty()) {
+                report_error(decl->location, ErrorCode::RedefinedIdentifier,
+                    "variable '" + decl->name +
+                    "' conflicts with a function of the same name in this scope");
+                return;
+            }
         }
         if (decl->type.kind == TypeKind::Array) {
             if (!decl->array_size.has_value()) {
@@ -689,16 +711,46 @@ namespace gallt {
                         is_null = true;
                     }
                 }
-               if (!is_null || decl->type.kind != TypeKind::Pointer) {
+                if (decl->type.kind == TypeKind::Function &&
+                    init_type.kind == TypeKind::Function &&
+                    !function_signatures_match(decl->type, init_type)) {
+                    report_error(decl->location, ErrorCode::FuncPtrTypeMismatch,
+                        "function pointer type mismatch: expected '" +
+                        decl->type.to_string() + "', got '" + init_type.to_string() + "'");
+                }
+                else if (decl->type.kind == TypeKind::Pointer &&
+                    init_type.kind == TypeKind::Pointer &&
+                    decl->type.pointee_type && init_type.pointee_type &&
+                    decl->type.pointee_type->kind != TypeKind::Void &&
+                    init_type.pointee_type->kind != TypeKind::Void &&
+                    !(*decl->type.pointee_type == *init_type.pointee_type)) {
+                    report_error(decl->location, ErrorCode::PointerTypeMismatch,
+                        "cannot initialize pointer '" + decl->name +
+                        "' of type '" + decl->type.to_string() + "' with '" +
+                        init_type.to_string() + "'");
+                }
+               else if (!is_null || decl->type.kind != TypeKind::Pointer) {
                    if (!can_implicit_convert(init_type, decl->type)) {
-                       if (is_null && decl->type.kind == TypeKind::File) {
-                       }
-                       else {
+                      if (is_null && decl->type.kind == TypeKind::File) {
+                      }
+                      else if (is_expression_parameter_temp(decl->initializer.get())) {
+                          diag_.report_error_template(decl->location,
+                              ErrorCode::ExprParameterExpansionTypeError,
+                              { decl->name, decl->type.to_string(),
+                                init_type.to_string() });
+                      }
+                      else if (decl->name.find("$expr") != std::string::npos) {
+                          diag_.report_error_template(decl->location,
+                              ErrorCode::ExprParameterExpansionTypeError,
+                              { decl->name, decl->type.to_string(),
+                                init_type.to_string() });
+                      }
+                      else {
                        report_error(decl->location, ErrorCode::AssignmentTypeMismatch,
                            "cannot initialize variable '" + decl->name +
                            "' with type '" + init_type.to_string() +
                            "' (expected '" + decl->type.to_string() + "')");
-                       }
+                      }
                    }
                }
             }
@@ -834,11 +886,9 @@ namespace gallt {
     void TypeChecker::check_if_statement(AST::IfStatement* if_stmt) {
         if (if_stmt->condition) {
             AST::Type cond_type = check_expression(if_stmt->condition.get());
-            if (!is_bool_type(cond_type) && !cond_type.is_integer()) {
-                if (!can_implicit_convert(cond_type, AST::Type::make_bool())) {
-                    report_error(if_stmt->condition->location, ErrorCode::ConditionNotBoolean,
-                        "if condition must be boolean or integer type, got '" + cond_type.to_string() + "'");
-                }
+            if (!is_bool_type(cond_type)) {
+                report_error(if_stmt->condition->location, ErrorCode::ConditionNotBoolean,
+                    "if condition must be boolean type, got '" + cond_type.to_string() + "'");
             }
         }
         if (if_stmt->then_block) {
@@ -856,11 +906,9 @@ namespace gallt {
         }
         if (for_stmt->condition) {
             AST::Type cond_type = check_expression(for_stmt->condition.get());
-            if (!is_bool_type(cond_type) && !cond_type.is_integer()) {
-                if (!can_implicit_convert(cond_type, AST::Type::make_bool())) {
-                    report_error(for_stmt->condition->location, ErrorCode::ConditionNotBoolean,
-                        "for condition must be boolean or integer type, got '" + cond_type.to_string() + "'");
-                }
+            if (!is_bool_type(cond_type)) {
+                report_error(for_stmt->condition->location, ErrorCode::ConditionNotBoolean,
+                    "for condition must be boolean type, got '" + cond_type.to_string() + "'");
             }
         }
         if (for_stmt->step) {
@@ -877,11 +925,9 @@ namespace gallt {
     void TypeChecker::check_while_statement(AST::WhileStatement* while_stmt) {
         if (while_stmt->condition) {
             AST::Type cond_type = check_expression(while_stmt->condition.get());
-            if (!is_bool_type(cond_type) && !cond_type.is_integer()) {
-                if (!can_implicit_convert(cond_type, AST::Type::make_bool())) {
-                    report_error(while_stmt->condition->location, ErrorCode::ConditionNotBoolean,
-                        "while condition must be boolean or integer type, got '" + cond_type.to_string() + "'");
-                }
+            if (!is_bool_type(cond_type)) {
+                report_error(while_stmt->condition->location, ErrorCode::ConditionNotBoolean,
+                    "while condition must be boolean type, got '" + cond_type.to_string() + "'");
             }
         }
         loop_depth_++;
@@ -949,9 +995,390 @@ namespace gallt {
         }
     }
 
+    bool TypeChecker::is_custom_type(const AST::Type& type) const {
+        if (type.kind == TypeKind::Struct) {
+            return true;
+        }
+        if (type.kind == TypeKind::Pointer && type.pointee_type) {
+            return is_custom_type(*type.pointee_type);
+        }
+        if (type.kind == TypeKind::Array && type.element_type) {
+            return is_custom_type(*type.element_type);
+        }
+        return false;
+    }
+
+    bool TypeChecker::validate_operator_definition(AST::FunctionDefinition* node) {
+        if (node->is_conversion_operator) {
+            if (node->parameters.size() != 1) {
+                report_error(node->location, ErrorCode::OperatorOverloadOperandCountMismatch,
+                    "operator " + node->conversion_target_type.to_string());
+                return false;
+            }
+            if (!is_custom_type(node->parameters[0])) {
+                report_error(node->location, ErrorCode::OperatorOverloadRequiresCustomType,
+                    "operator " + node->conversion_target_type.to_string());
+                return false;
+            }
+            return true;
+        }
+        const std::string& op = node->overloaded_operator;
+        if (op == "." || op == "::" || op == "=" || op.empty()) {
+            report_error(node->location, ErrorCode::OperatorCannotBeOverloaded, op);
+            return false;
+        }
+        bool binary_operator = (op == "/" || op == "%" || op == "**" || op == "==" ||
+            op == "!=" || op == ">" || op == "<" || op == ">=" || op == "<=" ||
+            op == "&&" || op == "||" || op == "+=" || op == "-=");
+        std::size_t expected = binary_operator ? 2u : 1u;
+        if (op == "[]") {
+            expected = 2u;
+        }
+        if (op == "->") {
+            expected = 1u;
+        }
+        if (!binary_operator && (op == "+" || op == "-" || op == "*") &&
+            node->parameters.size() == 2) {
+            expected = 2u;
+        }
+        if ((op == "++" || op == "--") && node->parameters.size() == 2 &&
+            node->parameters[0].kind == TypeKind::Pointer) {
+            expected = 2u;
+        }
+        if (node->parameters.size() != expected) {
+            report_error(node->location, ErrorCode::OperatorOverloadOperandCountMismatch,
+                op + " (" + std::to_string(expected) + "/" +
+                std::to_string(node->parameters.size()) + ")");
+            return false;
+        }
+        bool has_custom = false;
+        for (const AST::Type& param : node->parameters) {
+            if (is_custom_type(param)) {
+                has_custom = true;
+            }
+        }
+        if (!has_custom) {
+            report_error(node->location, ErrorCode::OperatorOverloadRequiresCustomType, op);
+            return false;
+        }
+        if (op == "+=" || op == "-=") {
+            if (node->parameters[0].kind != TypeKind::Pointer ||
+                node->parameters[0].pointee_type == nullptr ||
+                !is_custom_type(*node->parameters[0].pointee_type)) {
+                report_error(node->location,
+                    ErrorCode::ModifyingOperatorFirstParameterNotPointer, op);
+                return false;
+            }
+        }
+        if (op == "++" || op == "--") {
+            if (node->parameters[0].kind == TypeKind::Pointer &&
+                node->parameters[0].pointee_type != nullptr &&
+                is_custom_type(*node->parameters[0].pointee_type)) {
+                node->operator_postfix_dummy = node->parameters.size() == 2;
+            }
+        }
+        if (op == "[]") {
+            if (node->return_type.kind != TypeKind::Pointer) {
+                report_error(node->location, ErrorCode::SubscriptOperatorMustReturnPointer, op);
+                return false;
+            }
+            if (node->parameters.size() == 2 && !node->parameters[1].is_integer()) {
+                report_error(node->location, ErrorCode::OperatorOverloadParameterMismatch,
+                    op);
+                return false;
+            }
+        }
+        if (op == "->") {
+            if (node->return_type.kind != TypeKind::Pointer) {
+                report_error(node->location, ErrorCode::ArrowOperatorMustReturnPointer, op);
+                return false;
+            }
+        }
+        for (const std::unique_ptr<AST::Expression>& def : node->param_defaults) {
+            if (def != nullptr) {
+                report_error(node->location,
+                    ErrorCode::OperatorOverloadDefaultArgumentNotAllowed, op);
+                return false;
+            }
+        }
+        return true;
+    }
+
+    void TypeChecker::collect_operator_overloads() {
+        for (auto& top : program_->top_levels) {
+            auto* func = dynamic_cast<AST::FunctionDefinition*>(top.get());
+            if (func == nullptr || !func->is_operator) {
+                continue;
+            }
+            if (!validate_operator_definition(func)) {
+                continue;
+            }
+            std::string key = func->is_conversion_operator
+                ? std::string("operator") + func->conversion_target_type.to_string()
+                : std::string("operator") + func->overloaded_operator;
+            std::vector<AST::FunctionDefinition*>& bucket = operator_overloads_[key];
+            for (AST::FunctionDefinition* existing : bucket) {
+                if (existing->parameters.size() != func->parameters.size()) {
+                    continue;
+                }
+                bool same = true;
+                for (std::size_t i = 0; i < func->parameters.size(); ++i) {
+                    if (!(existing->parameters[i] == func->parameters[i])) {
+                        same = false;
+                        break;
+                    }
+                }
+                if (same) {
+                    report_error(func->location, ErrorCode::OperatorOverloadRedefined,
+                        func->overloaded_operator);
+                    same = false;
+                    break;
+                }
+            }
+            bucket.push_back(func);
+        }
+    }
+
+    AST::FunctionDefinition* TypeChecker::resolve_user_operator(const std::string& op,
+        const std::vector<AST::Type>& operand_types, SourceLocation loc) {
+        auto it = operator_overloads_.find("operator" + op);
+        if (it == operator_overloads_.end()) {
+            return nullptr;
+        }
+        AST::FunctionDefinition* best = nullptr;
+        int best_rank = -1;
+        bool ambiguous = false;
+        for (AST::FunctionDefinition* candidate : it->second) {
+            if (candidate->parameters.size() != operand_types.size()) {
+                continue;
+            }
+            int total_rank = 0;
+            bool viable = true;
+            for (std::size_t i = 0; i < operand_types.size(); ++i) {
+                int rank = conversion_rank(operand_types[i], candidate->parameters[i]);
+                if (rank < 0) {
+                    viable = false;
+                    break;
+                }
+                total_rank += rank;
+            }
+            if (!viable) {
+                continue;
+            }
+            if (best == nullptr || total_rank < best_rank) {
+                best = candidate;
+                best_rank = total_rank;
+                ambiguous = false;
+            }
+            else if (total_rank == best_rank) {
+                ambiguous = true;
+            }
+        }
+        if (ambiguous && best != nullptr) {
+            report_error(loc, ErrorCode::OperatorOverloadAmbiguous, op);
+            return nullptr;
+        }
+        return best;
+    }
+
+    bool TypeChecker::try_user_defined_operator(AST::Expression* expr, AST::Type& out) {
+        if (operator_overloads_.empty()) {
+            return false;
+        }
+        if (auto* cast = dynamic_cast<AST::PostfixExpression*>(expr)) {
+            if (cast->op == AST::PostfixExpression::Operator::Cast) {
+                AST::Type operand_type = check_expression(cast->base.get());
+                if (is_custom_type(operand_type)) {
+                    std::string key = std::string("operator") + cast->cast_type.to_string();
+                    auto found = operator_overloads_.find(key);
+                    if (found != operator_overloads_.end()) {
+                        for (AST::FunctionDefinition* candidate : found->second) {
+                            if (candidate->parameters.size() != 1) {
+                                continue;
+                            }
+                            if (conversion_rank(operand_type, candidate->parameters[0]) >= 0) {
+                                resolved_operators_[expr] = candidate;
+                                out = candidate->return_type;
+                                return true;
+                            }
+                        }
+                    }
+                }
+                return false;
+            }
+        }
+        std::string symbol;
+        std::vector<AST::Expression*> operands;
+        std::vector<bool> operand_needs_address;
+        bool auto_wrap_pointer = false;
+        bool postfix_increment = false;
+        if (auto* comp = dynamic_cast<AST::ComparisonExpression*>(expr)) {
+            switch (comp->op) {
+            case AST::ComparisonExpression::Operator::Equal: symbol = "=="; break;
+            case AST::ComparisonExpression::Operator::NotEqual: symbol = "!="; break;
+            case AST::ComparisonExpression::Operator::Greater: symbol = ">"; break;
+            case AST::ComparisonExpression::Operator::Less: symbol = "<"; break;
+            case AST::ComparisonExpression::Operator::GreaterEqual: symbol = ">="; break;
+            case AST::ComparisonExpression::Operator::LessEqual: symbol = "<="; break;
+            }
+            operands = { comp->left.get(), comp->right.get() };
+        }
+        else if (auto* add = dynamic_cast<AST::AdditiveExpression*>(expr)) {
+            symbol = add->op == AST::AdditiveExpression::Operator::Plus ? "+" : "-";
+            operands = { add->left.get(), add->right.get() };
+        }
+        else if (auto* mul = dynamic_cast<AST::MultiplicativeExpression*>(expr)) {
+            switch (mul->op) {
+            case AST::MultiplicativeExpression::Operator::Multiply: symbol = "*"; break;
+            case AST::MultiplicativeExpression::Operator::Divide: symbol = "/"; break;
+            case AST::MultiplicativeExpression::Operator::Remainder: symbol = "%"; break;
+            }
+            operands = { mul->left.get(), mul->right.get() };
+        }
+        else if (auto* pow = dynamic_cast<AST::PowerExpression*>(expr)) {
+            symbol = "**";
+            operands = { pow->left.get(), pow->right.get() };
+        }
+        else if (auto* land = dynamic_cast<AST::LogicalAndExpression*>(expr)) {
+            symbol = "&&";
+            operands = { land->left.get(), land->right.get() };
+        }
+        else if (auto* lor = dynamic_cast<AST::LogicalOrExpression*>(expr)) {
+            symbol = "||";
+            operands = { lor->left.get(), lor->right.get() };
+        }
+        else if (auto* unary = dynamic_cast<AST::UnaryExpression*>(expr)) {
+            switch (unary->op) {
+            case AST::UnaryExpression::Operator::LogicalNot: symbol = "!"; break;
+            case AST::UnaryExpression::Operator::UnaryMinus: symbol = "-"; break;
+            case AST::UnaryExpression::Operator::UnaryPlus: symbol = "+"; break;
+            case AST::UnaryExpression::Operator::AddressOf: symbol = "&"; break;
+            case AST::UnaryExpression::Operator::Dereference: symbol = "*"; break;
+            case AST::UnaryExpression::Operator::Increment: symbol = "++"; break;
+            case AST::UnaryExpression::Operator::Decrement: symbol = "--"; break;
+            }
+            operands = { unary->operand.get() };
+            operand_needs_address = { true };
+        }
+        else if (auto* post = dynamic_cast<AST::PostfixExpression*>(expr)) {
+            if (post->op == AST::PostfixExpression::Operator::Increment) {
+                symbol = "++";
+            }
+            else if (post->op == AST::PostfixExpression::Operator::Decrement) {
+                symbol = "--";
+            }
+            else if (post->op == AST::PostfixExpression::Operator::Subscript) {
+                symbol = "[]";
+            }
+            else {
+                return false;
+            }
+            postfix_increment = post->op == AST::PostfixExpression::Operator::Increment ||
+                post->op == AST::PostfixExpression::Operator::Decrement;
+            operands = { post->base.get() };
+            operand_needs_address = { true };
+            auto_wrap_pointer = postfix_increment ||
+                post->op == AST::PostfixExpression::Operator::Subscript;
+            if (post->op == AST::PostfixExpression::Operator::Subscript) {
+                operands.push_back(post->subscript_expr.get());
+                operand_needs_address.push_back(false);
+            }
+        }
+        else if (auto* assign = dynamic_cast<AST::AssignmentExpression*>(expr)) {
+            if (assign->op == AST::AssignmentExpression::Operator::PlusAssign) {
+                symbol = "+=";
+            }
+            else if (assign->op == AST::AssignmentExpression::Operator::MinusAssign) {
+                symbol = "-=";
+            }
+            else {
+                return false;
+            }
+            operands = { assign->left.get(), assign->right.get() };
+            operand_needs_address = { true, false };
+            auto_wrap_pointer = true;
+        }
+        if (symbol.empty()) {
+            return false;
+        }
+        std::vector<AST::Type> probe;
+        for (AST::Expression* operand : operands) {
+            if (operand == nullptr) {
+                probe.push_back(AST::Type::make_int());
+                continue;
+            }
+            auto known = expression_types_.find(operand);
+            if (known != expression_types_.end()) {
+                probe.push_back(known->second);
+            }
+            else {
+                probe.push_back(check_expression(operand));
+            }
+        }
+        bool any_custom = false;
+        for (const AST::Type& type : probe) {
+            if (is_custom_type(type)) {
+                any_custom = true;
+            }
+        }
+        if (!any_custom) {
+            return false;
+        }
+        (void)auto_wrap_pointer;
+        std::vector<AST::Type> addressable_probe = probe;
+        bool has_addressable = false;
+        for (std::size_t i = 0; i < addressable_probe.size(); ++i) {
+            if (i >= operand_needs_address.size() || !operand_needs_address[i]) {
+                continue;
+            }
+            if (addressable_probe[i].kind == TypeKind::Pointer ||
+                addressable_probe[i].kind == TypeKind::Array ||
+                addressable_probe[i].kind == TypeKind::Void) {
+                continue;
+            }
+            AST::Expression* operand = operands[i];
+            if (operand == nullptr || !operand->is_lvalue()) {
+                continue;
+            }
+            addressable_probe[i] = AST::Type::make_pointer(
+                std::make_shared<AST::Type>(addressable_probe[i]));
+            has_addressable = true;
+        }
+        AST::FunctionDefinition* chosen = nullptr;
+        if (postfix_increment) {
+            std::vector<AST::Type> binary_probe =
+                has_addressable ? addressable_probe : probe;
+            binary_probe.push_back(AST::Type::make_int());
+            AST::FunctionDefinition* post_fix = resolve_user_operator(symbol, binary_probe,
+                expr->location);
+            if (post_fix != nullptr && post_fix->parameters.size() == 2) {
+                operands.push_back(nullptr);
+                operand_needs_address.push_back(false);
+                chosen = post_fix;
+            }
+        }
+        if (chosen == nullptr) {
+            chosen = resolve_user_operator(symbol, probe, expr->location);
+        }
+        if (chosen == nullptr && has_addressable) {
+            chosen = resolve_user_operator(symbol, addressable_probe, expr->location);
+        }
+        if (chosen == nullptr) {
+            return false;
+        }
+        resolved_operators_[expr] = chosen;
+        out = chosen->return_type;
+        return true;
+    }
+
     AST::Type TypeChecker::check_expression(AST::Expression* expr, bool allow_void) {
         if (expr == nullptr) {
             return AST::Type::make_void();
+        }
+        AST::Type operator_result;
+        if (try_user_defined_operator(expr, operator_result)) {
+            expression_types_[expr] = operator_result;
+            return operator_result;
         }
         AST::Type result;
         if (auto* assign = dynamic_cast<AST::AssignmentExpression*>(expr)) {
@@ -1027,6 +1454,23 @@ namespace gallt {
                 "array type does not support assignment");
             return left_type;
         }
+        if (left_type.kind == TypeKind::Pointer && right_type.kind == TypeKind::Pointer &&
+            left_type.pointee_type && right_type.pointee_type &&
+            left_type.pointee_type->kind != TypeKind::Void &&
+            right_type.pointee_type->kind != TypeKind::Void &&
+            !(*left_type.pointee_type == *right_type.pointee_type)) {
+            report_error(expr->location, ErrorCode::PointerTypeMismatch,
+                "cannot assign pointer type '" + right_type.to_string() +
+                "' to '" + left_type.to_string() + "'");
+            return left_type;
+        }
+        if (left_type.kind == TypeKind::Function && right_type.kind == TypeKind::Function &&
+            !function_signatures_match(left_type, right_type)) {
+            report_error(expr->location, ErrorCode::FuncPtrTypeMismatch,
+                "function pointer type mismatch: expected '" + left_type.to_string() +
+                "', got '" + right_type.to_string() + "'");
+            return left_type;
+        }
        bool ok = false;
        if (expr->op == AST::AssignmentExpression::Operator::Assign) {
            ok = can_implicit_convert(right_type, left_type);
@@ -1054,9 +1498,18 @@ namespace gallt {
             }
         }
         if (!ok) {
-            report_error(expr->location, ErrorCode::AssignmentTypeMismatch,
-                "cannot assign type '" + right_type.to_string() +
-                "' to type '" + left_type.to_string() + "'");
+            auto* target = dynamic_cast<AST::PrimaryExpression*>(expr->left.get());
+            if (target != nullptr && target->kind == AST::PrimaryExpression::Kind::Identifier &&
+                target->identifier.rfind("__glt_expr", 0) == 0) {
+                diag_.report_error_template(expr->location,
+                    ErrorCode::ExprParameterBlockReturnTypeMismatch,
+                    { left_type.to_string(), right_type.to_string() });
+            }
+            else {
+                report_error(expr->location, ErrorCode::AssignmentTypeMismatch,
+                    "cannot assign type '" + right_type.to_string() +
+                    "' to type '" + left_type.to_string() + "'");
+            }
         }
         return left_type;
     }
@@ -1090,8 +1543,8 @@ namespace gallt {
     }
 
     AST::Type TypeChecker::check_comparison(AST::ComparisonExpression* expr) {
-        AST::Type left = check_expression(expr->left.get());
-        AST::Type right = check_expression(expr->right.get());
+        AST::Type left = decay_array_type(check_expression(expr->left.get()));
+        AST::Type right = decay_array_type(check_expression(expr->right.get()));
         bool ok = false;
         bool reported = false;   
         if (is_numeric_type(left) && is_numeric_type(right)) {
@@ -1108,11 +1561,33 @@ namespace gallt {
             }
         }
         else if (left.kind == TypeKind::Pointer && right.is_integer()) {
+            if (is_null_literal_expr(expr->right.get())) {
+                ok = true;
+            }
+            else {
+                report_error(expr->location, ErrorCode::PointerArithmeticInvalid,
+                    "pointer and integer cannot be compared; got '" + left.to_string() +
+                    "' and '" + right.to_string() + "'");
+                reported = true;
+            }
+        }
+        else if (left.is_integer() && right.kind == TypeKind::Pointer) {
+            if (is_null_literal_expr(expr->left.get())) {
+                ok = true;
+            }
+            else {
+                report_error(expr->location, ErrorCode::PointerArithmeticInvalid,
+                    "pointer and integer cannot be compared; got '" + left.to_string() +
+                    "' and '" + right.to_string() + "'");
+                reported = true;
+            }
+        }
+        else if (left.kind == TypeKind::Pointer && is_null_literal_expr(expr->right.get())) {
             ok = true;
         }
-       else if (left.is_integer() && right.kind == TypeKind::Pointer) {
-           ok = true;
-       }
+        else if (right.kind == TypeKind::Pointer && is_null_literal_expr(expr->left.get())) {
+            ok = true;
+        }
        else if (left.kind == TypeKind::File && right.kind == TypeKind::File) {
            ok = true;
        }
@@ -1179,8 +1654,8 @@ namespace gallt {
     }
 
     AST::Type TypeChecker::check_additive(AST::AdditiveExpression* expr) {
-        AST::Type left = check_expression(expr->left.get());
-        AST::Type right = check_expression(expr->right.get());
+        AST::Type left = decay_array_type(check_expression(expr->left.get()));
+        AST::Type right = decay_array_type(check_expression(expr->right.get()));
        if (expr->op == AST::AdditiveExpression::Operator::Plus) {
             if (left.kind == TypeKind::String || right.kind == TypeKind::String) {
                 if (left.kind == TypeKind::String && right.kind == TypeKind::String) {
@@ -1243,6 +1718,14 @@ namespace gallt {
     AST::Type TypeChecker::check_multiplicative(AST::MultiplicativeExpression* expr) {
         AST::Type left = check_expression(expr->left.get());
         AST::Type right = check_expression(expr->right.get());
+        if (left.kind == TypeKind::Array || right.kind == TypeKind::Array) {
+            report_error(expr->location, ErrorCode::ArrayOperatorNotSupported,
+                "array type does not support operator '" +
+                std::string(expr->op == AST::MultiplicativeExpression::Operator::Multiply ? "*" :
+                    (expr->op == AST::MultiplicativeExpression::Operator::Divide ? "/" : "%")) +
+                "'");
+            return AST::Type::make_void();
+        }
         if (expr->op == AST::MultiplicativeExpression::Operator::Remainder) {
             if (left.is_integer() && right.is_integer()) {
                 return usual_arithmetic_conversion(left, right);
@@ -1267,6 +1750,11 @@ namespace gallt {
     AST::Type TypeChecker::check_power(AST::PowerExpression* expr) {
         AST::Type left = check_expression(expr->left.get());
         AST::Type right = check_expression(expr->right.get());
+        if (left.kind == TypeKind::Array || right.kind == TypeKind::Array) {
+            report_error(expr->location, ErrorCode::ArrayOperatorNotSupported,
+                "array type does not support operator '**'");
+            return AST::Type::make_void();
+        }
         if (is_numeric_type(left) && is_numeric_type(right)) {
             return left;
         }
@@ -1282,6 +1770,12 @@ namespace gallt {
         if (expr->op == AST::UnaryExpression::Operator::AddressOf) {
             if (auto* prim = dynamic_cast<AST::PrimaryExpression*>(expr->operand.get())) {
                 if (prim->kind == AST::PrimaryExpression::Kind::Identifier) {
+                    const Symbol* constant = sym_table_.lookup(prim->identifier);
+                    if (constant != nullptr && constant->kind != SymbolKind::Function &&
+                        constant->type.is_const) {
+                        diag_.report_error_template(expr->operand->location,
+                            ErrorCode::ConstModification, { prim->identifier });
+                    }
                     std::vector<Symbol>* set = sym_table_.lookup_overloads(prim->identifier);
                     if (set != nullptr && !set->empty()) {
                         Symbol* chosen = nullptr;
@@ -1361,6 +1855,11 @@ namespace gallt {
                     operand.to_string() + "'");
                 return AST::Type::make_void();
             }
+            if (is_null_literal_expr(expr->operand.get())) {
+                report_error(expr->location, ErrorCode::NullPointerDereference,
+                    "cannot dereference a null pointer constant");
+                return AST::Type::make_void();
+            }
             if (operand.pointee_type) {
                 return *operand.pointee_type;
             }
@@ -1377,7 +1876,35 @@ namespace gallt {
     }
 
     AST::Type TypeChecker::check_postfix(AST::PostfixExpression* expr) {
+        if (expr->op == AST::PostfixExpression::Operator::FunctionCall) {
+            if (auto* prim = dynamic_cast<AST::PrimaryExpression*>(expr->base.get())) {
+                if (prim->kind == AST::PrimaryExpression::Kind::Identifier) {
+                    const std::string& callee_name = prim->identifier;
+                    const bool declared =
+                        sym_table_.lookup_overloads(callee_name) != nullptr ||
+                        sym_table_.lookup(callee_name) != nullptr;
+                    if (!declared) {
+                        diag_.report_error_template(expr->location,
+                            ErrorCode::UndefinedFunction, { callee_name });
+                        for (auto& arg : expr->arguments) {
+                            check_expression(arg.get());
+                        }
+                        return AST::Type::make_void();
+                    }
+                }
+            }
+        }
         AST::Type base_type = check_expression(expr->base.get());
+
+        if (expr->op == AST::PostfixExpression::Operator::Subscript ||
+            expr->op == AST::PostfixExpression::Operator::Arrow ||
+            expr->op == AST::PostfixExpression::Operator::Increment ||
+            expr->op == AST::PostfixExpression::Operator::Decrement) {
+            AST::Type operator_type;
+            if (try_user_defined_operator(expr, operator_type)) {
+                return operator_type;
+            }
+        }
 
         switch (expr->op) {
         case AST::PostfixExpression::Operator::Subscript: {
@@ -1392,6 +1919,18 @@ namespace gallt {
                 if (!index_type.is_integer()) {
                     report_error(expr->subscript_expr->location, ErrorCode::SubscriptNotInteger,
                         "array index must be integer type, got '" + index_type.to_string() + "'");
+                }
+                else if (base_type.kind == TypeKind::Array &&
+                    base_type.array_size.has_value()) {
+                    auto index_value =
+                        evaluate_const_integer_expression(expr->subscript_expr.get());
+                    if (index_value.has_value() &&
+                        static_cast<std::size_t>(*index_value) >= *base_type.array_size) {
+                        diag_.report_error_template(expr->subscript_expr->location,
+                            ErrorCode::SubscriptOutOfBounds,
+                            { std::to_string(*index_value),
+                              std::to_string(*base_type.array_size) });
+                    }
                 }
             }
             if (base_type.kind == TypeKind::Array) {
@@ -1663,9 +2202,20 @@ namespace gallt {
                 allowed = true;
             }
             if (!allowed) {
-                report_error(expr->location, ErrorCode::InvalidTypeCast,
-                    "cannot cast type '" + base_type.to_string() +
-                    "' to '" + expr->cast_type.to_string() + "'");
+                auto argument = expression_argument_casts_.find(expr);
+                if (argument != expression_argument_casts_.end()) {
+                    diag_.report_error_template(expr->location,
+                        ErrorCode::ExprParameterCallArgTypeMismatch,
+                        { std::get<0>(argument->second),
+                          std::to_string(std::get<1>(argument->second) + 1),
+                          std::get<2>(argument->second).to_string(),
+                          base_type.to_string() });
+                }
+                else {
+                    report_error(expr->location, ErrorCode::InvalidTypeCast,
+                        "cannot cast type '" + base_type.to_string() +
+                        "' to '" + expr->cast_type.to_string() + "'");
+                }
                 return AST::Type::make_void();
             }
             return expr->cast_type;
@@ -1712,6 +2262,26 @@ namespace gallt {
             return member_type;
         }
        case AST::PostfixExpression::Operator::Arrow: {
+           if (base_type.kind == TypeKind::Struct &&
+               operator_overloads_.count("operator->") != 0) {
+               std::vector<AST::Type> addressable;
+               if (expr->base->is_lvalue()) {
+                   addressable.push_back(AST::Type::make_pointer(
+                       std::make_shared<AST::Type>(base_type)));
+               }
+               std::vector<AST::Type> by_value;
+               by_value.push_back(base_type);
+               AST::FunctionDefinition* arrow_operator =
+                   resolve_user_operator("->", by_value, expr->location);
+               if (arrow_operator == nullptr && !addressable.empty()) {
+                   arrow_operator = resolve_user_operator("->", addressable,
+                       expr->location);
+               }
+               if (arrow_operator != nullptr) {
+                   resolved_operators_[expr->base.get()] = arrow_operator;
+                   base_type = arrow_operator->return_type;
+               }
+           }
            if (base_type.kind != TypeKind::Pointer) {
                report_error(expr->location, ErrorCode::ArrowOnNonStructPtr,
                    "arrow operator requires pointer to struct, got '" + base_type.to_string() + "'");
@@ -1918,8 +2488,16 @@ namespace gallt {
                 }
                 return sym->type;
             }
-            report_error(expr->location, ErrorCode::UndefinedIdentifier,
-                "undefined identifier '" + expr->identifier + "'");
+            auto from_expression = expression_free_identifiers_.find(expr);
+            if (from_expression != expression_free_identifiers_.end()) {
+                diag_.report_error_template(expr->location,
+                    ErrorCode::ExprParameterFreeIdentifierUndefined,
+                    { from_expression->second });
+            }
+            else {
+                report_error(expr->location, ErrorCode::UndefinedIdentifier,
+                    "undefined identifier '" + expr->identifier + "'");
+            }
             return AST::Type::make_void();
         }
         case AST::PrimaryExpression::Kind::Parens: {
@@ -2110,6 +2688,36 @@ namespace gallt {
 
     bool TypeChecker::is_array_type(const AST::Type& type) const {
         return type.kind == TypeKind::Array;
+    }
+
+    AST::Type TypeChecker::decay_array_type(const AST::Type& type) {
+        if (type.kind == TypeKind::Array && type.element_type) {
+            return AST::Type::make_pointer(
+                std::make_shared<AST::Type>(*type.element_type));
+        }
+        return type;
+    }
+
+    bool TypeChecker::function_signatures_match(const AST::Type& expected,
+        const AST::Type& actual) {
+        if (expected.kind != TypeKind::Function || actual.kind != TypeKind::Function) {
+            return false;
+        }
+        if (!expected.return_type || !actual.return_type) {
+            return false;
+        }
+        if (!(*expected.return_type == *actual.return_type)) {
+            return false;
+        }
+        if (expected.parameter_types.size() != actual.parameter_types.size()) {
+            return false;
+        }
+        for (std::size_t i = 0; i < expected.parameter_types.size(); ++i) {
+            if (!(expected.parameter_types[i] == actual.parameter_types[i])) {
+                return false;
+            }
+        }
+        return true;
     }
 
     bool TypeChecker::is_void_type(const AST::Type& type) const {
@@ -2368,9 +2976,9 @@ namespace gallt {
             for (auto it = const_values_.rbegin(); it != const_values_.rend(); ++it) {
                 auto found = it->find(name);
                 if (found != it->end()) {
-                    int_value = found->second;
-                    float_value = static_cast<double>(found->second);
-                    is_float = false;
+                    int_value = found->second.int_value;
+                    float_value = found->second.float_value;
+                    is_float = found->second.is_float;
                     return true;
                 }
             }
@@ -2393,13 +3001,42 @@ namespace gallt {
 
     void TypeChecker::record_const_value(const std::string& name, AST::Expression* initializer,
         const AST::Type& type) {
-        if (!type.is_integer()) return;
-        auto value = evaluate_const_integer_expression(initializer);
-        if (!value.has_value()) return;
+        if (!type.is_integer() && !type.is_floating()) return;
+        ConstantEvaluationContext ctx;
+        ctx.lookup_constant = [this](const std::string& lookup, long long& int_value,
+            double& float_value, bool& is_float) {
+            for (auto it = const_values_.rbegin(); it != const_values_.rend(); ++it) {
+                auto found = it->find(lookup);
+                if (found != it->end()) {
+                    int_value = found->second.int_value;
+                    float_value = found->second.float_value;
+                    is_float = found->second.is_float;
+                    return true;
+                }
+            }
+            return false;
+        };
+        long long int_value = 0;
+        double float_value = 0.0;
+        bool is_float = false;
+        if (!evaluate_constant_expression(initializer, int_value, float_value, is_float, ctx)) {
+            return;
+        }
+        ConstValue value;
+        if (type.is_floating()) {
+            value.is_float = true;
+            value.float_value = is_float ? float_value : static_cast<double>(int_value);
+            value.int_value = static_cast<long long>(value.float_value);
+        }
+        else {
+            value.is_float = false;
+            value.int_value = is_float ? static_cast<long long>(float_value) : int_value;
+            value.float_value = static_cast<double>(value.int_value);
+        }
         if (const_values_.empty()) {
             const_values_.emplace_back();
         }
-        const_values_.back()[name] = *value;
+        const_values_.back()[name] = value;
     }
 
     std::string TypeChecker::expression_display_name(const AST::Expression* expr) {
@@ -2453,6 +3090,8 @@ namespace gallt {
                 Symbol* sym = lookup_symbol(prim->identifier, false);
                 return sym != nullptr && sym->type.is_const;
             }
+            case PrimaryExpression::Kind::Null:
+                return true;
             default:
                 return false;
             }
@@ -2464,6 +3103,12 @@ namespace gallt {
             case UnaryExpression::Operator::UnaryMinus:
             case UnaryExpression::Operator::LogicalNot:
                 return is_compile_time_constant_expression(un->operand.get());
+            case UnaryExpression::Operator::AddressOf: {
+                auto* prim = dynamic_cast<PrimaryExpression*>(un->operand.get());
+                return prim != nullptr &&
+                    (prim->kind == PrimaryExpression::Kind::Identifier ||
+                        prim->kind == PrimaryExpression::Kind::Null);
+            }
             default:
                 return false;
             }
@@ -2880,6 +3525,17 @@ namespace gallt {
         default:
             return true;
         }
+    }
+
+    bool TypeChecker::is_expression_parameter_temp(const AST::Initializer* init) {
+        if (init == nullptr || !init->is_expression()) {
+            return false;
+        }
+        const auto* expr_init = static_cast<const AST::ExpressionInitializer*>(init);
+        const auto* prim = dynamic_cast<const AST::PrimaryExpression*>(
+            expr_init->expr.get());
+        return prim != nullptr && prim->kind == AST::PrimaryExpression::Kind::Identifier &&
+            prim->identifier.rfind("__glt_expr", 0) == 0;
     }
 
     bool TypeChecker::is_move_expression(const AST::Expression* expr) {

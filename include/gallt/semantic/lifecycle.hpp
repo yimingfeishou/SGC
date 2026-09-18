@@ -51,6 +51,7 @@ namespace gallt {
 
         void collect_structs();
         void validate_special_members();
+        void check_copy_constructor_source(const StructInfo& info);
         void collect_declarations();
 
         void lower_special_members();
