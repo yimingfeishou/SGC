@@ -1,0 +1,12 @@
+// common.glt
+// Gallt Standard Library
+// Naming Conventions: snake_case
+// All standard library statements are stored in the sl namespace
+// All standard libraries except for sl.glt itself, should import sl.glt and addition namespace sl
+// Copyright (c) Yimingfeishou
+
+guide "sl.glt"
+
+addition namespace sl {
+    extern int system from libucrt (string command)
+}
