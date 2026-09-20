@@ -28,20 +28,38 @@ addition namespace sl {
         return abs(x)
     }
 
-    double floor(double x) {
-        int i = int(x)
-        if (x < 0.0 && double(i) != x) {
-            i = i - 1
+    double trunc(double x) {
+        if (x != x) {
+            return x
         }
-        return double(i)
+        if (x >= 9223372036854775808.0 || x <= -9223372036854775808.0) {
+            return x
+        }
+        return double(lint(x))
+    }
+
+    double fmod(double x, double y) {
+        if (y == 0.0) {
+            return 0.0
+        }
+        double q = trunc(x / y)
+        return x - q * y
+    }
+
+    double floor(double x) {
+        double t = trunc(x)
+        if (t > x) {
+            return t - 1.0
+        }
+        return t
     }
 
     double ceil(double x) {
-        int i = int(x)
-        if (x > 0.0 && double(i) != x) {
-            i = i + 1
+        double t = trunc(x)
+        if (t < x) {
+            return t + 1.0
         }
-        return double(i)
+        return t
     }
 
     double round(double x) {
@@ -50,10 +68,6 @@ addition namespace sl {
         } else {
             return ceil(x - 0.5)
         }
-    }
-
-    double trunc(double x) {
-        return double(int(x))
     }
 
     double min(double a, double b) {
@@ -120,45 +134,67 @@ addition namespace sl {
         if (x == 0.0) {
             return 0.0
         }
-        double guess = x
-        if (guess < 1.0) {
-            guess = 1.0
+        if (x != x) {
+            return x
         }
-        for (int i = 0; i < 50; i = i + 1) {
+        int k = 0
+        while (x >= 4.0 && k < 600) {
+            x = x / 4.0
+            k = k + 1
+        }
+        while (x < 1.0 && k > -600) {
+            x = x * 4.0
+            k = k - 1
+        }
+        double guess = 1.0
+        for (int i = 0; i < 64; i = i + 1) {
             double next = (guess + x / guess) / 2.0
-            if (abs(next - guess) < 0.000000000000001) {
-                return next
+            if (next == guess) {
+                break
             }
             guess = next
         }
-        return guess
+        double result = guess
+        for (int i = 0; i < k; i = i + 1) {
+            result = result * 2.0
+        }
+        for (int i = 0; i < -k; i = i + 1) {
+            result = result / 2.0
+        }
+        return result
     }
 
     double exp(double x) {
         if (x == 0.0) {
             return 1.0
         }
+        if (x != x) {
+            return x
+        }
         bool negative = false
         if (x < 0.0) {
             negative = true
             x = -x
         }
-        int k = 0
-        while (x > 1.0) {
-            x = x / 2.0
-            k = k + 1
+        if (x > 1024.0) {
+            x = 1024.0
         }
+        int k = int(x / ln2 + 0.5)
+        double r = (x - double(k) * 0.69314718036912382) - double(k) * 0.00000000019082149
         double result = 1.0
         double term = 1.0
-        for (int i = 1; i < 100; i = i + 1) {
-            term = term * x / double(i)
+        for (int i = 1; i < 40; i = i + 1) {
+            term = term * r / double(i)
             result = result + term
             if (abs(term) < 0.000000000000001) {
                 break
             }
         }
         for (int i = 0; i < k; i = i + 1) {
-            result = result * result
+            result = result * 2.0
+        }
+        for (int i = 0; i < -k; i = i + 1) {
+            result = result / 2.0
         }
         if (negative) {
             return 1.0 / result
@@ -170,12 +206,15 @@ addition namespace sl {
         if (x <= 0.0) {
             return 0.0
         }
+        if (x != x) {
+            return x
+        }
         int k = 0
-        while (x >= 2.0) {
+        while (x >= 2.0 && k < 1100) {
             x = x / 2.0
             k = k + 1
         }
-        while (x < 1.0) {
+        while (x < 1.0 && k > -1100) {
             x = x * 2.0
             k = k - 1
         }
@@ -191,7 +230,7 @@ addition namespace sl {
             }
         }
         result = result * 2.0
-        return result + double(k) * ln2
+        return result + (double(k) * 0.69314718036912382 + double(k) * 0.00000000019082149)
     }
 
     double log10(double x) {
@@ -215,24 +254,24 @@ addition namespace sl {
         if (base > 0.0) {
             return exp(exponent * log(base))
         }
-        int exp_int = int(exponent)
+        lint exp_int = lint(exponent)
         if (double(exp_int) != exponent) {
             return 0.0
         }
         double result = 1.0
         double b = base
-        int e = exp_int
+        lint e = exp_int
         bool negative = false
         if (e < 0) {
             negative = true
             e = -e
         }
-        while (e > 0) {
-            if (e % 2 == 1) {
+        while (e > 0l) {
+            if (e % 2l == 1l) {
                 result = result * b
             }
             b = b * b
-            e = e / 2
+            e = e / 2l
         }
         if (negative) {
             return 1.0 / result
@@ -241,11 +280,20 @@ addition namespace sl {
     }
 
     double sin(double x) {
+        if (x != x) {
+            return x
+        }
+        double q = trunc(x / 6.283185307179586)
+        if (q > 1048576.0 || q < -1048576.0) {
+            x = x - q * 6.283185307179586
+        } else {
+            x = (x - q * 6.2831853069365025) - q * 0.00000000024308402026024769
+        }
         while (x > pi) {
-            x = x - 2.0 * pi
+            x = x - 6.283185307179586
         }
         while (x < -pi) {
-            x = x + 2.0 * pi
+            x = x + 6.283185307179586
         }
         double term = x
         double result = x
@@ -261,11 +309,20 @@ addition namespace sl {
     }
 
     double cos(double x) {
+        if (x != x) {
+            return x
+        }
+        double q = trunc(x / 6.283185307179586)
+        if (q > 1048576.0 || q < -1048576.0) {
+            x = x - q * 6.283185307179586
+        } else {
+            x = (x - q * 6.2831853069365025) - q * 0.00000000024308402026024769
+        }
         while (x > pi) {
-            x = x - 2.0 * pi
+            x = x - 6.283185307179586
         }
         while (x < -pi) {
-            x = x + 2.0 * pi
+            x = x + 6.283185307179586
         }
         double term = 1.0
         double result = 1.0
@@ -295,10 +352,16 @@ addition namespace sl {
         if (x < -1.0) {
             return -pi / 2.0 - atan(1.0 / x)
         }
+        if (x > 0.41421356237309503) {
+            return 0.7853981633974483 + atan((x - 1.0) / (x + 1.0))
+        }
+        if (x < -0.41421356237309503) {
+            return -0.7853981633974483 + atan((x + 1.0) / (1.0 - x))
+        }
         double term = x
         double result = x
         double x2 = x * x
-        for (int i = 3; i < 200; i = i + 2) {
+        for (int i = 3; i < 80; i = i + 2) {
             term = -term * x2
             result = result + term / double(i)
             if (abs(term) < 0.000000000000001) {
@@ -318,14 +381,20 @@ addition namespace sl {
         if (x == -1.0) {
             return -pi / 2.0
         }
-        return atan(x / sqrt(1.0 - x * x))
+        return 2.0 * atan(x / (1.0 + sqrt(1.0 - x * x)))
     }
 
     double acos(double x) {
         if (x > 1.0 || x < -1.0) {
             return 0.0
         }
-        return pi / 2.0 - asin(x)
+        if (x == 1.0) {
+            return 0.0
+        }
+        if (x == -1.0) {
+            return pi
+        }
+        return 2.0 * atan(sqrt(1.0 - x * x) / (1.0 + x))
     }
 
     double atan2(double y, double x) {
@@ -351,6 +420,22 @@ addition namespace sl {
     }
 
     double sinh(double x) {
+        if (x == 0.0) {
+            return 0.0
+        }
+        if (abs(x) < 0.5) {
+            double x2 = x * x
+            double term = 1.0
+            double sum = 1.0
+            for (int i = 1; i < 20; i = i + 1) {
+                term = term * x2 / (double(2 * i) * double(2 * i + 1))
+                sum = sum + term
+                if (abs(term) < 0.000000000000001) {
+                    break
+                }
+            }
+            return x * sum
+        }
         return (exp(x) - exp(-x)) / 2.0
     }
 
@@ -359,20 +444,18 @@ addition namespace sl {
     }
 
     double tanh(double x) {
+        if (x > 20.0) {
+            return 1.0
+        }
+        if (x < -20.0) {
+            return -1.0
+        }
         double s = sinh(x)
         double c = cosh(x)
         if (abs(c) < 0.000000000000001) {
             return 0.0
         }
         return s / c
-    }
-
-    double fmod(double x, double y) {
-        if (y == 0.0) {
-            return 0.0
-        }
-        double q = trunc(x / y)
-        return x - q * y
     }
 
 } // namespace sl

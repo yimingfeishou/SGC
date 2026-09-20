@@ -34,10 +34,10 @@ namespace gallt {
         std::deque<std::string> lexeme_pool_;
         bool had_error_ = false;
 
-        void process_top_levels(std::vector<std::unique_ptr<AST::TopLevel>>& nodes,
-            std::vector<std::unique_ptr<AST::TopLevel>>& out);
         void process_top_level_list(std::vector<std::unique_ptr<AST::TopLevel>>& nodes);
         void process_top_level_node(AST::TopLevel* node);
+        void process_top_level_statement(std::unique_ptr<AST::Statement>& stmt,
+            std::vector<std::unique_ptr<AST::TopLevel>>& kept);
         void process_statement(std::unique_ptr<AST::Statement>& stmt);
         void process_statement_list(std::vector<std::unique_ptr<AST::Statement>>& stmts);
         void process_block(AST::Block* block);

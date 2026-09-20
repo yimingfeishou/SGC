@@ -9,7 +9,7 @@ guide "sl.glt"
 
 addition namespace sl {
 
-    generics dynamic_array_generic<T: int | lint | uint | luint | float | double | char | uchar | bool> {
+    generics dynamic_array_generic<T: int | lint | uint | luint | float | double | char | uchar | bool | string> {
         struct dynamic_array {
             T* data
             int size
@@ -44,6 +44,9 @@ addition namespace sl {
 
             destructor () {
                 if (data != null) {
+                    for (int i = 0; i < size; i++) {
+                        T discarded = move(data[i])
+                    }
                     free(data)
                     data = null
                 }
@@ -120,6 +123,9 @@ addition namespace sl {
 
                 if (other->capacity <= 0 || other->data == null || other->size < 0 || other->size > other->capacity) {
                     if (data != null) {
+                        for (int i = 0; i < size; i++) {
+                            T discarded = move(data[i])
+                        }
                         free(data)
                         data = null
                     }
@@ -138,6 +144,9 @@ addition namespace sl {
                 }
 
                 if (data != null) {
+                    for (int i = 0; i < size; i++) {
+                        T discarded = move(data[i])
+                    }
                     free(data)
                 }
 
@@ -157,6 +166,9 @@ addition namespace sl {
 
                 if (other->data == null || other->size < 0 || other->size > other->capacity) {
                     if (data != null) {
+                        for (int i = 0; i < size; i++) {
+                            T discarded = move(data[i])
+                        }
                         free(data)
                         data = null
                     }
@@ -170,6 +182,9 @@ addition namespace sl {
                 }
 
                 if (data != null) {
+                    for (int i = 0; i < size; i++) {
+                        T discarded = move(data[i])
+                    }
                     free(data)
                     data = null
                 }
@@ -182,6 +197,20 @@ addition namespace sl {
                 other->size = 0
                 other->capacity = 0
             }
+        }
+
+        T zero_value() {
+            T dummy
+            if (T.is_string == true) {
+                dummy = ""
+            } else {
+                if (T.is_bool == true) {
+                    dummy = false
+                } else {
+                    dummy = 0
+                }
+            }
+            return dummy
         }
 
         int length(dynamic_array* arr) {
@@ -209,18 +238,15 @@ addition namespace sl {
             if (arr == null) {
                 return
             }
+            for (int i = 0; i < arr->size; i++) {
+                arr->data[i] = zero_value()
+            }
             arr->size = 0
         }
 
         T get(dynamic_array* arr, int index) {
             if (arr == null || index < 0 || index >= arr->size) {
-                T dummy
-                if (T.is_bool == true) {
-                    dummy = false
-                } else {
-                    dummy = 0
-                }
-                return dummy
+                return zero_value()
             }
             return arr->data[index]
         }
@@ -234,26 +260,14 @@ addition namespace sl {
 
         T front(dynamic_array* arr) {
             if (arr == null || arr->size == 0) {
-                T dummy
-                if (T.is_bool == true) {
-                    dummy = false
-                } else {
-                    dummy = 0
-                }
-                return dummy
+                return zero_value()
             }
             return arr->data[0]
         }
 
         T back(dynamic_array* arr) {
             if (arr == null || arr->size == 0) {
-                T dummy
-                if (T.is_bool == true) {
-                    dummy = false
-                } else {
-                    dummy = 0
-                }
-                return dummy
+                return zero_value()
             }
             return arr->data[arr->size - 1]
         }
@@ -292,6 +306,9 @@ addition namespace sl {
             }
 
             if (arr->data != null) {
+                for (int i = 0; i < arr->size; i++) {
+                    arr->data[i] = zero_value()
+                }
                 free(arr->data)
             }
 
@@ -326,17 +343,13 @@ addition namespace sl {
 
         T pop(dynamic_array* arr) {
             if (arr == null || arr->size == 0) {
-                T dummy
-                if (T.is_bool == true) {
-                    dummy = false
-                } else {
-                    dummy = 0
-                }
-                return dummy
+                return zero_value()
             }
 
             arr->size = arr->size - 1
-            return arr->data[arr->size]
+            T result = arr->data[arr->size]
+            arr->data[arr->size] = zero_value()
+            return result
         }
 
         bool insert(dynamic_array* arr, int index, T value) {
@@ -384,6 +397,7 @@ addition namespace sl {
             }
 
             arr->size = arr->size - 1
+            arr->data[arr->size] = zero_value()
             return true
         }
 
@@ -406,16 +420,525 @@ addition namespace sl {
 
             if (new_size > arr->size) {
                 for (int i = arr->size; i < new_size; i++) {
-                    if (T.is_bool == true) {
-                        arr->data[i] = false
-                    } else {
-                        arr->data[i] = 0
-                    }
+                    arr->data[i] = zero_value()
+                }
+            } else {
+                for (int i = new_size; i < arr->size; i++) {
+                    arr->data[i] = zero_value()
                 }
             }
 
             arr->size = new_size
             return true
+        }
+    }
+
+    generics hash_table_generic<K: int | lint | uint | luint | char | uchar | bool, V: int | lint | uint | luint | float | double | char | uchar | bool | string> {
+        struct hash_table {
+            K* keys
+            V* values
+            int* states
+            int capacity
+            int count
+            int used
+
+            constructor () {
+                keys = null
+                values = null
+                states = null
+                capacity = 0
+                count = 0
+                used = 0
+            }
+
+            constructor (int cap) {
+                keys = null
+                values = null
+                states = null
+                capacity = 0
+                count = 0
+                used = 0
+
+                if (cap > 0 && cap <= 1073741823) {
+                    K* new_keys = heap(K, cap)
+                    V* new_values = heap(V, cap)
+                    int* new_states = heap(int, cap)
+                    if (new_keys != null && new_values != null && new_states != null) {
+                        keys = new_keys
+                        values = new_values
+                        states = new_states
+                        capacity = cap
+                    } else {
+                        free(new_keys)
+                        free(new_values)
+                        free(new_states)
+                    }
+                }
+            }
+
+            destructor () {
+                if (values != null) {
+                    for (int i = 0; i < capacity; i++) {
+                        if (states[i] == 1) {
+                            V discarded = move(values[i])
+                        }
+                    }
+                }
+                if (keys != null) {
+                    free(keys)
+                    keys = null
+                }
+                if (values != null) {
+                    free(values)
+                    values = null
+                }
+                if (states != null) {
+                    free(states)
+                    states = null
+                }
+                capacity = 0
+                count = 0
+                used = 0
+            }
+
+            copy_constructor (hash_table* other) {
+                keys = null
+                values = null
+                states = null
+                capacity = 0
+                count = 0
+                used = 0
+
+                if (other == null) {
+                    return
+                }
+
+                if (other->capacity <= 0 || other->keys == null || other->values == null || other->states == null) {
+                    return
+                }
+
+                K* new_keys = heap(K, other->capacity)
+                V* new_values = heap(V, other->capacity)
+                int* new_states = heap(int, other->capacity)
+                if (new_keys == null || new_values == null || new_states == null) {
+                    free(new_keys)
+                    free(new_values)
+                    free(new_states)
+                    return
+                }
+
+                for (int i = 0; i < other->capacity; i++) {
+                    new_keys[i] = other->keys[i]
+                    new_states[i] = other->states[i]
+                    if (other->states[i] == 1) {
+                        new_values[i] = other->values[i]
+                    }
+                }
+
+                keys = new_keys
+                values = new_values
+                states = new_states
+                capacity = other->capacity
+                count = other->count
+                used = other->used
+            }
+
+            move_constructor (hash_table* other) {
+                keys = null
+                values = null
+                states = null
+                capacity = 0
+                count = 0
+                used = 0
+
+                if (other == null) {
+                    return
+                }
+
+                keys = other->keys
+                values = other->values
+                states = other->states
+                capacity = other->capacity
+                count = other->count
+                used = other->used
+
+                other->keys = null
+                other->values = null
+                other->states = null
+                other->capacity = 0
+                other->count = 0
+                other->used = 0
+            }
+
+            copy_assignment (hash_table* other) {
+                if (other == null) {
+                    return
+                }
+
+                if (other->keys == keys && other->values == values && other->states == states) {
+                    capacity = other->capacity
+                    count = other->count
+                    used = other->used
+                    return
+                }
+
+                if (other->capacity <= 0 || other->keys == null || other->values == null || other->states == null) {
+                    if (values != null) {
+                        for (int i = 0; i < capacity; i++) {
+                            if (states[i] == 1) {
+                                V discarded = move(values[i])
+                            }
+                        }
+                        free(values)
+                        values = null
+                    }
+                    if (keys != null) {
+                        free(keys)
+                        keys = null
+                    }
+                    if (states != null) {
+                        free(states)
+                        states = null
+                    }
+                    capacity = 0
+                    count = 0
+                    used = 0
+                    return
+                }
+
+                K* new_keys = heap(K, other->capacity)
+                V* new_values = heap(V, other->capacity)
+                int* new_states = heap(int, other->capacity)
+                if (new_keys == null || new_values == null || new_states == null) {
+                    free(new_keys)
+                    free(new_values)
+                    free(new_states)
+                    return
+                }
+
+                for (int i = 0; i < other->capacity; i++) {
+                    new_keys[i] = other->keys[i]
+                    new_states[i] = other->states[i]
+                    if (other->states[i] == 1) {
+                        new_values[i] = other->values[i]
+                    }
+                }
+
+                if (values != null) {
+                    for (int i = 0; i < capacity; i++) {
+                        if (states[i] == 1) {
+                            V discarded = move(values[i])
+                        }
+                    }
+                    free(values)
+                }
+                if (keys != null) {
+                    free(keys)
+                }
+                if (states != null) {
+                    free(states)
+                }
+
+                keys = new_keys
+                values = new_values
+                states = new_states
+                capacity = other->capacity
+                count = other->count
+                used = other->used
+            }
+
+            move_assignment (hash_table* other) {
+                if (other == null) {
+                    return
+                }
+
+                if (other->keys == keys && other->values == values && other->states == states) {
+                    return
+                }
+
+                if (values != null) {
+                    for (int i = 0; i < capacity; i++) {
+                        if (states[i] == 1) {
+                            V discarded = move(values[i])
+                        }
+                    }
+                    free(values)
+                    values = null
+                }
+                if (keys != null) {
+                    free(keys)
+                    keys = null
+                }
+                if (states != null) {
+                    free(states)
+                    states = null
+                }
+                capacity = 0
+                count = 0
+                used = 0
+
+                keys = other->keys
+                values = other->values
+                states = other->states
+                capacity = other->capacity
+                count = other->count
+                used = other->used
+
+                other->keys = null
+                other->values = null
+                other->states = null
+                other->capacity = 0
+                other->count = 0
+                other->used = 0
+            }
+        }
+
+        if (V.is_string == true) {
+            emit {
+                V zero_value() {
+                    string empty_value = ""
+                    return empty_value
+                }
+            }
+        } else {
+            emit {
+                V zero_value() {
+                    V dummy
+                    if (V.is_bool == true) {
+                        dummy = false
+                    } else {
+                        dummy = 0
+                    }
+                    return dummy
+                }
+            }
+        }
+
+        luint hash_value(K key) {
+            luint mixed = luint(key)
+            mixed = mixed * 1099511628211lu
+            mixed = mixed % 4294967291lu
+            return mixed
+        }
+
+        int hash_slot(hash_table* table, K key) {
+            if (table == null || table->capacity <= 0) {
+                return 0
+            }
+            return int(hash_value(key) % luint(table->capacity))
+        }
+
+        int locate(hash_table* table, K key) {
+            int found = -1
+            if (table != null && table->capacity > 0 && table->states != null) {
+                int start = hash_slot(table, key)
+                int i = 0
+                bool stop = false
+                while (i < table->capacity && stop == false) {
+                    int index = start + i
+                    if (index >= table->capacity) {
+                        index = index - table->capacity
+                    }
+                    int state = table->states[index]
+                    if (state == 0) {
+                        stop = true
+                    } else {
+                        if (state == 1 && table->keys[index] == key) {
+                            found = index
+                            stop = true
+                        }
+                    }
+                    i = i + 1
+                }
+            }
+            return found
+        }
+
+        int probe_slot(hash_table* table, K key) {
+            int slot = -1
+            if (table != null && table->capacity > 0 && table->states != null) {
+                int start = hash_slot(table, key)
+                int i = 0
+                bool stop = false
+                while (i < table->capacity && stop == false) {
+                    int index = start + i
+                    if (index >= table->capacity) {
+                        index = index - table->capacity
+                    }
+                    int state = table->states[index]
+                    if (state == 1) {
+                        if (table->keys[index] == key) {
+                            slot = index
+                            stop = true
+                        }
+                    } else {
+                        if (slot < 0) {
+                            slot = index
+                        }
+                        if (state == 0) {
+                            stop = true
+                        }
+                    }
+                    i = i + 1
+                }
+            }
+            return slot
+        }
+
+        int length(hash_table* table) {
+            if (table == null) {
+                return 0
+            }
+            return table->count
+        }
+
+        int get_capacity(hash_table* table) {
+            if (table == null) {
+                return 0
+            }
+            return table->capacity
+        }
+
+        bool empty(hash_table* table) {
+            if (table == null) {
+                return true
+            }
+            return table->count == 0
+        }
+
+        void clear(hash_table* table) {
+            if (table != null && table->states != null) {
+                for (int i = 0; i < table->capacity; i++) {
+                    if (table->states[i] == 1) {
+                        table->values[i] = zero_value()
+                    }
+                    table->states[i] = 0
+                }
+                table->count = 0
+                table->used = 0
+            }
+        }
+
+        bool contains(hash_table* table, K key) {
+            return locate(table, key) >= 0
+        }
+
+        bool get(hash_table* table, K key, V* out) {
+            bool found = false
+            if (out != null) {
+                int index = locate(table, key)
+                if (index >= 0) {
+                    *out = table->values[index]
+                    found = true
+                }
+            }
+            return found
+        }
+
+        bool reserve(hash_table* table, int new_capacity) {
+            bool ok = false
+            if (table != null && new_capacity > 0 && new_capacity <= 1073741823) {
+                if (new_capacity <= table->capacity) {
+                    ok = true
+                } else {
+                    K* new_keys = heap(K, new_capacity)
+                    V* new_values = heap(V, new_capacity)
+                    int* new_states = heap(int, new_capacity)
+                    if (new_keys != null && new_values != null && new_states != null) {
+                        for (int i = 0; i < new_capacity; i++) {
+                            new_states[i] = 0
+                        }
+
+                        ok = true
+                        int moved = 0
+                        for (int i = 0; i < table->capacity; i++) {
+                            if (table->states[i] == 1) {
+                                int target = int(hash_value(table->keys[i]) % luint(new_capacity))
+                                int guard = 0
+                                while (new_states[target] != 0 && guard < new_capacity) {
+                                    target = target + 1
+                                    if (target >= new_capacity) {
+                                        target = 0
+                                    }
+                                    guard = guard + 1
+                                }
+
+                                if (new_states[target] == 0) {
+                                    new_keys[target] = table->keys[i]
+                                    new_values[target] = table->values[i]
+                                    new_states[target] = 1
+                                    table->values[i] = zero_value()
+                                    moved = moved + 1
+                                }
+                            }
+                        }
+                        ok = moved == table->count
+                    }
+
+                    if (ok) {
+                        if (table->keys != null) {
+                            free(table->keys)
+                        }
+                        if (table->values != null) {
+                            free(table->values)
+                        }
+                        if (table->states != null) {
+                            free(table->states)
+                        }
+                        table->keys = new_keys
+                        table->values = new_values
+                        table->states = new_states
+                        table->capacity = new_capacity
+                        table->used = table->count
+                    } else {
+                        free(new_keys)
+                        free(new_values)
+                        free(new_states)
+                    }
+                }
+            }
+            return ok
+        }
+
+        bool set(hash_table* table, K key, V value) {
+            bool stored = false
+            if (table != null && table->capacity > 0 && table->states != null) {
+                if ((table->used + 1) * 4 >= table->capacity * 3) {
+                    if (table->capacity <= 1073741823 / 2) {
+                        reserve(table, table->capacity * 2)
+                    }
+                }
+
+                if (table->used < table->capacity) {
+                    int index = probe_slot(table, key)
+                    if (index >= 0) {
+                        int state = table->states[index]
+                        table->keys[index] = key
+                        table->values[index] = value
+                        if (state == 0) {
+                            table->used = table->used + 1
+                            table->count = table->count + 1
+                        } else {
+                            if (state == 2) {
+                                table->count = table->count + 1
+                            }
+                        }
+                        table->states[index] = 1
+                        stored = true
+                    }
+                }
+            }
+            return stored
+        }
+
+        bool erase(hash_table* table, K key) {
+            int index = locate(table, key)
+            if (index >= 0) {
+                table->values[index] = zero_value()
+                table->states[index] = 2
+                table->count = table->count - 1
+            }
+            return index >= 0
         }
     }
 

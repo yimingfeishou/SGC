@@ -21,6 +21,12 @@ namespace gallt {
 
         std::unique_ptr<AST::Program> parse();
 
+        void seed_generic_names(const std::unordered_set<std::string>& names);
+
+        const std::unordered_set<std::string>& generic_names() const {
+            return seen_generics_;
+        }
+
     private:
         Lexer& lexer_;
         DiagnosticEngine& diag_;
@@ -40,6 +46,9 @@ namespace gallt {
         void reset_to(std::size_t m);
 
         std::unordered_set<std::string> seen_generics_;
+
+        std::unordered_set<std::string> declared_type_names_;
+        std::unordered_set<std::string> declared_value_names_;
 
         int loop_depth_ = 0;     
 
@@ -91,9 +100,11 @@ namespace gallt {
         std::vector<std::unique_ptr<AST::TopLevel>> parse_namespace_members();
         std::unique_ptr<AST::EmitStatement> parse_emit_statement(bool inside_generic);
         std::unique_ptr<AST::TopLevel> parse_condition_statement();
-        std::unique_ptr<AST::Statement> parse_condition_node();
+        std::unique_ptr<AST::Statement> parse_condition_node(bool top_level);
         std::unique_ptr<AST::ConditionalBlock> parse_conditional_block(bool top_level);
+        std::unique_ptr<AST::Statement> parse_conditional_branch_top_level();
         std::unique_ptr<AST::Expression> parse_condition_expression();
+        std::unique_ptr<AST::Statement> parse_top_level_block();
         std::unique_ptr<AST::Statement> parse_generic_compile_time_item();
         bool emit_item_starts_with_function_definition() const;
         std::unique_ptr<AST::Expression> parse_property_argument();
@@ -156,6 +167,11 @@ namespace gallt {
 
         std::unique_ptr<AST::Expression> parse_postfix_operator(
             std::unique_ptr<AST::Expression> base);
+
+        bool looks_like_pointer_type_cast() const;
+        bool cast_type_has_function_pointer_suffix() const;
+        bool declaration_name_after_star_suffix(std::size_t index) const;
+        bool declaration_name_after_pointer_suffix(std::size_t index) const;
 
         std::vector<std::unique_ptr<AST::Expression>> parse_argument_list();
 

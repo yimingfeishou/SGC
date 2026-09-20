@@ -323,6 +323,7 @@ namespace gallt {
         class ArrayInitializer : public Initializer {
         public:
             std::vector<std::unique_ptr<Initializer>> elements;
+            bool from_paren_call = false;
 
             ArrayInitializer(SourceLocation loc, std::vector<std::unique_ptr<Initializer>> elems)
                 : Initializer(loc), elements(std::move(elems)) {
@@ -636,6 +637,16 @@ namespace gallt {
             virtual ~ConditionalBlock() noexcept = default;
         };
 
+        class TopLevelBlock : public TopLevel, public Statement {
+        public:
+            std::vector<std::unique_ptr<TopLevel>> items;
+
+            explicit TopLevelBlock(SourceLocation loc)
+                : Node(loc), TopLevel(loc), Statement(loc) {
+            }
+            virtual ~TopLevelBlock() noexcept = default;
+        };
+
         class Program : public Node {
         public:
             std::vector<std::unique_ptr<TopLevel>> top_levels;
@@ -674,6 +685,8 @@ namespace gallt {
             std::unique_ptr<Expression> array_size_expr;
             std::optional<Type> function_pointer_type;
             std::unique_ptr<Initializer> initializer;
+
+            bool constructed_by_lowering = false;
 
             VariableDeclaration(SourceLocation loc, Type t, std::string_view n,
                 std::optional<size_t> arr_sz = std::nullopt,

@@ -54,6 +54,9 @@ namespace gallt {
             if (kind != other.kind) {
                 return false;
             }
+            if (is_const != other.is_const) {
+                return false;
+            }
             switch (kind) {
             case TypeKind::Int:
             case TypeKind::Lint:

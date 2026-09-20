@@ -121,7 +121,10 @@ namespace gallt {
         NamespaceInfo& info = namespaces_[prefix];
         auto found = info.members.find(name);
         if (found != info.members.end()) {
-            if (addition) {
+            auto kind_it = info.member_kinds.find(name);
+            const bool same_generic_name = kind == "generic" &&
+                kind_it != info.member_kinds.end() && kind_it->second == "generic";
+            if (addition && !same_generic_name) {
                 report(loc, ErrorCode::AdditionNamespaceMemberConflict, std::vector<std::string>{ name });
             }
             return;
@@ -677,6 +680,13 @@ namespace gallt {
             push_scope();
             for (const GenericParameter& param : gd->parameters) {
                 declare_name(param.name, "generic parameter");
+            }
+            for (auto& member : gd->members) {
+                if (member == nullptr) continue;
+                if (std::string(declaration_kind(member.get())) == "unknown") continue;
+                std::string member_name = declaration_name(member.get());
+                if (member_name.empty()) continue;
+                declare_name(member_name, declaration_type_text(member.get()));
             }
             for (auto& member : gd->members) rewrite_top_level(member.get());
             for (auto& item : gd->compile_time_items) rewrite_statement(item.get());

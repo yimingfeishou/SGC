@@ -43,6 +43,11 @@ namespace gallt {
         const std::unordered_map<const AST::Expression*, AST::FunctionDefinition*>&
             resolved_operators() const { return resolved_operators_; }
 
+        void set_expression_call_sites(
+            const std::unordered_map<const AST::Expression*, AST::Type>& sites) {
+            expression_call_sites_ = sites;
+        }
+
     private:
         DiagnosticEngine& diag_;
         const std::unordered_map<const AST::Expression*, std::string>&
@@ -52,6 +57,8 @@ namespace gallt {
             expression_argument_casts_;
         SymbolTable sym_table_;
         AST::Program* program_ = nullptr;
+        std::unordered_map<const AST::Expression*, AST::Type> expression_call_sites_;
+        std::unordered_map<std::string, AST::StructDefinition*> predeclared_structs_;
 
         AST::FunctionDefinition* current_function_ = nullptr;
 
@@ -177,16 +184,21 @@ namespace gallt {
         bool type_is_movable(const AST::Type& type) const;
         static bool is_move_expression(const AST::Expression* expr);
         static bool is_expression_parameter_temp(const AST::Initializer* init);
+        bool is_address_of_const_identifier(const AST::Expression* expr);
 
         void verify_main_function();
 
         void declare_builtin_functions();
 
         bool is_complete_type(const AST::Type& type);
+        void collect_local_structs(AST::Statement* stmt);
 
-        void check_struct_completeness(AST::StructDefinition* struct_def);
-
-        void check_array_initialization(AST::VariableDeclaration* decl);
+        std::size_t type_size_of(const AST::Type& type);
+        std::size_t type_align_of(const AST::Type& type);
+        bool type_layout_of_name(const std::string& name, std::size_t& size,
+            std::size_t& align);
+        bool type_contains_struct_by_value(const AST::Type& type,
+            const std::string& target, std::vector<std::string>& visited);
 
         std::optional<size_t> evaluate_const_expression(AST::Expression* expr);
         bool is_constant_integer_expression(AST::Expression* expr, size_t* out_value = nullptr);
@@ -198,11 +210,14 @@ namespace gallt {
         };
 
         std::vector<std::unordered_map<std::string, ConstValue>> const_values_;
+        int layout_depth_ = 0;
         void enter_scope();
         void exit_scope();
         void record_const_value(const std::string& name, AST::Expression* initializer,
             const AST::Type& type);
         std::optional<long long> evaluate_const_integer_expression(AST::Expression* expr);
+        std::optional<long long> evaluate_signed_const_integer_expression(
+            AST::Expression* expr);
         void check_const_declaration(AST::VariableDeclaration* decl);
         bool is_compile_time_constant_expression(AST::Expression* expr);
         static std::string expression_display_name(const AST::Expression* expr);

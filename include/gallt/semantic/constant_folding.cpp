@@ -15,22 +15,54 @@ namespace gallt {
             std::string_view inner = lexeme.substr(1, lexeme.size() - 2);
             if (inner.empty()) return false;
             if (inner[0] != '\\') {
+                if (inner.size() != 1) return false;
                 out = static_cast<unsigned char>(inner[0]);
                 return true;
             }
-            switch (inner.size() > 1 ? inner[1] : '\0') {
+            std::string_view body = inner.substr(1);
+            if (body.empty()) return false;
+            switch (body[0]) {
             case 'n': out = '\n'; return true;
             case 't': out = '\t'; return true;
             case 'r': out = '\r'; return true;
             case 'b': out = '\b'; return true;
             case 'f': out = '\f'; return true;
             case 'v': out = '\v'; return true;
-            case '0': out = '\0'; return true;
             case '\\': out = '\\'; return true;
             case '"': out = '"'; return true;
             case '\'': out = '\''; return true;
-            default: return false;
+            case 'x': {
+                long long value = 0;
+                int digits = 0;
+                for (std::size_t i = 1; i < body.size() && digits < 2; ++i) {
+                    const char c = body[i];
+                    int digit = -1;
+                    if (c >= '0' && c <= '9') digit = c - '0';
+                    else if (c >= 'a' && c <= 'f') digit = c - 'a' + 10;
+                    else if (c >= 'A' && c <= 'F') digit = c - 'A' + 10;
+                    if (digit < 0) break;
+                    value = value * 16 + digit;
+                    ++digits;
+                }
+                if (digits == 0) return false;
+                out = value;
+                return true;
             }
+            default: break;
+            }
+            if (body[0] >= '0' && body[0] <= '7') {
+                long long value = 0;
+                int digits = 0;
+                for (std::size_t i = 0; i < body.size() && digits < 3; ++i) {
+                    if (body[i] < '0' || body[i] > '7') break;
+                    value = value * 8 + (body[i] - '0');
+                    ++digits;
+                }
+                if (digits == 0) return false;
+                out = value;
+                return true;
+            }
+            return false;
         }
 
         bool builtin_layout(const std::string& name, std::size_t& size, std::size_t& align) {

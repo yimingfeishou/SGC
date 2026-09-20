@@ -115,7 +115,7 @@ function Invoke-Build([string]$Name, [string]$Compiler, [string]$VcVars) {
     }
 
     $common = @(
-        '/nologo', '/std:c++20', '/utf-8', '/EHsc', '/O2', '/DNDEBUG', '/Z7', '/FS',
+        '/nologo', '/std:c++20', '/utf-8', '/EHsc', '/O2', '/DNDEBUG', '/FS',
         ('/I' + (Join-Path $Root 'include'))
     )
     $link = @(

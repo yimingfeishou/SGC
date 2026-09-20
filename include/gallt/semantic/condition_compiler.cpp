@@ -55,6 +55,69 @@ namespace {
         return std::string(lexeme);
     }
 
+    int hex_digit_value(char c) {
+        if (c >= '0' && c <= '9') return c - '0';
+        if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+        if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+        return -1;
+    }
+
+    bool is_octal_digit(char c) {
+        return c >= '0' && c <= '7';
+    }
+
+    std::optional<long long> decode_char_literal(std::string_view lexeme) {
+        if (lexeme.size() < 2 || lexeme.front() != '\'' || lexeme.back() != '\'') {
+            return std::nullopt;
+        }
+        std::string_view inner = lexeme.substr(1, lexeme.size() - 2);
+        if (inner.empty()) return std::nullopt;
+        if (inner.front() != '\\') {
+            if (inner.size() != 1) return std::nullopt;
+            return static_cast<long long>(
+                static_cast<unsigned char>(inner.front()));
+        }
+        std::string_view body = inner.substr(1);
+        if (body.empty()) return std::nullopt;
+        switch (body.front()) {
+        case 'n': return 10;
+        case 't': return 9;
+        case 'r': return 13;
+        case 'b': return 8;
+        case 'f': return 12;
+        case 'v': return 11;
+        case '\\': return 92;
+        case '"': return 34;
+        case '\'': return 39;
+        case 'x': {
+            long long value = 0;
+            int digits = 0;
+            for (std::size_t i = 1; i < body.size() && digits < 2; ++i) {
+                int d = hex_digit_value(body[i]);
+                if (d < 0) break;
+                value = value * 16 + d;
+                ++digits;
+            }
+            if (digits == 0) return std::nullopt;
+            return value;
+        }
+        default:
+            break;
+        }
+        if (is_octal_digit(body.front())) {
+            long long value = 0;
+            int digits = 0;
+            for (std::size_t i = 0; i < body.size() && digits < 3; ++i) {
+                if (!is_octal_digit(body[i])) break;
+                value = value * 8 + (body[i] - '0');
+                ++digits;
+            }
+            if (digits == 0) return std::nullopt;
+            return value;
+        }
+        return std::nullopt;
+    }
+
 }
 
     ConditionCompiler::ConditionCompiler(DiagnosticEngine& diag) : diag_(diag) {
@@ -85,23 +148,24 @@ namespace {
                 handle_condition_removal(uncond);
                 continue;
             }
-            if (auto* block = dynamic_cast<AST::ConditionalBlock*>(node.get())) {
-                Evaluation result;
-                if (!evaluate_condition(block->condition.get(), result)) {
+            if (dynamic_cast<AST::ConditionalBlock*>(node.get()) != nullptr) {
+                AST::Statement* as_statement = dynamic_cast<AST::Statement*>(node.get());
+                if (as_statement == nullptr) {
                     continue;
                 }
-                std::unique_ptr<AST::Statement>& chosen =
-                    result.value != 0 ? block->then_block : block->else_block;
-                if (chosen != nullptr) {
-                    process_statement(chosen);
-                }
-                if (chosen != nullptr) {
-                    AST::Statement* raw = chosen.release();
-                    if (auto* top = dynamic_cast<AST::TopLevel*>(raw)) {
-                        kept.emplace_back(top);
-                    }
-                    else {
-                        delete raw;
+                node.release();
+                std::unique_ptr<AST::Statement> statement(as_statement);
+                process_top_level_statement(statement, kept);
+                continue;
+            }
+            if (auto* top_level_block = dynamic_cast<AST::TopLevelBlock*>(node.get())) {
+                std::vector<std::unique_ptr<AST::TopLevel>> items =
+                    std::move(top_level_block->items);
+                node.reset();
+                process_top_level_list(items);
+                for (std::unique_ptr<AST::TopLevel>& item : items) {
+                    if (item != nullptr) {
+                        kept.push_back(std::move(item));
                     }
                 }
                 continue;
@@ -110,6 +174,68 @@ namespace {
             kept.push_back(std::move(node));
         }
         nodes = std::move(kept);
+    }
+
+    void ConditionCompiler::process_top_level_statement(
+        std::unique_ptr<AST::Statement>& stmt,
+        std::vector<std::unique_ptr<AST::TopLevel>>& kept) {
+        if (stmt == nullptr) {
+            return;
+        }
+        if (auto* cond = dynamic_cast<AST::CondDefinition*>(stmt.get())) {
+            handle_condition_definition(cond);
+            stmt.reset();
+            return;
+        }
+        if (auto* uncond = dynamic_cast<AST::UncondDefinition*>(stmt.get())) {
+            handle_condition_removal(uncond);
+            stmt.reset();
+            return;
+        }
+        if (auto* conditional = dynamic_cast<AST::ConditionalBlock*>(stmt.get())) {
+            Evaluation result;
+            if (!evaluate_condition(conditional->condition.get(), result)) {
+                stmt.reset();
+                return;
+            }
+            std::unique_ptr<AST::Statement>& chosen =
+                result.value != 0 ? conditional->then_block : conditional->else_block;
+            if (chosen == nullptr) {
+                stmt.reset();
+                return;
+            }
+            stmt = std::move(chosen);
+            process_top_level_statement(stmt, kept);
+            return;
+        }
+        if (auto* block = dynamic_cast<AST::Block*>(stmt.get())) {
+            std::vector<std::unique_ptr<AST::Statement>> inner = std::move(block->statements);
+            stmt.reset();
+            for (std::unique_ptr<AST::Statement>& child : inner) {
+                process_top_level_statement(child, kept);
+            }
+            return;
+        }
+        if (auto* top_level_block = dynamic_cast<AST::TopLevelBlock*>(stmt.get())) {
+            std::vector<std::unique_ptr<AST::TopLevel>> items =
+                std::move(top_level_block->items);
+            stmt.reset();
+            process_top_level_list(items);
+            for (std::unique_ptr<AST::TopLevel>& item : items) {
+                if (item != nullptr) {
+                    kept.push_back(std::move(item));
+                }
+            }
+            return;
+        }
+        AST::TopLevel* top = dynamic_cast<AST::TopLevel*>(stmt.get());
+        if (top == nullptr) {
+            stmt.reset();
+            return;
+        }
+        process_top_level_node(top);
+        stmt.release();
+        kept.emplace_back(top);
     }
 
     void ConditionCompiler::process_top_level_node(AST::TopLevel* node) {
@@ -270,11 +396,17 @@ namespace {
     void ConditionCompiler::handle_condition_definition(AST::CondDefinition* node) {
         long long value = 0;
         if (node->value != nullptr) {
-            if (auto* prim = dynamic_cast<AST::PrimaryExpression*>(node->value.get())) {
-                if (prim->kind == AST::PrimaryExpression::Kind::Literal) {
-                    if (auto parsed = literal_value(node->value.get())) {
-                        value = *parsed;
-                    }
+            const std::size_t errors_before = diag_.error_count();
+            Evaluation evaluated;
+            if (evaluate_condition(node->value.get(), evaluated)) {
+                value = evaluated.value;
+            }
+            else {
+                had_error_ = true;
+                if (diag_.error_count() == errors_before) {
+                    report(node->location, ErrorCode::CompileTimeConditionNotBoolean,
+                        std::string(
+                            "@cond value must be a compile-time constant expression"));
                 }
             }
         }
@@ -523,28 +655,8 @@ namespace {
         switch (prim->literal_token.type) {
         case TokenType::IntegerLiteral:
             return parse_integer_text(prim->literal_token.lexeme);
-        case TokenType::CharLiteral: {
-            std::string_view lexeme = prim->literal_token.lexeme;
-            if (lexeme.size() >= 2 && lexeme.front() == '\'' && lexeme.back() == '\'') {
-                std::string_view inner = lexeme.substr(1, lexeme.size() - 2);
-                if (inner.size() == 1) {
-                    return static_cast<long long>(
-                        static_cast<unsigned char>(inner[0]));
-                }
-                if (inner.size() == 2 && inner[0] == '\\') {
-                    switch (inner[1]) {
-                    case 'n': return 10;
-                    case 't': return 9;
-                    case 'r': return 13;
-                    case '0': return 0;
-                    case '\\': return 92;
-                    case '\'': return 39;
-                    default: break;
-                    }
-                }
-            }
-            return std::nullopt;
-        }
+        case TokenType::CharLiteral:
+            return decode_char_literal(prim->literal_token.lexeme);
         case TokenType::BoolLiteral:
             return prim->literal_token.lexeme == "true" ? 1 : 0;
         default:

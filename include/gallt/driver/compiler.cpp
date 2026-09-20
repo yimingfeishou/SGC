@@ -170,7 +170,8 @@ namespace {
         fs::path canonical_path;
     };
 
-    bool load_one_file(const fs::path& path, DiagnosticEngine& diag, LoadedSource& out) {
+    bool load_one_file(const fs::path& path, DiagnosticEngine& diag, LoadedSource& out,
+        std::unordered_set<std::string>* generic_names) {
         auto bytes = read_entire_file(path);
         if (!bytes.has_value()) {
             diag.report_error(SourceLocation{}, ErrorCode::LibraryNotFound,
@@ -183,9 +184,16 @@ namespace {
         std::string_view name_view(*name);
         Lexer lexer(source_view, name_view, diag);
         Parser parser(lexer, diag);
+        if (generic_names != nullptr) {
+            parser.seed_generic_names(*generic_names);
+        }
         out.source = source;
         out.name = name;
         out.program = parser.parse();
+        if (generic_names != nullptr && out.program != nullptr) {
+            const std::unordered_set<std::string>& names = parser.generic_names();
+            generic_names->insert(names.begin(), names.end());
+        }
         return out.program != nullptr;
     }
 
@@ -195,6 +203,29 @@ namespace {
             if (c == '\\') c = '/';
         }
         return result;
+    }
+
+    std::vector<std::pair<std::string, SourceLocation>> scan_guide_references(
+        const fs::path& path, std::vector<std::shared_ptr<std::string>>& name_pool) {
+        std::vector<std::pair<std::string, SourceLocation>> references;
+        auto bytes = read_entire_file(path);
+        if (!bytes.has_value()) return references;
+        name_pool.push_back(std::make_shared<std::string>(wide_to_utf8(path.wstring())));
+        DiagnosticEngine scratch;
+        Lexer lexer(*bytes, *name_pool.back(), scratch);
+        for (;;) {
+            Token token = lexer.next_token();
+            if (token.type == TokenType::EndOfFile) break;
+            if (token.type != TokenType::Keyword_Guide) continue;
+            Token literal = lexer.next_token();
+            if (literal.type != TokenType::StringLiteral) continue;
+            std::string text(literal.lexeme);
+            if (text.size() >= 2 && text.front() == '"' && text.back() == '"') {
+                text = text.substr(1, text.size() - 2);
+            }
+            references.emplace_back(std::move(text), token.location);
+        }
+        return references;
     }
 
     const std::vector<fs::path>& standard_library_dirs() {
@@ -256,6 +287,12 @@ namespace {
 } 
 
     int run_compiler(const CommandOptions& options) {
+        if (!options.positional.empty()) {
+            std::cerr << "sgc: unexpected positional argument '" <<
+                options.positional.front() <<
+                "'; use --input <file.glt> and --output <file.exe>\n";
+            return 2;
+        }
         if (options.input.empty()) {
             std::cerr << "sgc: no input file; use --input <file.glt>\n";
             return 1;
@@ -268,6 +305,10 @@ namespace {
         DiagnosticEngine diag;
         std::vector<LoadedSource> sources;
         std::vector<fs::path> visited;
+        std::unordered_set<std::string> merged_generic_names;
+        std::vector<std::shared_ptr<std::string>> guide_name_pool;
+        std::size_t main_index = 0;
+        bool main_registered = false;
 
         std::function<bool(const fs::path&)> load_with_guides =
             [&](const fs::path& path) -> bool {
@@ -278,30 +319,30 @@ namespace {
                 return true;
             }
             visited.push_back(canonical);
-            LoadedSource ls;
-            ls.canonical_path = canonical;
-            if (!load_one_file(canonical, diag, ls)) {
-                return false;
-            }
-            size_t current_size = sources.size();
-            sources.push_back(std::move(ls));
-            AST::Program* loaded_program = sources.back().program.get();
-            for (auto& top : loaded_program->top_levels) {
-                if (auto* guide = dynamic_cast<AST::GuideStatement*>(top.get())) {
-                    std::string gpath = normalize_library_reference(guide->path);
-                    std::optional<fs::path> resolved =
-                        resolve_guide_path(gpath, canonical.parent_path());
-                    if (!resolved.has_value()) {
-                        diag.report_error(guide->location, ErrorCode::LibraryNotFound,
-                            "guide file not found: " + gpath);
-                        return false;
-                    }
-                    if (!load_with_guides(*resolved)) {
-                        return false;
-                    }
+            for (const auto& reference : scan_guide_references(canonical,
+                guide_name_pool)) {
+                std::string gpath = normalize_library_reference(reference.first);
+                std::optional<fs::path> resolved =
+                    resolve_guide_path(gpath, canonical.parent_path());
+                if (!resolved.has_value()) {
+                    diag.report_error(reference.second, ErrorCode::LibraryNotFound,
+                        "guide file not found: " + gpath);
+                    return false;
+                }
+                if (!load_with_guides(*resolved)) {
+                    return false;
                 }
             }
-            (void)current_size;
+            LoadedSource ls;
+            ls.canonical_path = canonical;
+            if (!load_one_file(canonical, diag, ls, &merged_generic_names)) {
+                return false;
+            }
+            sources.push_back(std::move(ls));
+            if (!main_registered && canonical == canonical_main) {
+                main_index = sources.size() - 1;
+                main_registered = true;
+            }
             return true;
         };
 
@@ -341,7 +382,7 @@ namespace {
             }
         };
         if (!sources.empty()) {
-            append_in_guide_order(&sources.front());
+            append_in_guide_order(&sources[main_index]);
         }
         SourceLocation fake_start;
         AST::Program combined(fake_start, std::move(all_nodes));
@@ -372,6 +413,13 @@ namespace {
 
         TypeChecker checker(diag, expander.expression_free_identifiers(),
             expander.expression_argument_casts());
+        {
+            std::unordered_map<const AST::Expression*, AST::Type> call_sites;
+            for (const auto& entry : expander.expression_call_sites()) {
+                call_sites[entry.first] = entry.second.declared_return_type;
+            }
+            checker.set_expression_call_sites(call_sites);
+        }
         if (!checker.check_program(&combined)) {
             diag.print_all(std::cerr);
             return 1;
@@ -379,7 +427,7 @@ namespace {
 
         CodeGenerator generator(&combined, checker.expression_types(),
             checker.resolved_functions(), checker.resolved_externs(),
-            checker.resolved_operators());
+            checker.resolved_operators(), &diag, options.debug_symbols_level);
         generator.generate();
         if (diag.has_errors()) {
             diag.print_all(std::cerr);
@@ -437,24 +485,60 @@ namespace {
         }
 
         bool reset_language = false;
+        bool link_library_missing = false;
         for (const std::string& lib : generator.link_libraries()) {
             std::string ref = normalize_library_reference(lib);
             fs::path lib_path(utf8_to_wide(ref));
-            std::vector<fs::path> probes = { lib_path };
-            if (lib_path.extension().empty()) {
-                probes.push_back(fs::path(lib_path.wstring() + L".lib"));
+            std::vector<fs::path> bases;
+            if (lib_path.is_absolute()) {
+                bases.push_back(fs::path());
             }
-            for (const fs::path& probe : probes) {
-                if (fs::exists(probe)) {
-                    if (!reset_language) {
-                        tool_args.push_back(L"-x");
-                        tool_args.push_back(L"none");
-                        reset_language = true;
-                    }
-                    tool_args.push_back(probe.wstring());
-                    break;
+            else {
+                bases.push_back(canonical_main.parent_path());
+                std::error_code cwd_ec;
+                bases.push_back(fs::current_path(cwd_ec));
+                for (const fs::path& dir : standard_library_dirs()) {
+                    bases.push_back(dir);
+                }
+                wchar_t module_path[MAX_PATH];
+                if (::GetModuleFileNameW(nullptr, module_path, MAX_PATH) > 0) {
+                    bases.push_back(fs::path(module_path).parent_path());
                 }
             }
+            std::vector<fs::path> probes;
+            if (lib_path.extension().empty()) {
+                probes.push_back(lib_path);
+                probes.push_back(fs::path(lib_path.wstring() + L".lib"));
+            }
+            else {
+                probes.push_back(lib_path);
+            }
+            bool resolved = false;
+            for (const fs::path& base : bases) {
+                for (const fs::path& probe : probes) {
+                    fs::path candidate = base.empty() ? probe : (base / probe);
+                    if (fs::exists(candidate)) {
+                        if (!reset_language) {
+                            tool_args.push_back(L"-x");
+                            tool_args.push_back(L"none");
+                            reset_language = true;
+                        }
+                        tool_args.push_back(candidate.wstring());
+                        resolved = true;
+                        break;
+                    }
+                }
+                if (resolved) break;
+            }
+            if (!resolved) {
+                link_library_missing = true;
+                diag.report_error(SourceLocation{}, ErrorCode::LibraryNotFound,
+                    "clib library not found: " + lib);
+            }
+        }
+        if (link_library_missing) {
+            diag.print_all(std::cerr);
+            return 1;
         }
 
         std::string tool_output;

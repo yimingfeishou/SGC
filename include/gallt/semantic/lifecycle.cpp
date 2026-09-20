@@ -28,9 +28,54 @@ namespace gallt {
 
 
     void LifecycleLowering::collect_structs() {
+        std::function<void(Statement*)> walk = [&](Statement* stmt) {
+            if (stmt == nullptr) return;
+            if (auto* def = dynamic_cast<StructDefinition*>(stmt)) {
+                register_struct_definition(def);
+            }
+            if (auto* block = dynamic_cast<Block*>(stmt)) {
+                for (auto& inner : block->statements) walk(inner.get());
+            }
+            else if (auto* ifs = dynamic_cast<IfStatement*>(stmt)) {
+                walk(ifs->then_block.get());
+                if (ifs->else_block) walk(ifs->else_block.get());
+            }
+            else if (auto* for_ = dynamic_cast<ForStatement*>(stmt)) {
+                if (for_->init) walk(for_->init.get());
+                if (for_->body) walk(for_->body.get());
+            }
+            else if (auto* while_ = dynamic_cast<WhileStatement*>(stmt)) {
+                if (while_->body) walk(while_->body.get());
+            }
+        };
         for (auto& top : program_->top_levels) {
             if (auto* def = dynamic_cast<StructDefinition*>(top.get())) {
-                struct_defs_[def->name] = def;
+                register_struct_definition(def);
+            }
+            else if (auto* func = dynamic_cast<FunctionDefinition*>(top.get())) {
+                if (func->body != nullptr) walk(func->body.get());
+            }
+        }
+        bool changed = true;
+        while (changed) {
+            changed = false;
+            for (auto& pair : structs_) {
+                if (has_destructor(pair.first)) continue;
+                for (const auto& member : pair.second.def->members) {
+                    if (type_needs_destruction(member.type)) {
+                        mark_needs_destruction(pair.first);
+                        changed = true;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    void LifecycleLowering::register_struct_definition(StructDefinition* def) {
+        if (def == nullptr) return;
+        if (structs_.count(def->name) != 0) return;
+        struct_defs_[def->name] = def;
             StructInfo& info = structs_[def->name];
             info.def = def;
             info.no_copy = def->no_copy;
@@ -93,22 +138,6 @@ namespace gallt {
                 info.move_ctor_name = "__sgc_movector$" + def->name;
                 info.copy_assign_name = "__sgc_copyassign$" + def->name;
                 info.move_assign_name = "__sgc_moveassign$" + def->name;
-            }
-        }
-        bool changed = true;
-        while (changed) {
-            changed = false;
-            for (auto& pair : structs_) {
-                if (has_destructor(pair.first)) continue;
-                for (const auto& member : pair.second.def->members) {
-                    if (type_needs_destruction(member.type)) {
-                        mark_needs_destruction(pair.first);
-                        changed = true;
-                        break;
-                    }
-                }
-            }
-        }
     }
 
     void LifecycleLowering::mark_needs_destruction(const std::string& name) {
@@ -900,6 +929,7 @@ namespace gallt {
             call->arguments.push_back(make_self_address());
             if (extra != nullptr) call->arguments.push_back(std::move(extra));
             decl->initializer.reset();
+            decl->constructed_by_lowering = true;
             insert_after.push_back(std::make_unique<ExpressionStatement>(loc,
                 std::move(call)));
         };
@@ -963,9 +993,6 @@ namespace gallt {
         bool is_shallow = (callee->identifier == "shallow_copy");
         if (!is_type_construction && !is_copy && !is_move && !is_deep && !is_shallow) return;
 
-        if (is_copy || is_move) {
-        }
-
         if (is_type_construction) {
             bool ambiguous = false;
             std::vector<AST::Expression*> args;
@@ -983,8 +1010,10 @@ namespace gallt {
                         elements.push_back(std::make_unique<ExpressionInitializer>(
                             a->location, std::move(a)));
                     }
-                    decl->initializer = std::make_unique<ArrayInitializer>(
+                    auto aggregate = std::make_unique<ArrayInitializer>(
                         call->location, std::move(elements));
+                    aggregate->from_paren_call = true;
+                    decl->initializer = std::move(aggregate);
                 }
                 return;
             }
@@ -997,6 +1026,7 @@ namespace gallt {
             call_stmt->arguments.push_back(make_self_address());
             for (auto& a : call->arguments) call_stmt->arguments.push_back(std::move(a));
             decl->initializer.reset();
+            decl->constructed_by_lowering = true;
             insert_after.push_back(std::make_unique<ExpressionStatement>(call->location,
                 std::move(call_stmt)));
             return;
@@ -1142,13 +1172,15 @@ namespace gallt {
     void LifecycleLowering::track_pointer_source(const std::string& name,
         const Expression* expr) {
         if (expr == nullptr) return;
+        int resolved_group = -1;
+        if (resolve_pointer_origin(expr, resolved_group)) {
+            constructed_pointers_.insert(name);
+            alias_group_[name] = resolved_group >= 0
+                ? resolved_group : next_alias_group_++;
+            return;
+        }
         if (auto* prim = dynamic_cast<const PrimaryExpression*>(expr)) {
             switch (prim->kind) {
-            case PrimaryExpression::Kind::Construct:
-            case PrimaryExpression::Kind::PlacementConstruct:
-                constructed_pointers_.insert(name);
-                alias_group_[name] = next_alias_group_++;
-                return;
             case PrimaryExpression::Kind::Heap:
                 non_construct_pointers_.insert(name);
                 return;
@@ -1188,6 +1220,54 @@ namespace gallt {
         if (dynamic_cast<const PostfixExpression*>(expr) != nullptr) {
             non_construct_pointers_.insert(name);
         }
+    }
+
+    bool LifecycleLowering::resolve_pointer_origin(const Expression* expr, int& group) {
+        group = -1;
+        if (expr == nullptr) return false;
+        if (auto* prim = dynamic_cast<const PrimaryExpression*>(expr)) {
+            switch (prim->kind) {
+            case PrimaryExpression::Kind::Construct:
+            case PrimaryExpression::Kind::PlacementConstruct:
+                return true;
+            case PrimaryExpression::Kind::Identifier: {
+                auto found = alias_group_.find(prim->identifier);
+                if (found != alias_group_.end()) {
+                    group = found->second;
+                    return true;
+                }
+                return false;
+            }
+            case PrimaryExpression::Kind::CopyMove:
+                return prim->paren_expr != nullptr
+                    ? resolve_pointer_origin(prim->paren_expr.get(), group)
+                    : false;
+            default:
+                return false;
+            }
+        }
+        if (auto* call = dynamic_cast<const PostfixExpression*>(expr)) {
+            if (call->op != PostfixExpression::Operator::FunctionCall) return false;
+            auto* callee = dynamic_cast<const PrimaryExpression*>(call->base.get());
+            if (callee == nullptr ||
+                callee->kind != PrimaryExpression::Kind::Identifier) {
+                return false;
+            }
+            auto construct_it = function_returns_construct_.find(callee->identifier);
+            if (construct_it != function_returns_construct_.end() &&
+                construct_it->second) {
+                return true;
+            }
+            auto forward_it = function_forwards_parameter_.find(callee->identifier);
+            if (forward_it != function_forwards_parameter_.end() &&
+                forward_it->second >= 0 &&
+                static_cast<std::size_t>(forward_it->second) <
+                    call->arguments.size()) {
+                return resolve_pointer_origin(
+                    call->arguments[forward_it->second].get(), group);
+            }
+        }
+        return false;
     }
 
     void LifecycleLowering::rewrite_statement(Statement* stmt) {
@@ -1240,6 +1320,57 @@ namespace gallt {
         }
         if (auto* rs = dynamic_cast<ReturnStatement*>(stmt)) {
             rewrite_expression(rs->value.get());
+            if (!current_function_name_.empty() && rs->value != nullptr) {
+                bool returns_construct = false;
+                int forwards_parameter = -1;
+                if (auto* prim = dynamic_cast<PrimaryExpression*>(rs->value.get())) {
+                    if (prim->kind == PrimaryExpression::Kind::Construct ||
+                        prim->kind == PrimaryExpression::Kind::PlacementConstruct) {
+                        returns_construct = true;
+                    }
+                    else if (prim->kind == PrimaryExpression::Kind::Identifier &&
+                        constructed_pointers_.count(prim->identifier) != 0) {
+                        returns_construct = true;
+                    }
+                    else if (prim->kind == PrimaryExpression::Kind::Identifier) {
+                        for (std::size_t i = 0;
+                            i < current_function_parameters_.size(); ++i) {
+                            if (current_function_parameters_[i] == prim->identifier) {
+                                forwards_parameter = static_cast<int>(i);
+                                break;
+                            }
+                        }
+                    }
+                    else if (prim->kind == PrimaryExpression::Kind::CopyMove &&
+                        prim->paren_expr != nullptr) {
+                        auto* inner = dynamic_cast<PrimaryExpression*>(
+                            prim->paren_expr.get());
+                        if (inner != nullptr &&
+                            inner->kind == PrimaryExpression::Kind::Identifier &&
+                            constructed_pointers_.count(inner->identifier) != 0) {
+                            returns_construct = true;
+                        }
+                    }
+                }
+                else if (auto* call = dynamic_cast<PostfixExpression*>(rs->value.get())) {
+                    if (call->op == PostfixExpression::Operator::FunctionCall) {
+                        auto* callee = dynamic_cast<PrimaryExpression*>(
+                            call->base.get());
+                        if (callee != nullptr &&
+                            callee->kind == PrimaryExpression::Kind::Identifier) {
+                            auto found = function_returns_construct_.find(
+                                callee->identifier);
+                            returns_construct =
+                                found != function_returns_construct_.end() &&
+                                found->second;
+                        }
+                    }
+                }
+                function_returns_construct_[current_function_name_] =
+                    returns_construct;
+                function_forwards_parameter_[current_function_name_] =
+                    forwards_parameter;
+            }
             return;
         }
         if (auto* es = dynamic_cast<ExpressionStatement*>(stmt)) {
@@ -1338,7 +1469,11 @@ namespace gallt {
             return;
         }
         if (auto* func = dynamic_cast<FunctionDefinition*>(node)) {
+            current_function_name_ = func->name;
+            current_function_parameters_ = func->param_names;
             if (func->body) rewrite_statement(func->body.get());
+            current_function_name_.clear();
+            current_function_parameters_.clear();
             return;
         }
         if (auto* vd = dynamic_cast<VariableDeclaration*>(node)) {

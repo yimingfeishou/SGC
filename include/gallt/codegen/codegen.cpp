@@ -81,10 +81,70 @@ namespace {
     }
 
     std::string llvm_float_constant_text(std::string text) {
-        if (text.find_first_of(".eE") == std::string::npos) {
-            text += ".0";
+        if (text.empty()) {
+            return text;
+        }
+        if (text == "inf" || text == "+inf") {
+            return "0x7FF0000000000000";
+        }
+        if (text == "-inf") {
+            return "0xFFF0000000000000";
+        }
+        if (text == "nan" || text == "+nan" || text == "-nan") {
+            return "0x7FF8000000000000";
+        }
+        if (text.find('.') == std::string::npos) {
+            const std::size_t exponent = text.find_first_of("eE");
+            if (exponent == std::string::npos) {
+                text += ".0";
+            }
+            else {
+                text.insert(exponent, ".0");
+            }
         }
         return text;
+    }
+
+    bool line_accepts_debug_metadata(const std::string& line) {
+        if (line.empty()) return false;
+        if (line.front() == '@' || line.front() == '!') return false;
+        if (line.back() == ':') return false;
+        if (line == "}") return false;
+        if (line.rfind("define ", 0) == 0) return false;
+        if (line.rfind("declare ", 0) == 0) return false;
+        if (line.rfind("source_filename", 0) == 0) return false;
+        if (line.rfind("target ", 0) == 0) return false;
+        if (line.rfind("attributes ", 0) == 0) return false;
+        if (line.rfind("phi ", 0) == 0) return false;
+        if (line.find(" = phi ") != std::string::npos) return false;
+        if (line.find(" = ") != std::string::npos) {
+            if (line.find(" = global ") != std::string::npos) return false;
+            if (line.find(" = private ") != std::string::npos) return false;
+            if (line.find(" = constant ") != std::string::npos) return false;
+            if (line.find(" = internal ") != std::string::npos) return false;
+            if (line.find(" = type ") != std::string::npos) return false;
+            return true;
+        }
+        static const char* kInstructionPrefixes[] = {
+            "ret ", "br ", "switch ", "unreachable", "store ", "call ",
+            "invoke ", "resume ", "fence ",
+        };
+        for (const char* prefix : kInstructionPrefixes) {
+            if (line.rfind(prefix, 0) == 0) return true;
+        }
+        return false;
+    }
+
+    std::string escape_metadata_string(const std::string& text) {
+        std::string out;
+        out.reserve(text.size());
+        for (char c : text) {
+            if (c == '\\' || c == '"') {
+                out.push_back('\\');
+            }
+            out.push_back(c);
+        }
+        return out;
     }
 
     std::string strip_literal_quotes(std::string_view lexeme) {
@@ -115,7 +175,6 @@ namespace {
             case 'b': out.push_back('\b'); break;
             case 'f': out.push_back('\f'); break;
             case 'v': out.push_back('\v'); break;
-            case '0': out.push_back('\0'); break;
             case '\\': out.push_back('\\'); break;
             case '"': out.push_back('"'); break;
             case '\'': out.push_back('\''); break;
@@ -166,10 +225,12 @@ namespace {
         const std::unordered_map<const AST::PrimaryExpression*,
             const AST::ExternDeclaration*>& resolved_externs,
         const std::unordered_map<const AST::Expression*,
-            AST::FunctionDefinition*>& resolved_operators)
+            AST::FunctionDefinition*>& resolved_operators,
+        DiagnosticEngine* diagnostics, int debug_symbols_level)
         : program_(program), expression_types_(expression_types),
         resolved_functions_(resolved_functions), resolved_externs_(resolved_externs),
-        resolved_operators_(resolved_operators) {
+        resolved_operators_(resolved_operators), diagnostics_(diagnostics),
+        debug_level_(debug_symbols_level) {
     }
 
     std::string CodeGenerator::new_temp(const char* hint) {
@@ -200,7 +261,16 @@ namespace {
             lines_.push_back(current_label_ + ":");
             emitted_labels_.insert(current_label_);
         }
-        lines_.push_back(line);
+        std::string emitted = line;
+        if (debug_level_ >= 1 && debug_location_valid_ &&
+            debug_subprogram_id_ != 0 &&
+            line_accepts_debug_metadata(line)) {
+            const unsigned location_id = debug_location_id(debug_location_);
+            if (location_id != 0) {
+                emitted += ", !dbg !" + std::to_string(location_id);
+            }
+        }
+        lines_.push_back(emitted);
         if (line.starts_with("ret ") || line.starts_with("br ") ||
             line.starts_with("unreachable") || line.starts_with("switch ") ||
             line.starts_with("invoke ")) {
@@ -319,12 +389,24 @@ namespace {
         collect_global_variables();
         collect_function_signatures();
         register_lifecycle_symbols();
+        collect_debug_source_file();
         lines_.clear();
         temp_counter_ = 0;
         label_counter_ = 0;
         emitted_labels_.clear();
         string_literals_.clear();
         string_literal_ids_.clear();
+        constant_aggregate_globals_.clear();
+        constant_aggregate_counter_ = 0;
+        debug_metadata_.clear();
+        debug_type_ids_.clear();
+        debug_location_ids_.clear();
+        debug_subroutine_ids_.clear();
+        debug_next_id_ = 5;
+        debug_subprogram_id_ = 0;
+        debug_shared_subroutine_id_ = 0;
+        debug_expression_id_ = 0;
+        debug_location_valid_ = false;
         link_libraries_.clear();
         for (const auto& top : program_->top_levels) {
             if (auto* clib = dynamic_cast<AST::ClibStatement*>(top.get())) {
@@ -342,6 +424,8 @@ namespace {
         emit_global_initializer();
         emit_main_wrapper();
         emit_string_constants();
+        emit_constant_aggregate_globals();
+        emit_debug_metadata();
 
         std::ostringstream out;
         for (const std::string& line : lines_) {
@@ -355,6 +439,281 @@ namespace {
         emit_line("source_filename = \"gallt\"");
         emit_line("target triple = \"x86_64-pc-windows-msvc\"");
         emit_line("%struct.gallt.string = type { i64, i64, [16 x i8] }");
+    }
+
+    void CodeGenerator::collect_debug_source_file() {
+        debug_source_file_.clear();
+        debug_source_dir_.clear();
+        for (const auto& top : program_->top_levels) {
+            if (top == nullptr) continue;
+            if (!top->location.filename.empty()) {
+                debug_source_file_ = std::string(top->location.filename);
+                break;
+            }
+        }
+        if (debug_source_file_.empty()) return;
+        const std::size_t slash = debug_source_file_.find_last_of("/\\");
+        if (slash != std::string::npos) {
+            debug_source_dir_ = debug_source_file_.substr(0, slash);
+            debug_source_file_ = debug_source_file_.substr(slash + 1);
+        }
+    }
+
+    unsigned CodeGenerator::next_debug_id() {
+        return debug_next_id_++;
+    }
+
+    unsigned CodeGenerator::debug_type_id(const AST::Type& type) {
+        if (type.kind == TypeKind::Void) return 0;
+        const std::string key = type.to_string();
+        auto cached = debug_type_ids_.find(key);
+        if (cached != debug_type_ids_.end()) return cached->second;
+        const unsigned id = next_debug_id();
+        debug_type_ids_[key] = id;
+        std::string text;
+        switch (type.kind) {
+        case TypeKind::Int:
+            text = "!DIBasicType(name: \"int\", size: 32, encoding: DW_ATE_signed)";
+            break;
+        case TypeKind::Lint:
+            text = "!DIBasicType(name: \"lint\", size: 64, encoding: DW_ATE_signed)";
+            break;
+        case TypeKind::Uint:
+            text = "!DIBasicType(name: \"uint\", size: 32, encoding: DW_ATE_unsigned)";
+            break;
+        case TypeKind::Luint:
+            text = "!DIBasicType(name: \"luint\", size: 64, encoding: DW_ATE_unsigned)";
+            break;
+        case TypeKind::Float:
+            text = "!DIBasicType(name: \"float\", size: 32, encoding: DW_ATE_float)";
+            break;
+        case TypeKind::Double:
+            text = "!DIBasicType(name: \"double\", size: 64, encoding: DW_ATE_float)";
+            break;
+        case TypeKind::Char:
+            text = "!DIBasicType(name: \"char\", size: 8, encoding: DW_ATE_signed_char)";
+            break;
+        case TypeKind::Uchar:
+            text = "!DIBasicType(name: \"uchar\", size: 8, encoding: DW_ATE_unsigned_char)";
+            break;
+        case TypeKind::Bool:
+            text = "!DIBasicType(name: \"bool\", size: 8, encoding: DW_ATE_boolean)";
+            break;
+        case TypeKind::String:
+            text = "!DICompositeType(tag: DW_TAG_structure_type, name: \"string\", "
+                "size: 256, identifier: \"gallt.string\")";
+            break;
+        case TypeKind::File:
+            text = "!DIBasicType(name: \"file\", size: 64, encoding: DW_ATE_unsigned)";
+            break;
+        case TypeKind::Pointer: {
+            const unsigned base = type.pointee_type
+                ? debug_type_id(*type.pointee_type) : 0;
+            text = "!DIDerivedType(tag: DW_TAG_pointer_type, baseType: " +
+                (base != 0 ? "!" + std::to_string(base) : std::string("null")) +
+                ", size: 64)";
+            break;
+        }
+        case TypeKind::Function:
+            text = "!DIDerivedType(tag: DW_TAG_pointer_type, baseType: null, size: 64)";
+            break;
+        case TypeKind::Array: {
+            const unsigned element = type.element_type
+                ? debug_type_id(*type.element_type) : 0;
+            const unsigned subrange = next_debug_id();
+            const unsigned elements = next_debug_id();
+            const long long count = type.array_size.has_value()
+                ? static_cast<long long>(*type.array_size) : -1LL;
+            debug_metadata_.push_back("!" + std::to_string(subrange) +
+                " = !DISubrange(count: " + std::to_string(count) + ", lowerBound: 0)");
+            debug_metadata_.push_back("!" + std::to_string(elements) + " = !{!" +
+                std::to_string(subrange) + "}");
+            text = "!DICompositeType(tag: DW_TAG_array_type, baseType: " +
+                (element != 0 ? "!" + std::to_string(element) : std::string("null")) +
+                ", size: " + std::to_string(type_size(type) * 8) +
+                ", elements: !" + std::to_string(elements) + ")";
+            break;
+        }
+        case TypeKind::Struct: {
+            auto found = struct_by_name_.find(type.struct_name);
+            if (found == struct_by_name_.end() || found->second == nullptr) {
+                text = "!DICompositeType(tag: DW_TAG_structure_type, name: \"" +
+                    escape_metadata_string(type.struct_name) + "\", size: " +
+                    std::to_string(type_size(type) * 8) + ")";
+                break;
+            }
+            AST::StructDefinition* def = found->second;
+            std::vector<unsigned> member_ids;
+            std::size_t offset = 0;
+            for (const AST::StructDefinition::Member& member : def->members) {
+                const unsigned member_id = next_debug_id();
+                const unsigned member_type = debug_type_id(member.type);
+                debug_metadata_.push_back("!" + std::to_string(member_id) +
+                    " = !DIDerivedType(tag: DW_TAG_member, name: \"" +
+                    escape_metadata_string(member.name) + "\", scope: !" +
+                    std::to_string(id) + ", file: !1, line: " +
+                    std::to_string(member.location.line > 0 ? member.location.line : 1) +
+                    ", baseType: " +
+                    (member_type != 0 ? "!" + std::to_string(member_type)
+                                      : std::string("null")) +
+                    ", size: " + std::to_string(type_size(member.type) * 8) +
+                    ", offset: " + std::to_string(offset * 8) + ")");
+                const std::size_t alignment = type_align(member.type);
+                offset += type_size(member.type);
+                if (alignment > 1) {
+                    offset = (offset + alignment - 1) / alignment * alignment;
+                }
+                member_ids.push_back(member_id);
+            }
+            const unsigned elements = next_debug_id();
+            std::string list = "!" + std::to_string(elements) + " = !{";
+            for (std::size_t i = 0; i < member_ids.size(); ++i) {
+                if (i != 0) list += ", ";
+                list += "!" + std::to_string(member_ids[i]);
+            }
+            list += "}";
+            debug_metadata_.push_back(list);
+            text = "!DICompositeType(tag: DW_TAG_structure_type, name: \"" +
+                escape_metadata_string(def->name) + "\", file: !1, line: " +
+                std::to_string(def->location.line > 0 ? def->location.line : 1) +
+                ", size: " + std::to_string(type_size(type) * 8) +
+                ", elements: !" + std::to_string(elements) +
+                ", identifier: \"gallt.struct." +
+                escape_metadata_string(def->name) + "\")";
+            break;
+        }
+        default:
+            return 0;
+        }
+        debug_metadata_.push_back("!" + std::to_string(id) + " = " + text);
+        return id;
+    }
+
+    unsigned CodeGenerator::debug_subroutine_id(const AST::Type& return_type,
+        const std::vector<AST::Type>& parameters) {
+        if (debug_level_ < 2) {
+            if (debug_shared_subroutine_id_ == 0) {
+                const unsigned types_id = next_debug_id();
+                debug_shared_subroutine_id_ = next_debug_id();
+                debug_metadata_.push_back("!" + std::to_string(types_id) + " = !{null}");
+                debug_metadata_.push_back("!" + std::to_string(debug_shared_subroutine_id_) +
+                    " = !DISubroutineType(types: !" + std::to_string(types_id) + ")");
+            }
+            return debug_shared_subroutine_id_;
+        }
+        std::string key = return_type.to_string();
+        for (const AST::Type& parameter : parameters) {
+            key += ",";
+            key += parameter.to_string();
+        }
+        auto cached = debug_subroutine_ids_.find(key);
+        if (cached != debug_subroutine_ids_.end()) return cached->second;
+        const unsigned id = next_debug_id();
+        const unsigned types_id = next_debug_id();
+        debug_subroutine_ids_[key] = id;
+        const unsigned return_id = debug_type_id(return_type);
+        std::string list = "!" + std::to_string(types_id) + " = !{";
+        list += (return_id != 0 ? "!" + std::to_string(return_id) : std::string("null"));
+        for (const AST::Type& parameter : parameters) {
+            const unsigned parameter_id = debug_type_id(parameter);
+            list += ", ";
+            list += (parameter_id != 0 ? "!" + std::to_string(parameter_id)
+                                       : std::string("null"));
+        }
+        list += "}";
+        debug_metadata_.push_back(list);
+        debug_metadata_.push_back("!" + std::to_string(id) +
+            " = !DISubroutineType(types: !" + std::to_string(types_id) + ")");
+        return id;
+    }
+
+    unsigned CodeGenerator::debug_location_id(const SourceLocation& location) {
+        if (debug_level_ < 1 || debug_subprogram_id_ == 0) return 0;
+        const unsigned line = location.line > 0
+            ? static_cast<unsigned>(location.line) : 1u;
+        const unsigned column = location.column > 0
+            ? static_cast<unsigned>(location.column) : 1u;
+        const std::string key = std::to_string(debug_subprogram_id_) + ":" +
+            std::to_string(line) + ":" + std::to_string(column);
+        auto cached = debug_location_ids_.find(key);
+        if (cached != debug_location_ids_.end()) return cached->second;
+        const unsigned id = next_debug_id();
+        debug_location_ids_[key] = id;
+        debug_metadata_.push_back("!" + std::to_string(id) +
+            " = !DILocation(line: " + std::to_string(line) + ", column: " +
+            std::to_string(column) + ", scope: !" +
+            std::to_string(debug_subprogram_id_) + ")");
+        return id;
+    }
+
+    void CodeGenerator::begin_debug_function(AST::FunctionDefinition* func,
+        std::string& suffix) {
+        suffix.clear();
+        debug_subprogram_id_ = 0;
+        debug_location_valid_ = false;
+        if (debug_level_ < 1 || func == nullptr) return;
+        const unsigned line = func->location.line > 0
+            ? static_cast<unsigned>(func->location.line) : 1u;
+        debug_subprogram_id_ = next_debug_id();
+        const unsigned signature = debug_subroutine_id(func->return_type,
+            func->parameters);
+        const std::string ir_name = function_llvm_name_for_source(func->name);
+        std::string symbol = ir_name;
+        if (!symbol.empty() && symbol.front() == '@') symbol.erase(0, 1);
+        debug_metadata_.push_back("!" + std::to_string(debug_subprogram_id_) +
+            " = distinct !DISubprogram(name: \"" +
+            escape_metadata_string(func->name) + "\", linkageName: \"" +
+            escape_metadata_string(symbol) + "\", scope: !1, file: !1, line: " +
+            std::to_string(line) + ", type: !" + std::to_string(signature) +
+            ", scopeLine: " + std::to_string(line) +
+            ", spFlags: DISPFlagDefinition, unit: !0)");
+        suffix = " !dbg !" + std::to_string(debug_subprogram_id_);
+        debug_location_ = func->location;
+        debug_location_valid_ = true;
+    }
+
+    void CodeGenerator::emit_debug_local_variable(const std::string& name,
+        const AST::Type& type, const std::string& address,
+        const SourceLocation& location) {
+        if (debug_level_ < 2 || debug_subprogram_id_ == 0) return;
+        if (address.empty() || name.empty()) return;
+        if (debug_expression_id_ == 0) {
+            debug_expression_id_ = next_debug_id();
+            debug_metadata_.push_back("!" + std::to_string(debug_expression_id_) +
+                " = !DIExpression()");
+        }
+        const unsigned line = location.line > 0
+            ? static_cast<unsigned>(location.line) : 1u;
+        const unsigned variable_id = next_debug_id();
+        const unsigned type_id = debug_type_id(type);
+        debug_metadata_.push_back("!" + std::to_string(variable_id) +
+            " = !DILocalVariable(name: \"" + escape_metadata_string(name) +
+            "\", scope: !" + std::to_string(debug_subprogram_id_) + ", file: !1, line: " +
+            std::to_string(line) + ", type: " +
+            (type_id != 0 ? "!" + std::to_string(type_id) : std::string("null")) + ")");
+        emit_line("call void @llvm.dbg.declare(metadata ptr " + address +
+            ", metadata !" + std::to_string(variable_id) + ", metadata !" +
+            std::to_string(debug_expression_id_) + ")");
+    }
+
+    void CodeGenerator::emit_debug_metadata() {
+        if (debug_level_ < 1) return;
+        current_label_.clear();
+        const char* emission = debug_level_ >= 2 ? "FullDebug" : "LineTablesOnly";
+        lines_.push_back("!llvm.dbg.cu = !{!0}");
+        lines_.push_back("!llvm.module.flags = !{!2, !3, !4}");
+        lines_.push_back("!2 = !{i32 2, !\"CodeView\", i32 1}");
+        lines_.push_back("!3 = !{i32 2, !\"Debug Info Version\", i32 3}");
+        lines_.push_back("!4 = !{i32 1, !\"wchar_size\", i32 4}");
+        lines_.push_back("!0 = distinct !DICompileUnit(language: DW_LANG_C99, file: !1, "
+            "producer: \"sgc Standard Gallt Compiler\", isOptimized: false, "
+            "runtimeVersion: 0, emissionKind: " + std::string(emission) + ")");
+        lines_.push_back("!1 = !DIFile(filename: \"" +
+            escape_metadata_string(debug_source_file_) + "\", directory: \"" +
+            escape_metadata_string(debug_source_dir_) + "\")");
+        for (const std::string& entry : debug_metadata_) {
+            lines_.push_back(entry);
+        }
     }
 
     void CodeGenerator::emit_struct_types() {
@@ -444,9 +803,12 @@ namespace {
         emit_line("declare i8 @gallt_file_copy(ptr, ptr)");
         emit_line("declare i8 @gallt_file_mkdir(ptr)");
         emit_line("declare i8 @gallt_file_removedir(ptr)");
-        emit_line("declare void @llvm.memcpy.p0.p0.i64(ptr, ptr, i64, i1)");
-        emit_line("declare void @llvm.memset.p0.i64(ptr, i8, i64, i1)");
-        emit_line("declare double @pow(double, double)");
+          emit_line("declare void @llvm.memcpy.p0.p0.i64(ptr, ptr, i64, i1)");
+          emit_line("declare void @llvm.memset.p0.i64(ptr, i8, i64, i1)");
+          if (debug_level_ >= 2) {
+              emit_line("declare void @llvm.dbg.declare(metadata, metadata, metadata)");
+          }
+          emit_line("declare double @pow(double, double)");
     }
 
     void CodeGenerator::emit_string_constants() {
@@ -492,6 +854,7 @@ namespace {
     void CodeGenerator::collect_global_variables() {
         global_vars_.clear();
         const_globals_.clear();
+        runtime_const_globals_.clear();
         for (const auto& top : program_->top_levels) {
             if (auto* var = dynamic_cast<AST::VariableDeclaration*>(top.get())) {
                 if (var->type.is_const) {
@@ -520,15 +883,39 @@ namespace {
         global_symbols_.clear();
         for (AST::VariableDeclaration* var : const_globals_) {
             LocalInfo info;
-            if (!fold_constant_declaration(var, info)) {
+            if (fold_constant_declaration(var, info)) {
+                global_symbols_[var->name] = std::move(info);
                 continue;
             }
-            global_symbols_[var->name] = std::move(info);
+            runtime_const_globals_.push_back(var);
+            std::string address = "@glt_g_" + var->name;
+            emit_line(address + " = global " + llvm_type(var->type) +
+                " zeroinitializer");
+            LocalInfo fallback;
+            fallback.type = var->type;
+            fallback.address = address;
+            global_symbols_[var->name] = std::move(fallback);
         }
         for (AST::VariableDeclaration* var : global_vars_) {
             std::string address = "@glt_g_" + var->name;
             std::string type_text = llvm_type(var->type);
-            emit_line(address + " = global " + type_text + " zeroinitializer");
+            std::string definition = address + " = global " + type_text +
+                " zeroinitializer";
+            if (debug_level_ >= 2) {
+                const unsigned variable_id = next_debug_id();
+                const unsigned type_id = debug_type_id(var->type);
+                const unsigned line = var->location.line > 0
+                    ? static_cast<unsigned>(var->location.line) : 1u;
+                debug_metadata_.push_back("!" + std::to_string(variable_id) +
+                    " = distinct !DIGlobalVariable(name: \"" +
+                    escape_metadata_string(var->name) + "\", scope: !1, file: !1, line: " +
+                    std::to_string(line) + ", type: " +
+                    (type_id != 0 ? "!" + std::to_string(type_id)
+                                  : std::string("null")) +
+                    ", isLocal: false, isDefinition: true)");
+                definition += ", !dbg !" + std::to_string(variable_id);
+            }
+            emit_line(definition);
             LocalInfo info;
             info.type = var->type;
             info.address = address;
@@ -538,8 +925,10 @@ namespace {
 
     void CodeGenerator::emit_global_initializer() {
         emit_global_deinit_function();
-        if (global_vars_.empty()) return;
+        if (global_vars_.empty() && runtime_const_globals_.empty()) return;
 
+        debug_subprogram_id_ = 0;
+        debug_location_valid_ = false;
         scopes_.clear();
         cleanup_scopes_.clear();
         push_scope();
@@ -553,6 +942,17 @@ namespace {
         hoisted_allocas_.clear();
         hoist_insert_index_ = lines_.size();
         for (AST::VariableDeclaration* var : global_vars_) {
+            if (var->initializer) {
+                emit_initializer_to_address(var, "@glt_g_" + var->name);
+            }
+            else if (var->type.kind == TypeKind::Struct) {
+                AST::ArrayInitializer empty_init(var->location,
+                    std::vector<std::unique_ptr<AST::Initializer>>{});
+                emit_struct_brace_initialization("@glt_g_" + var->name, var->type,
+                    &empty_init);
+            }
+        }
+        for (AST::VariableDeclaration* var : runtime_const_globals_) {
             if (var->initializer) {
                 emit_initializer_to_address(var, "@glt_g_" + var->name);
             }
@@ -581,6 +981,8 @@ namespace {
     }
 
     void CodeGenerator::emit_global_deinit_function() {
+        debug_subprogram_id_ = 0;
+        debug_location_valid_ = false;
         scopes_.clear();
         cleanup_scopes_.clear();
         push_scope();
@@ -603,6 +1005,18 @@ namespace {
             if (!destructible && !type_contains_string(var->type)) continue;
             emit_destroy_string_at(var->type, "@glt_g_" + var->name);
         }
+        for (auto it = runtime_const_globals_.rbegin();
+            it != runtime_const_globals_.rend(); ++it) {
+            AST::VariableDeclaration* var = *it;
+            bool destructible = false;
+            if (var->type.kind == TypeKind::Struct) {
+                auto def_it = struct_by_name_.find(var->type.struct_name);
+                destructible = def_it != struct_by_name_.end() &&
+                    def_it->second != nullptr && def_it->second->needs_destruction;
+            }
+            if (!destructible && !type_contains_string(var->type)) continue;
+            emit_destroy_string_at(var->type, "@glt_g_" + var->name);
+        }
         emit_line("ret void");
         std::string deinit_end = new_label("function_end");
         if (!current_block_terminated_) {
@@ -615,6 +1029,8 @@ namespace {
     }
 
     void CodeGenerator::emit_main_wrapper() {
+        debug_subprogram_id_ = 0;
+        debug_location_valid_ = false;
         AST::FunctionDefinition* main_func = nullptr;
         for (const auto& top : program_->top_levels) {
             if (auto* func = dynamic_cast<AST::FunctionDefinition*>(top.get())) {
@@ -724,7 +1140,12 @@ namespace {
             for (auto it = owned.rbegin(); it != owned.rend(); ++it) {
                 emit_destroy_string_at(it->type, it->address);
             }
-            owned.clear();
+        }
+    }
+
+    void CodeGenerator::discard_current_cleanup_scope() {
+        if (!cleanup_scopes_.empty()) {
+            cleanup_scopes_.back().clear();
         }
     }
 
@@ -811,6 +1232,11 @@ namespace {
             header += " %" + param_name;
         }
         header += ") {";
+        std::string debug_suffix;
+        begin_debug_function(func, debug_suffix);
+        if (!debug_suffix.empty()) {
+            header.insert(header.size() - 2, debug_suffix);
+        }
         emit_line(header);
         current_sret_pointer_ = sret ? std::string("%__sret_ret") : std::string();
 
@@ -874,6 +1300,7 @@ namespace {
         }
         flush_hoisted_allocas();
         emit_line("}");
+        discard_current_cleanup_scope();
         pop_scope();
     }
 
@@ -903,6 +1330,9 @@ namespace {
 
     void CodeGenerator::emit_statement(AST::Statement* stmt) {
         if (stmt == nullptr) return;
+        if (debug_level_ >= 1 && debug_location_valid_) {
+            debug_location_ = stmt->location;
+        }
         if (auto* block = dynamic_cast<AST::Block*>(stmt)) {
             emit_block(block, true);
         } else if (auto* decl = dynamic_cast<AST::VariableDeclaration*>(stmt)) {
@@ -1091,6 +1521,9 @@ namespace {
             return true;
         }
         if (!decl->type.is_scalar()) {
+            if (fold_constant_aggregate(decl, info)) {
+                return true;
+            }
             info.is_constant = false;
             return false;
         }
@@ -1165,6 +1598,177 @@ namespace {
         return true;
     }
 
+    bool CodeGenerator::build_constant_scalar(const AST::Expression* expr,
+        const AST::Type& type, std::string& out) {
+        if (expr == nullptr) return false;
+        if (type.kind == TypeKind::String) {
+            auto* prim = dynamic_cast<const AST::PrimaryExpression*>(expr);
+            if (prim == nullptr ||
+                prim->kind != AST::PrimaryExpression::Kind::Literal ||
+                prim->literal_token.type != TokenType::StringLiteral) {
+                return false;
+            }
+            std::string bytes = decode_escaped_bytes(prim->literal_token.lexeme, false);
+            if (bytes.size() > 15) return false;
+            std::string buffer(bytes);
+            buffer.resize(16, '\0');
+            out = "%struct.gallt.string { i64 " + std::to_string(bytes.size()) +
+                ", i64 16, [16 x i8] " + llvm_escape_bytes(buffer) + " }";
+            return true;
+        }
+        if (type.kind == TypeKind::Pointer || type.kind == TypeKind::File ||
+            type.kind == TypeKind::Function) {
+            auto* prim = dynamic_cast<const AST::PrimaryExpression*>(expr);
+            if (prim != nullptr && prim->kind == AST::PrimaryExpression::Kind::Null) {
+                out = llvm_type(type) + " null";
+                return true;
+            }
+            if (type.kind == TypeKind::Pointer) {
+                out = "ptr null";
+                return false;
+            }
+            return false;
+        }
+        ConstantEvaluationContext ctx;
+        ctx.lookup_constant = [this](const std::string& name, long long& int_value,
+            double& float_value, bool& is_float) {
+            auto found = constant_values_.find(name);
+            if (found == constant_values_.end()) return false;
+            int_value = found->second.int_value;
+            float_value = found->second.float_value;
+            is_float = found->second.is_float;
+            return true;
+        };
+        long long int_value = 0;
+        double float_value = 0.0;
+        bool is_float = false;
+        if (!evaluate_constant_expression(expr, int_value, float_value, is_float, ctx)) {
+            return false;
+        }
+        if (type.is_floating()) {
+            double result = is_float ? float_value : static_cast<double>(int_value);
+            if (type.kind == TypeKind::Float) {
+                result = static_cast<double>(static_cast<float>(result));
+            }
+            std::ostringstream format;
+            format.precision(17);
+            format << result;
+            out = llvm_type(type) + " " + llvm_float_constant_text(format.str());
+            return true;
+        }
+        long long result = is_float ? static_cast<long long>(float_value) : int_value;
+        switch (type.kind) {
+        case TypeKind::Char:
+        case TypeKind::Uchar:
+            result = static_cast<long long>(static_cast<unsigned char>(result));
+            break;
+        case TypeKind::Bool:
+            result = (result != 0) ? 1 : 0;
+            break;
+        case TypeKind::Int:
+        case TypeKind::Uint:
+            result = static_cast<long long>(static_cast<int>(
+                static_cast<unsigned int>(result)));
+            break;
+        case TypeKind::Luint:
+            result = static_cast<long long>(static_cast<unsigned long long>(result));
+            break;
+        default:
+            break;
+        }
+        out = llvm_type(type) + " " + std::to_string(result);
+        return true;
+    }
+
+    bool CodeGenerator::build_constant_initializer(const AST::Initializer* init,
+        const AST::Type& type, std::string& out) {
+        if (init == nullptr) return false;
+        if (auto* expr_init = dynamic_cast<const AST::ExpressionInitializer*>(init)) {
+            return build_constant_scalar(expr_init->expr.get(), type, out);
+        }
+        auto* arr_init = dynamic_cast<const AST::ArrayInitializer*>(init);
+        if (arr_init == nullptr) return false;
+        if (type.kind == TypeKind::Array) {
+            if (!type.element_type) return false;
+            const std::size_t count =
+                type.array_size.value_or(arr_init->elements.size());
+            std::string text = "[";
+            for (std::size_t i = 0; i < count; ++i) {
+                if (i != 0) text += ", ";
+                if (i < arr_init->elements.size()) {
+                    std::string element;
+                    if (!build_constant_initializer(arr_init->elements[i].get(),
+                        *type.element_type, element)) {
+                        return false;
+                    }
+                    text += element;
+                }
+                else {
+                    text += "zeroinitializer";
+                }
+            }
+            text += "]";
+            out = text;
+            return true;
+        }
+        if (type.kind == TypeKind::Struct) {
+            auto it = struct_by_name_.find(type.struct_name);
+            if (it == struct_by_name_.end() || it->second == nullptr) return false;
+            AST::StructDefinition* def = it->second;
+            if (arr_init->elements.size() > def->members.size()) return false;
+            std::string text = "{";
+            for (std::size_t i = 0; i < def->members.size(); ++i) {
+                if (i != 0) text += ", ";
+                const AST::StructDefinition::Member& member = def->members[i];
+                const AST::Initializer* element = i < arr_init->elements.size()
+                    ? arr_init->elements[i].get() : member.initializer.get();
+                if (element == nullptr) {
+                    text += "zeroinitializer";
+                    continue;
+                }
+                std::string value;
+                if (!build_constant_initializer(element, member.type, value)) {
+                    return false;
+                }
+                text += value;
+            }
+            text += "}";
+            out = text;
+            return true;
+        }
+        return false;
+    }
+
+    bool CodeGenerator::fold_constant_aggregate(AST::VariableDeclaration* decl,
+        LocalInfo& info) {
+        if (decl == nullptr || decl->initializer == nullptr) return false;
+        if (decl->type.kind != TypeKind::Array && decl->type.kind != TypeKind::Struct) {
+            return false;
+        }
+        std::string text;
+        if (!build_constant_initializer(decl->initializer.get(), decl->type, text)) {
+            return false;
+        }
+        std::string name = "@__sgc_const$" + decl->name + "$" +
+            std::to_string(constant_aggregate_counter_++);
+        constant_aggregate_globals_.push_back(name +
+            " = private unnamed_addr constant " + llvm_type(decl->type) + " " + text);
+        info = LocalInfo{};
+        info.type = decl->type;
+        info.is_constant = true;
+        info.address = name;
+        return true;
+    }
+
+    void CodeGenerator::emit_constant_aggregate_globals() {
+        if (constant_aggregate_globals_.empty()) return;
+        current_label_.clear();
+        for (const std::string& line : constant_aggregate_globals_) {
+            emit_line(line);
+        }
+        constant_aggregate_globals_.clear();
+    }
+
     void CodeGenerator::emit_variable_declaration(AST::VariableDeclaration* decl) {
         if (decl->type.is_const) {
             LocalInfo constant;
@@ -1181,6 +1785,7 @@ namespace {
         info.address = address;
         if (scopes_.empty()) push_scope();
         scopes_.back()[decl->name] = std::move(info);
+        emit_debug_local_variable(decl->name, decl->type, address, decl->location);
 
         if (type_contains_string(decl->type)) {
             register_string_cleanup(address, decl->type);
@@ -1197,7 +1802,7 @@ namespace {
         }
 
         if (!decl->initializer) {
-            if (decl->type.kind == TypeKind::Struct) {
+            if (!decl->constructed_by_lowering && decl->type.kind == TypeKind::Struct) {
                 AST::ArrayInitializer empty_init(decl->location,
                     std::vector<std::unique_ptr<AST::Initializer>>{});
                 emit_struct_brace_initialization(address, decl->type, &empty_init);
@@ -1371,51 +1976,76 @@ namespace {
         }
     }
 
-    void CodeGenerator::emit_deep_copy_string_members(const AST::Type& struct_type,
-        const std::string& dest_address, const std::string& src_address) {
-        auto it = struct_by_name_.find(struct_type.struct_name);
-        if (it == struct_by_name_.end() || it->second == nullptr) return;
-        const AST::StructDefinition* def = it->second;
-        std::string struct_ir = llvm_type(struct_type);
-        for (size_t i = 0; i < def->members.size(); ++i) {
-            const auto& member = def->members[i];
-            std::string src_field = new_temp("deep_src");
-            std::string dst_field = new_temp("deep_dst");
-            emit_line(src_field + " = getelementptr " + struct_ir +
-                ", ptr " + src_address + ", i32 0, i32 " + std::to_string(i));
-            emit_line(dst_field + " = getelementptr " + struct_ir +
-                ", ptr " + dest_address + ", i32 0, i32 " + std::to_string(i));
-            if (member.type.kind == TypeKind::String) {
-                ExprValue source;
-                source.type = member.type;
-                source.address = src_field;
-                emit_string_assign(dst_field, source);
-            } else if (member.type.kind == TypeKind::Struct &&
-                type_contains_string(member.type)) {
-                emit_deep_copy_string_members(member.type, dst_field, src_field);
-            } else if (member.type.kind == TypeKind::Array &&
-                type_contains_string(member.type) && member.type.array_size.has_value()) {
-                std::string elem_ir = llvm_type(*member.type.element_type);
-                std::string array_ir = llvm_type(member.type);
-                size_t n = *member.type.array_size;
-                for (size_t j = 0; j < n; ++j) {
-                    std::string se = new_temp("deep_se");
-                    std::string de = new_temp("deep_de");
-                    emit_line(se + " = getelementptr " + array_ir +
-                        ", ptr " + src_field + ", i64 0, i64 " + std::to_string(j));
-                    emit_line(de + " = getelementptr " + array_ir +
-                        ", ptr " + dst_field + ", i64 0, i64 " + std::to_string(j));
-                    if (member.type.element_type->kind == TypeKind::String) {
-                        ExprValue source;
-                        source.type = *member.type.element_type;
-                        source.address = se;
-                        emit_string_assign(de, source);
-                    } else if (member.type.element_type->kind == TypeKind::Struct) {
-                        emit_deep_copy_string_members(*member.type.element_type, de, se);
-                    }
-                }
+    int CodeGenerator::default_constructor_index(const AST::StructDefinition* def) {
+        if (def == nullptr) return -1;
+        if (def->constructor_names.empty()) return 0;
+        for (std::size_t i = 0; i < def->constructor_names.size(); ++i) {
+            const std::size_t user_params = i < def->constructor_param_types.size()
+                ? def->constructor_param_types[i].size() : 0;
+            std::vector<AST::Expression*> supplied_defaults;
+            collect_constructor_defaults(def->constructor_names[i], supplied_defaults);
+            if (supplied_defaults.size() >= user_params) {
+                return static_cast<int>(i) + 1;
             }
         }
+        return -1;
+    }
+
+    bool CodeGenerator::emit_struct_default_constructor(const std::string& address,
+        const AST::StructDefinition* def, SourceLocation loc) {
+        if (def == nullptr) return false;
+        if (lifecycle_owner_ == def) return false;
+        const int ctor_index = default_constructor_index(def);
+        if (ctor_index < 0) {
+            std::size_t required = 0;
+            if (!def->constructor_param_types.empty()) {
+                required = def->constructor_param_types.front().size();
+                for (const std::vector<AST::Type>& params : def->constructor_param_types) {
+                    if (params.size() < required) required = params.size();
+                }
+            }
+            if (diagnostics_ != nullptr) {
+                diagnostics_->report_error_template(loc,
+                    ErrorCode::FunctionArgCountMismatch,
+                    { std::to_string(required), "0" });
+            }
+            return true;
+        }
+        if (ctor_index == 0) {
+            std::string callee = function_reference("__sgc_ctor$" + def->name);
+            if (callee.empty()) return false;
+            emit_line("call void " + callee + "(ptr " + address + ")");
+            return true;
+        }
+        const std::size_t index = static_cast<std::size_t>(ctor_index - 1);
+        const std::string& ctor_name = def->constructor_names[index];
+        std::string callee = function_reference(ctor_name);
+        if (callee.empty()) return false;
+        std::vector<AST::Expression*> ctor_args;
+        collect_constructor_defaults(ctor_name, ctor_args);
+        const std::vector<AST::Type>* params =
+            index < def->constructor_param_types.size()
+                ? &def->constructor_param_types[index] : nullptr;
+        std::string call_text = "call void " + callee + "(ptr " + address;
+        for (std::size_t i = 0; i < ctor_args.size(); ++i) {
+            ExprValue value = gen_expr(ctor_args[i]);
+            AST::Type want = (params != nullptr && i < params->size())
+                ? (*params)[i] : value.type;
+            if (want.kind == TypeKind::String && value.type.kind == TypeKind::String) {
+                std::string addr = !value.address.empty() ? value.address : value.value;
+                std::string aggregate = new_temp("temp_str");
+                emit_line(aggregate + " = load %struct.gallt.string, ptr " + addr);
+                call_text += ", %struct.gallt.string " + aggregate;
+            }
+            else {
+                call_text += ", " + llvm_type(want) + " " +
+                    convert_value(value.value, value.type, want);
+            }
+            destroy_owned_string(value);
+        }
+        call_text += ")";
+        emit_line(call_text);
+        return true;
     }
 
     void CodeGenerator::emit_struct_brace_initialization(const std::string& address,
@@ -1423,11 +2053,8 @@ namespace {
         auto it = struct_by_name_.find(struct_type.struct_name);
         if (it == struct_by_name_.end() || it->second == nullptr) return;
         AST::StructDefinition* def = it->second;
-        if (init != nullptr && init->elements.empty() &&
-            def->constructor_names.empty() && lifecycle_owner_ != def) {
-            std::string callee = function_reference("__sgc_ctor$" + def->name);
-            if (!callee.empty()) {
-                emit_line("call void " + callee + "(ptr " + address + ")");
+        if (init != nullptr && init->elements.empty()) {
+            if (emit_struct_default_constructor(address, def, init->location)) {
                 return;
             }
         }
@@ -1478,15 +2105,9 @@ namespace {
                 if (member.type.kind == TypeKind::Struct) {
                     auto member_def = struct_by_name_.find(member.type.struct_name);
                     if (member_def != struct_by_name_.end() &&
-                        member_def->second != nullptr &&
-                        member_def->second->constructor_names.empty() &&
-                        member_def->second != lifecycle_owner_) {
-                        std::string callee = function_reference(
-                            "__sgc_ctor$" + member_def->second->name);
-                        if (!callee.empty()) {
-                            emit_line("call void " + callee + "(ptr " + field_ptr + ")");
-                            handled = true;
-                        }
+                        member_def->second != nullptr) {
+                        handled = emit_struct_default_constructor(field_ptr,
+                            member_def->second, member.location);
                     }
                 }
             }
@@ -1572,6 +2193,10 @@ namespace {
             final_arguments = { post->base.get() };
             postfix_dummy = post->op == AST::PostfixExpression::Operator::Increment ||
                 post->op == AST::PostfixExpression::Operator::Decrement;
+            if (post->op == AST::PostfixExpression::Operator::Subscript &&
+                post->subscript_expr != nullptr) {
+                final_arguments.push_back(post->subscript_expr.get());
+            }
         }
         else if (auto* assign = dynamic_cast<AST::AssignmentExpression*>(expr)) {
             if (assign->op == AST::AssignmentExpression::Operator::Assign) {
@@ -2034,6 +2659,54 @@ namespace {
             ExprValue l = gen_expr(pow->left.get());
             ExprValue r = gen_expr(pow->right.get());
             AST::Type result_type = resolved_type(expr);
+            if (result_type.is_integer() && l.type.is_integer() &&
+                r.type.is_integer()) {
+                AST::Type work_type = result_type;
+                if (work_type.integer_bit_width() == 8) {
+                    work_type = Type::make_int();
+                }
+                std::string work_ir = llvm_type(work_type);
+                std::string base_addr = emit_alloca(work_ir, "powbase");
+                std::string acc_addr = emit_alloca(work_ir, "powacc");
+                std::string idx_addr = emit_alloca("i64", "powidx");
+                emit_line("store " + work_ir + " " +
+                    convert_value(l.value, l.type, work_type) + ", ptr " + base_addr);
+                emit_line("store " + work_ir + " " +
+                    convert_value("1", Type::make_int(), work_type) +
+                    ", ptr " + acc_addr);
+                emit_line("store i64 0, ptr " + idx_addr);
+                std::string exponent = to_i64_value(r.value, r.type);
+                std::string cond_label = new_label("powcond");
+                std::string body_label = new_label("powbody");
+                std::string end_label = new_label("powend");
+                emit_line("br label %" + cond_label);
+                start_block(cond_label);
+                std::string index = new_temp("powi");
+                emit_line(index + " = load i64, ptr " + idx_addr);
+                std::string in_range = new_temp("powin");
+                emit_line(in_range + " = icmp slt i64 " + index + ", " + exponent);
+                emit_line("br i1 " + in_range + ", label %" + body_label +
+                    ", label %" + end_label);
+                start_block(body_label);
+                std::string acc = new_temp("powaccv");
+                emit_line(acc + " = load " + work_ir + ", ptr " + acc_addr);
+                std::string base = new_temp("powbasev");
+                emit_line(base + " = load " + work_ir + ", ptr " + base_addr);
+                std::string product = new_temp("powmul");
+                emit_line(product + " = mul " + work_ir + " " + acc + ", " + base);
+                emit_line("store " + work_ir + " " + product + ", ptr " + acc_addr);
+                std::string next_index = new_temp("pownext");
+                emit_line(next_index + " = add i64 " + index + ", 1");
+                emit_line("store i64 " + next_index + ", ptr " + idx_addr);
+                emit_line("br label %" + cond_label);
+                start_block(end_label);
+                ExprValue v;
+                v.type = result_type;
+                std::string accumulated = new_temp("powres");
+                emit_line(accumulated + " = load " + work_ir + ", ptr " + acc_addr);
+                v.value = convert_value(accumulated, work_type, result_type);
+                return v;
+            }
             std::string ld = convert_value(l.value, l.type, Type::make_double());
             std::string rd = convert_value(r.value, r.type, Type::make_double());
             std::string tmp = new_temp("pow");
@@ -2071,7 +2744,11 @@ namespace {
 
     std::string CodeGenerator::convert_value(const std::string& value,
         const AST::Type& from, const AST::Type& to) {
-        if (from == to) return value;
+        AST::Type from_type = from;
+        AST::Type to_type = to;
+        from_type.is_const = false;
+        to_type.is_const = false;
+        if (from_type == to_type) return value;
         auto int_ir = [](int bits) -> const char* {
             switch (bits) {
             case 64: return "i64";
@@ -2083,11 +2760,35 @@ namespace {
             (to.kind == TypeKind::Pointer || to.kind == TypeKind::Function)) {
             return value;
         }
-       if (to.kind == TypeKind::Pointer || to.kind == TypeKind::Function ||
-           from.kind == TypeKind::Pointer || from.kind == TypeKind::Function ||
-           to.kind == TypeKind::File || from.kind == TypeKind::File) {
-            if (from.kind == TypeKind::Pointer || from.kind == TypeKind::Function ||
-                from.kind == TypeKind::File) return value;
+        if (from.kind == TypeKind::Pointer || from.kind == TypeKind::Function) {
+            if (to.kind == TypeKind::Pointer || to.kind == TypeKind::Function ||
+                to.kind == TypeKind::File) {
+                return value;
+            }
+            if (to.kind == TypeKind::String || to.kind == TypeKind::Struct ||
+                to.kind == TypeKind::Array) {
+                return "zeroinitializer";
+            }
+            const int to_bits = to.integer_bit_width();
+            if (to_bits > 0) {
+                std::string converted = new_temp("ptrtoint");
+                emit_line(converted + " = ptrtoint ptr " + value + " to " +
+                    int_ir(to_bits));
+                return converted;
+            }
+            if (to.kind == TypeKind::Float || to.kind == TypeKind::Double) {
+                std::string converted = new_temp("ptrtoint");
+                emit_line(converted + " = ptrtoint ptr " + value + " to i64");
+                std::string result = new_temp("cast");
+                emit_line(result + " = sitofp i64 " + converted + " to " +
+                    (to.kind == TypeKind::Float ? "float" : "double"));
+                return result;
+            }
+            return value;
+        }
+        if (to.kind == TypeKind::Pointer || to.kind == TypeKind::Function ||
+            to.kind == TypeKind::File || from.kind == TypeKind::File) {
+            if (from.kind == TypeKind::File) return value;
             if (to.kind == TypeKind::Pointer || to.kind == TypeKind::Function) {
                 std::string out = new_temp("inttoptr");
                 const int from_bits = from.integer_bit_width();
@@ -2104,31 +2805,34 @@ namespace {
         if (to.kind == TypeKind::Float) {
             if (from.kind == TypeKind::Double) {
                 emit_line(tmp + " = fptrunc double " + value + " to float");
+                return tmp;
             } else if (from.integer_bit_width() > 0) {
                 const bool unsigned_from = from.is_unsigned_integer();
                 emit_line(tmp + std::string(" = ") + (unsigned_from ? "uitofp " : "sitofp ") +
                     int_ir(from.integer_bit_width()) + " " + value + " to float");
+                return tmp;
             }
-            return tmp;
+            return value;
         }
         if (to.kind == TypeKind::Double) {
             if (from.kind == TypeKind::Float) {
                 emit_line(tmp + " = fpext float " + value + " to double");
+                return tmp;
             } else if (from.integer_bit_width() > 0) {
                 const bool unsigned_from = from.is_unsigned_integer();
                 emit_line(tmp + std::string(" = ") + (unsigned_from ? "uitofp " : "sitofp ") +
                     int_ir(from.integer_bit_width()) + " " + value + " to double");
+                return tmp;
             }
-            return tmp;
+            return value;
         }
         if (from.kind == TypeKind::Float || from.kind == TypeKind::Double) {
             const int to_bits = to.integer_bit_width();
-            if (to_bits > 0) {
-                const bool unsigned_to = to.is_unsigned_integer();
-                emit_line(tmp + std::string(" = ") + (unsigned_to ? "fptoui " : "fptosi ") +
-                    (from.kind == TypeKind::Float ? "float" : "double") + " " + value +
-                    " to " + int_ir(to_bits));
-            }
+            if (to_bits <= 0) return value;
+            const bool unsigned_to = to.is_unsigned_integer();
+            emit_line(tmp + std::string(" = ") + (unsigned_to ? "fptoui " : "fptosi ") +
+                (from.kind == TypeKind::Float ? "float" : "double") + " " + value +
+                " to " + int_ir(to_bits));
             return tmp;
         }
         const int from_bits = from.integer_bit_width();
@@ -2215,10 +2919,15 @@ namespace {
             }
             case TokenType::FloatLiteral: {
                 std::string text = std::string(expr->literal_token.lexeme);
+                bool single_precision = false;
                 if (!text.empty() && (text.back() == 'f' || text.back() == 'F')) {
                     text.pop_back();
+                    single_precision = true;
                 }
                 double d = std::strtod(text.c_str(), nullptr);
+                if (single_precision || resolved_type(expr).kind == TypeKind::Float) {
+                    d = static_cast<double>(static_cast<float>(d));
+                }
                 std::ostringstream fmt;
                 fmt.precision(17);
                 fmt << d;
@@ -2267,6 +2976,22 @@ namespace {
             if (local != nullptr) {
                 if (local->is_constant) {
                     out.type = local->type;
+                    if (!local->address.empty()) {
+                        out.address = local->address;
+                        if (local->type.kind == TypeKind::Array &&
+                            local->type.element_type) {
+                            out.value = new_temp("constdecay");
+                            emit_line(out.value + " = getelementptr " +
+                                llvm_type(local->type) + ", ptr " + local->address +
+                                ", i64 0, i64 0");
+                            return out;
+                        }
+                        out.is_lvalue = true;
+                        out.value = new_temp("constload");
+                        emit_line(out.value + " = load " + llvm_type(local->type) +
+                            ", ptr " + local->address);
+                        return out;
+                    }
                     if (local->constant_expr != nullptr) {
                         return gen_expr(const_cast<AST::Expression*>(local->constant_expr));
                     }
@@ -2380,6 +3105,7 @@ namespace {
                 return gen_expr(expr->paren_expr.get());
             }
             std::string temp = emit_alloca(llvm_type(operand_type), "copy_move_temp");
+            emit_line("store " + llvm_type(operand_type) + " zeroinitializer, ptr " + temp);
             switch (expr->copy_move_kind) {
             case AST::PrimaryExpression::CopyMoveKind::Copy:
                 emit_memberwise_copy(operand_type, temp, source_address, false);
@@ -2746,6 +3472,8 @@ namespace {
 
     void CodeGenerator::emit_lifecycle_body(AST::StructDefinition* def,
         LifecycleKind kind, const std::string& name) {
+        debug_subprogram_id_ = 0;
+        debug_location_valid_ = false;
         const AST::Type struct_type = AST::Type::make_struct(def->name);
         scopes_.clear();
         cleanup_scopes_.clear();
@@ -2806,10 +3534,12 @@ namespace {
         emitting_lifecycle_body_ = false;
 
         if (!current_block_terminated_) {
+            destroy_active_cleanup_scopes(0);
             emit_line("ret void");
         }
         flush_hoisted_allocas();
         emit_line("}");
+        discard_current_cleanup_scope();
         pop_scope();
         emitted_lifecycle_bodies_.insert(name);
     }
@@ -2959,6 +3689,28 @@ namespace {
             if (direct != nullptr) {
                 auto struct_it = struct_by_name_.find(direct->identifier);
                 if (struct_it != struct_by_name_.end() && struct_it->second != nullptr &&
+                    struct_it->second->constructor_names.empty() &&
+                    expr->arguments.empty()) {
+                    AST::StructDefinition* def = struct_it->second;
+                    AST::Type temp_type = AST::Type::make_struct(direct->identifier);
+                    std::string storage = emit_alloca(llvm_type(temp_type), "value_temp");
+                    std::string callee = function_reference("__sgc_ctor$" + def->name);
+                    if (!callee.empty()) {
+                        emit_line("call void " + callee + "(ptr " + storage + ")");
+                    }
+                    if (def->needs_destruction) {
+                        CleanupRecord record;
+                        record.type = temp_type;
+                        record.address = storage;
+                        statement_temporaries_.push_back(record);
+                    }
+                    out.type = temp_type;
+                    out.value = storage;
+                    out.address = storage;
+                    out.is_lvalue = true;
+                    return out;
+                }
+                if (struct_it != struct_by_name_.end() && struct_it->second != nullptr &&
                     !struct_it->second->constructor_names.empty()) {
                     AST::StructDefinition* def = struct_it->second;
                     AST::Type temp_type = AST::Type::make_struct(direct->identifier);
@@ -3049,10 +3801,13 @@ namespace {
                                 if (!object_address.empty()) address = object_address;
                             }
                             auto it = struct_by_name_.find(owner.struct_name);
-                            if (it != struct_by_name_.end() && it->second != nullptr &&
-                                !it->second->destructor_name.empty()) {
-                                std::string callee =
-                                    function_reference(it->second->destructor_name);
+                            if (it != struct_by_name_.end() && it->second != nullptr) {
+                                AST::StructDefinition* def = it->second;
+                                std::string symbol = def->destructor_name;
+                                if (symbol.empty()) {
+                                    symbol = "__sgc_dtor$" + def->name;
+                                }
+                                std::string callee = function_reference(symbol);
                                 if (!callee.empty() && !address.empty()) {
                                     emit_line("call void " + callee + "(ptr " + address + ")");
                                 }
@@ -3279,7 +4034,9 @@ namespace {
     }
 
     void CodeGenerator::emit_output_call(AST::PostfixExpression* call) {
-        for (auto& arg_expr : call->arguments) {
+        for (std::size_t arg_index = 0; arg_index < call->arguments.size();
+            ++arg_index) {
+            auto& arg_expr = call->arguments[arg_index];
             ExprValue arg = gen_expr(arg_expr.get());
             std::string owned = arg.owned_string;
             switch (arg.type.kind) {
@@ -3320,7 +4077,16 @@ namespace {
             case TypeKind::Function:
                 emit_line("call void @gallt_output_ptr(ptr " + arg.value + ")");
                 break;
+            case TypeKind::Void:
+            case TypeKind::Struct:
+            case TypeKind::File:
             default:
+                if (diagnostics_ != nullptr) {
+                    diagnostics_->report_error_template(call->location,
+                        ErrorCode::FunctionArgTypeMismatch,
+                        { std::to_string(arg_index + 1), "printable value",
+                          arg.type.to_string() });
+                }
                 break;
             }
             if (!owned.empty()) {

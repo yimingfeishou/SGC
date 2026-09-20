@@ -47,9 +47,16 @@ namespace gallt {
         std::unordered_set<std::string> null_pointers_;
         std::unordered_map<std::string, int> alias_group_;
         std::unordered_set<int> destructed_groups_;
+        std::string current_function_name_;
+        std::unordered_map<std::string, bool> function_returns_construct_;
+        std::vector<std::string> current_function_parameters_;
+        std::unordered_map<std::string, int> function_forwards_parameter_;
         int next_alias_group_ = 0;
 
+        bool resolve_pointer_origin(const AST::Expression* expr, int& group);
+
         void collect_structs();
+        void register_struct_definition(AST::StructDefinition* def);
         void validate_special_members();
         void check_copy_constructor_source(const StructInfo& info);
         void collect_declarations();
@@ -62,7 +69,6 @@ namespace gallt {
         void rewrite_top_level(AST::TopLevel* node);
         void rewrite_statement(AST::Statement* stmt);
         void track_pointer_source(const std::string& name, const AST::Expression* expr);
-        void collect_pointer_allocations(AST::Statement* stmt);
         void rewrite_declaration(AST::VariableDeclaration* decl,
             std::vector<std::unique_ptr<AST::Statement>>& insert_after);
         void rewrite_expression(AST::Expression* expr);

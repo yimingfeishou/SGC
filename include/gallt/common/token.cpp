@@ -70,11 +70,6 @@ namespace gallt {
         case TokenType::Keyword_From: return "from";
         case TokenType::Keyword_Null: return "null";
         case TokenType::Keyword_Heap: return "heap";
-        case TokenType::Keyword_Free: return "free";
-        case TokenType::Keyword_Input: return "input";
-        case TokenType::Keyword_Output: return "output";
-        case TokenType::Keyword_Size: return "size";
-        case TokenType::Keyword_Align: return "align";
         case TokenType::Keyword_Generics: return "generics";
         case TokenType::Keyword_Namespace: return "namespace";
         case TokenType::Keyword_Access: return "access";

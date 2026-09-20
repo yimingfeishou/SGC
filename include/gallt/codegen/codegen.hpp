@@ -19,7 +19,9 @@ namespace gallt {
             const std::unordered_map<const AST::PrimaryExpression*,
                 const AST::ExternDeclaration*>& resolved_externs = {},
             const std::unordered_map<const AST::Expression*,
-                AST::FunctionDefinition*>& resolved_operators = {});
+                AST::FunctionDefinition*>& resolved_operators = {},
+            DiagnosticEngine* diagnostics = nullptr,
+            int debug_symbols_level = 0);
 
         bool generate();
 
@@ -38,6 +40,20 @@ namespace gallt {
             resolved_externs_;
         const std::unordered_map<const AST::Expression*, AST::FunctionDefinition*>&
             resolved_operators_;
+        DiagnosticEngine* diagnostics_ = nullptr;
+        int debug_level_ = 0;
+        bool debug_location_valid_ = false;
+        SourceLocation debug_location_;
+        unsigned debug_next_id_ = 5;
+        unsigned debug_subprogram_id_ = 0;
+        unsigned debug_shared_subroutine_id_ = 0;
+        unsigned debug_expression_id_ = 0;
+        std::string debug_source_file_;
+        std::string debug_source_dir_;
+        std::vector<std::string> debug_metadata_;
+        std::unordered_map<std::string, unsigned> debug_type_ids_;
+        std::unordered_map<std::string, unsigned> debug_location_ids_;
+        std::unordered_map<std::string, unsigned> debug_subroutine_ids_;
         std::string ir_;
         std::vector<std::string> link_libraries_;
         std::vector<AST::StructDefinition*> struct_defs_;
@@ -60,6 +76,9 @@ namespace gallt {
         };
         std::vector<AST::VariableDeclaration*> global_vars_;
         std::vector<AST::VariableDeclaration*> const_globals_;
+        std::vector<AST::VariableDeclaration*> runtime_const_globals_;
+        std::vector<std::string> constant_aggregate_globals_;
+        unsigned constant_aggregate_counter_ = 0;
         std::unordered_map<std::string, ConstantNumeric> constant_values_;
         enum class LifecycleKind {
             Constructor,
@@ -116,6 +135,16 @@ namespace gallt {
         bool type_contains_string(const AST::Type& type);
 
         void emit_preamble();
+        void collect_debug_source_file();
+        unsigned next_debug_id();
+        unsigned debug_type_id(const AST::Type& type);
+        unsigned debug_subroutine_id(const AST::Type& return_type,
+            const std::vector<AST::Type>& parameters);
+        unsigned debug_location_id(const SourceLocation& location);
+        void begin_debug_function(AST::FunctionDefinition* func, std::string& suffix);
+        void emit_debug_local_variable(const std::string& name, const AST::Type& type,
+            const std::string& address, const SourceLocation& location);
+        void emit_debug_metadata();
         void emit_struct_types();
         void emit_string_constants();
         void emit_runtime_declarations();
@@ -154,6 +183,12 @@ namespace gallt {
         void emit_block(AST::Block* block, bool new_scope);
         void emit_variable_declaration(AST::VariableDeclaration* decl);
         bool fold_constant_declaration(AST::VariableDeclaration* decl, LocalInfo& info);
+        bool fold_constant_aggregate(AST::VariableDeclaration* decl, LocalInfo& info);
+        bool build_constant_initializer(const AST::Initializer* init,
+            const AST::Type& type, std::string& out);
+        bool build_constant_scalar(const AST::Expression* expr,
+            const AST::Type& type, std::string& out);
+        void emit_constant_aggregate_globals();
         void emit_expression_statement(AST::ExpressionStatement* stmt);
 
         std::vector<std::unordered_map<std::string, LocalInfo>> scopes_;
@@ -164,6 +199,7 @@ namespace gallt {
         void register_string_cleanup(const std::string& address, const AST::Type& type);
         void emit_destroy_string_at(const AST::Type& type, const std::string& address);
         void destroy_active_cleanup_scopes(std::size_t until_depth);
+        void discard_current_cleanup_scope();
 
         struct ExprValue {
             AST::Type type;      
@@ -178,8 +214,6 @@ namespace gallt {
         ExprValue emit_operator_invocation(AST::FunctionDefinition* callee,
             std::vector<AST::Expression*>& final_arguments, bool postfix_dummy,
             SourceLocation loc);
-        ExprValue gen_operator_argument(AST::Expression* expr, bool need_address,
-            const AST::Type& parameter_type);
         ExprValue gen_primary(AST::PrimaryExpression* expr);
         ExprValue gen_unary(AST::UnaryExpression* expr);
         ExprValue gen_postfix(AST::PostfixExpression* expr);
@@ -189,7 +223,6 @@ namespace gallt {
         std::string gen_address(AST::Expression* expr);
         std::string gen_pointer_value(AST::Expression* expr);
 
-        std::string load_string_address(const std::string& address);
         void emit_string_assign(const std::string& dest_address, const ExprValue& source);
         void emit_struct_brace_initialization(const std::string& address,
             const AST::Type& struct_type, AST::ArrayInitializer* init);
@@ -197,8 +230,6 @@ namespace gallt {
             const AST::Type& array_type, AST::ArrayInitializer* init);
         void emit_aggregate_assign(const std::string& dest_address,
             const AST::Type& dest_type, ExprValue& source, bool is_assignment = false);
-        void emit_deep_copy_string_members(const AST::Type& struct_type,
-            const std::string& dest_address, const std::string& src_address);
         void emit_memberwise_copy(const AST::Type& type, const std::string& dst,
             const std::string& src, bool is_assignment);
         void emit_memberwise_move(const AST::Type& type, const std::string& dst,
@@ -212,6 +243,9 @@ namespace gallt {
         std::string operand_address(AST::Expression* expr, AST::Type* out_type = nullptr);
         void collect_constructor_defaults(const std::string& ctor_name,
             std::vector<AST::Expression*>& args);
+        int default_constructor_index(const AST::StructDefinition* def);
+        bool emit_struct_default_constructor(const std::string& address,
+            const AST::StructDefinition* def, SourceLocation loc);
         void emit_struct_return(AST::Expression* expr, const AST::Type& type,
             const std::string& sret);
         bool is_struct_returning_call(AST::Expression* expr) const;
@@ -231,8 +265,6 @@ namespace gallt {
 
         std::size_t type_size(const AST::Type& type) const;
         std::size_t type_align(const AST::Type& type) const;
-        std::vector<std::pair<std::size_t, std::size_t>> struct_member_layout(
-            const AST::StructDefinition* def) const;
     };
 
 } 

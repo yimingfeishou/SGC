@@ -2,14 +2,11 @@
 #include "include/gallt/driver/compiler.hpp"
 #include <iostream>
 
-const std::string VERSION = "0.4.2-0918 Preview";
-const std::string BUILD_DATE = "2026-09-18";
+const std::string VERSION = "0.4.2-0919 Preview";
 
 int wmain(int argc, wchar_t* argv[]) {
     std::cout << "sgc Standard Gallt Compiler " << VERSION << "\n";
-    std::cout << "Gallt Lang Standard Version 26.09 (Preview)\n";
     std::cout << "Project repository address: https://github.com/yimingfeishou/SGC\n";
-    std::cout << "Build date: " << BUILD_DATE << "\n";
     std::cout << "Copyright (c) Yimingfeishou.\n\n";
     gallt::CommandOptions options;
     if (!gallt::parse_command_line(argc, argv, options)) {

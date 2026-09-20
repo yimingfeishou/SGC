@@ -145,14 +145,28 @@ void gallt_input_bool(unsigned char* p) {
 
 void gallt_input_string(gallt_string* p) {
     if (p == NULL) return;
-    char buffer[8192];
-    if (fgets(buffer, (int)sizeof(buffer), stdin) == NULL) buffer[0] = '\0';
-    buffer[sizeof(buffer) - 1] = '\0';
-    size_t len = strlen(buffer);
-    while (len > 0 && (buffer[len - 1] == '\n' || buffer[len - 1] == '\r')) {
-        buffer[--len] = '\0';
+    char* buffer = NULL;
+    size_t capacity = 0;
+    size_t len = 0;
+    int c = EOF;
+    for (;;) {
+        c = fgetc(stdin);
+        if (c == EOF || c == '\n') break;
+        if (len + 1 > capacity) {
+            size_t next = (capacity == 0) ? 128 : capacity * 2;
+            char* grown = (char*)realloc(buffer, next);
+            if (grown == NULL) break;
+            buffer = grown;
+            capacity = next;
+        }
+        buffer[len++] = (char)c;
     }
-    gallt_string replacement = gallt_string_from_bytes_impl(buffer, (int64_t)len);
+    while (len > 0 && (buffer[len - 1] == '\n' || buffer[len - 1] == '\r')) {
+        --len;
+    }
+    gallt_string replacement = gallt_string_from_bytes_impl(
+        buffer == NULL ? "" : buffer, (int64_t)len);
+    free(buffer);
     gallt_string_free_contents(p);
     *p = replacement;
 }
@@ -228,6 +242,7 @@ typedef void* gallt_file_slot;
 
 static gallt_file* gallt_file_registry = NULL;
 static int gallt_file_exit_registered = 0;
+static int gallt_file_last_error = 0;
 
 static void gallt_file_release_all(void) {
     gallt_file* h = gallt_file_registry;
@@ -305,44 +320,43 @@ static int gallt_valid_file_mode(const char* mode) {
 }
 
 void* gallt_file_open(const gallt_string* path, const gallt_string* mode) {
-    if (path == NULL || mode == NULL) return NULL;
+    if (path == NULL || mode == NULL) {
+        gallt_file_last_error = 9;
+        return NULL;
+    }
     char* path_cstr = gallt_cstr_from_string(path);
     char* mode_cstr = gallt_cstr_from_string(mode);
     if (path_cstr == NULL || mode_cstr == NULL) {
         free(path_cstr);
         free(mode_cstr);
+        gallt_file_last_error = 9;
         return NULL;
     }
     if (!gallt_valid_file_mode(mode_cstr)) {
         free(path_cstr);
         free(mode_cstr);
+        gallt_file_last_error = 9;
         return NULL;
     }
 
-    char open_mode[8];
-    size_t mi = 0;
-    while (mode_cstr[mi] != '\0' && mi + 1 < sizeof(open_mode)) {
-        open_mode[mi] = mode_cstr[mi];
-        ++mi;
-    }
-    open_mode[mi] = '\0';
-    if (strchr(open_mode, 'b') == NULL && mi + 1 < sizeof(open_mode)) {
-        open_mode[mi] = 'b';
-        open_mode[mi + 1] = '\0';
-    }
-    FILE* fp = fopen(path_cstr, open_mode);
+    FILE* fp = fopen(path_cstr, mode_cstr);
     free(path_cstr);
     free(mode_cstr);
-    if (fp == NULL) return NULL;
+    if (fp == NULL) {
+        gallt_file_last_error = gallt_errno_code();
+        return NULL;
+    }
     gallt_file* handle = (gallt_file*)calloc(1, sizeof(gallt_file));
     if (handle == NULL) {
         fclose(fp);
+        gallt_file_last_error = 9;
         return NULL;
     }
     gallt_file_slot* slot = (gallt_file_slot*)calloc(1, sizeof(gallt_file_slot));
     if (slot == NULL) {
         fclose(fp);
         free(handle);
+        gallt_file_last_error = 9;
         return NULL;
     }
     *slot = handle;
@@ -351,6 +365,7 @@ void* gallt_file_open(const gallt_string* path, const gallt_string* mode) {
     handle->eof = 0;
     handle->slot = slot;
     gallt_file_register(handle);
+    gallt_file_last_error = 0;
     return slot;
 }
 
@@ -551,12 +566,24 @@ int8_t gallt_file_eof(void* handle) {
     gallt_file* h = gallt_file_valid(handle);
     if (h == NULL) return 0;
     if (h->eof || feof(h->fp)) return 1;
-    return 0;
+    long position = ftell(h->fp);
+    if (position < 0) return 0;
+    if (fseek(h->fp, 0, SEEK_END) != 0) {
+        fseek(h->fp, position, SEEK_SET);
+        return 0;
+    }
+    long end = ftell(h->fp);
+    fseek(h->fp, position, SEEK_SET);
+    if (end < 0) return 0;
+    return position >= end ? 1 : 0;
 }
 
 int32_t gallt_file_error(void* slot) {
     gallt_file* h = gallt_file_deref(slot);
-    if (h == NULL || h->fp == NULL) return 1;
+    if (h == NULL || h->fp == NULL) {
+        if (slot == NULL) return gallt_file_last_error;
+        return 1;
+    }
     return h->error;
 }
 

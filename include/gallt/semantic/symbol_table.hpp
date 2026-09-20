@@ -6,6 +6,7 @@
 #include <string_view>
 #include <vector>
 #include <unordered_map>
+#include <unordered_set>
 #include <memory>
 #include <optional>
 
@@ -113,6 +114,10 @@ namespace gallt {
         Symbol* lookup_current(std::string_view name);
         const Symbol* lookup_current(std::string_view name) const;
 
+        bool was_declared(std::string_view name) const {
+            return declared_names_.count(std::string(name)) != 0;
+        }
+
         static const AST::StructDefinition::Member* lookup_struct_member(
             const AST::StructDefinition* struct_def, std::string_view member_name);
 
@@ -120,6 +125,7 @@ namespace gallt {
 
     private:
         std::vector<std::unique_ptr<Scope>> scopes_;
+        std::unordered_set<std::string> declared_names_;
     };
 
 
@@ -176,11 +182,13 @@ namespace gallt {
 
     inline bool SymbolTable::declare(const Symbol& sym) {
         if (scopes_.empty()) enter_scope();
+        declared_names_.insert(sym.name);
         return scopes_.back()->declare(sym);
     }
 
     inline bool SymbolTable::declare_overload(const Symbol& sym) {
         if (scopes_.empty()) enter_scope();
+        declared_names_.insert(sym.name);
         return scopes_.back()->declare_overload(sym);
     }
 

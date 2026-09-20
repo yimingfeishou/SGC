@@ -94,6 +94,98 @@ namespace gallt {
             return true;
         }
 
+        bool types_equal_modulo_const(const AST::Type& a, const AST::Type& b) {
+            if (a.kind != b.kind) return false;
+            switch (a.kind) {
+            case TypeKind::Array:
+                if (a.array_size.has_value() != b.array_size.has_value()) return false;
+                if (a.array_size.has_value() && *a.array_size != *b.array_size) return false;
+                if ((a.element_type == nullptr) != (b.element_type == nullptr)) return false;
+                return a.element_type
+                    ? types_equal_modulo_const(*a.element_type, *b.element_type)
+                    : true;
+            case TypeKind::Pointer:
+                if ((a.pointee_type == nullptr) != (b.pointee_type == nullptr)) return false;
+                return a.pointee_type
+                    ? types_equal_modulo_const(*a.pointee_type, *b.pointee_type)
+                    : true;
+            case TypeKind::Struct:
+                return a.struct_name == b.struct_name;
+            case TypeKind::Function:
+                if (a.parameter_types.size() != b.parameter_types.size()) return false;
+                for (std::size_t i = 0; i < a.parameter_types.size(); ++i) {
+                    if (!types_equal_modulo_const(a.parameter_types[i],
+                        b.parameter_types[i])) {
+                        return false;
+                    }
+                }
+                if ((a.return_type == nullptr) != (b.return_type == nullptr)) return false;
+                return a.return_type
+                    ? types_equal_modulo_const(*a.return_type, *b.return_type)
+                    : true;
+            default:
+                return true;
+            }
+        }
+
+        bool const_qualification_ok(const AST::Type& from, const AST::Type& to) {
+            if (from.kind != to.kind) return false;
+            if (from.is_const && !to.is_const) return false;
+            switch (from.kind) {
+            case TypeKind::Array:
+                if (from.element_type && to.element_type) {
+                    return const_qualification_ok(*from.element_type, *to.element_type);
+                }
+                return true;
+            case TypeKind::Pointer:
+                if (from.pointee_type && to.pointee_type) {
+                    return const_qualification_ok(*from.pointee_type, *to.pointee_type);
+                }
+                return true;
+            case TypeKind::Function:
+                if ((from.return_type == nullptr) != (to.return_type == nullptr)) {
+                    return false;
+                }
+                if (from.return_type && !const_qualification_ok(*from.return_type,
+                    *to.return_type)) {
+                    return false;
+                }
+                if (from.parameter_types.size() != to.parameter_types.size()) {
+                    return false;
+                }
+                for (std::size_t i = 0; i < from.parameter_types.size(); ++i) {
+                    if (!const_qualification_ok(from.parameter_types[i],
+                        to.parameter_types[i])) {
+                        return false;
+                    }
+                }
+                return true;
+            default:
+                return true;
+            }
+        }
+
+        void collect_struct_names_from_type(const AST::Type& type,
+            std::unordered_set<std::string>& out) {
+            switch (type.kind) {
+            case TypeKind::Struct:
+                if (!type.struct_name.empty()) out.insert(type.struct_name);
+                break;
+            case TypeKind::Pointer:
+                if (type.pointee_type) {
+                    collect_struct_names_from_type(*type.pointee_type, out);
+                }
+                break;
+            case TypeKind::Array:
+                if (type.element_type) {
+                    collect_struct_names_from_type(*type.element_type, out);
+                }
+                break;
+            default:
+                break;
+            }
+        }
+
     } 
 
     TypeChecker::TypeChecker(DiagnosticEngine& diag,
@@ -134,6 +226,19 @@ namespace gallt {
         }
 
         collect_operator_overloads();
+
+        for (auto& top : program->top_levels) {
+            if (auto* func = dynamic_cast<AST::FunctionDefinition*>(top.get())) {
+                collect_local_structs(func->body.get());
+            }
+            else if (auto* strct = dynamic_cast<AST::StructDefinition*>(top.get())) {
+                for (auto& member : strct->special_members) {
+                    if (member != nullptr && member->body != nullptr) {
+                        collect_local_structs(member->body.get());
+                    }
+                }
+            }
+        }
 
         for (auto& top : program->top_levels) {
             check_top_level(top.get());
@@ -441,7 +546,10 @@ namespace gallt {
                 }
             }
             AST::Type& mem_type = member.type;
-            if (mem_type.kind == TypeKind::Struct && mem_type.struct_name == node->name) {
+            std::vector<std::string> containment_visited;
+            containment_visited.push_back(node->name);
+            if (type_contains_struct_by_value(mem_type, node->name,
+                containment_visited)) {
                 report_error(member.location, ErrorCode::StructSelfRefNonPtr,
                     "struct cannot directly contain itself; use pointer");
             }
@@ -554,8 +662,9 @@ namespace gallt {
                 report_error(destruct_stmt->location, ErrorCode::FreeNonPointer,
                     "destruct requires a pointer, got '" + target_type.to_string() + "'");
             }
-           else if (!target_type.pointee_type ||
-               target_type.pointee_type->kind != TypeKind::Struct) {
+           else if (!is_null_literal_expr(destruct_stmt->target.get()) &&
+               (!target_type.pointee_type ||
+               target_type.pointee_type->kind != TypeKind::Struct)) {
                 diag_.report_error_template(destruct_stmt->location,
                     ErrorCode::DestructNonConstructed, std::vector<std::string>{});
            }
@@ -687,6 +796,28 @@ namespace gallt {
             }
         }
         if (decl->initializer) {
+            if (decl->type.kind == TypeKind::Struct) {
+                if (auto* arr_init =
+                    dynamic_cast<AST::ArrayInitializer*>(decl->initializer.get())) {
+                    if (arr_init->from_paren_call && arr_init->elements.size() == 1) {
+                        if (auto* element = dynamic_cast<AST::ExpressionInitializer*>(
+                            arr_init->elements[0].get())) {
+                            AST::Type element_type = check_expression(element->expr.get());
+                            if (element_type.kind == TypeKind::Pointer ||
+                                element_type.kind == TypeKind::Function) {
+                                auto conversion = std::make_unique<AST::PostfixExpression>(
+                                    decl->location, std::move(element->expr),
+                                    AST::PostfixExpression::Operator::Cast, nullptr,
+                                    std::vector<std::unique_ptr<AST::Expression>>{},
+                                    decl->type);
+                                decl->initializer =
+                                    std::make_unique<AST::ExpressionInitializer>(
+                                        decl->location, std::move(conversion));
+                            }
+                        }
+                    }
+                }
+            }
             if (auto* expr_init = dynamic_cast<AST::ExpressionInitializer*>(decl->initializer.get())) {
                 const AST::Type* saved_expected = expected_type_;
                 expected_type_ = &decl->type;
@@ -711,6 +842,15 @@ namespace gallt {
                         is_null = true;
                     }
                 }
+                bool const_drop_reported = false;
+                if (decl->type.kind == TypeKind::Pointer &&
+                    init_type.kind == TypeKind::Pointer &&
+                    decl->type.pointee_type && init_type.pointee_type &&
+                    !const_qualification_ok(*init_type.pointee_type,
+                        *decl->type.pointee_type) &&
+                    is_address_of_const_identifier(expr_init->expr.get())) {
+                    const_drop_reported = true;
+                }
                 if (decl->type.kind == TypeKind::Function &&
                     init_type.kind == TypeKind::Function &&
                     !function_signatures_match(decl->type, init_type)) {
@@ -723,13 +863,18 @@ namespace gallt {
                     decl->type.pointee_type && init_type.pointee_type &&
                     decl->type.pointee_type->kind != TypeKind::Void &&
                     init_type.pointee_type->kind != TypeKind::Void &&
-                    !(*decl->type.pointee_type == *init_type.pointee_type)) {
+                    !(types_equal_modulo_const(*decl->type.pointee_type,
+                        *init_type.pointee_type) &&
+                        const_qualification_ok(*init_type.pointee_type,
+                            *decl->type.pointee_type)) &&
+                    !const_drop_reported) {
                     report_error(decl->location, ErrorCode::PointerTypeMismatch,
                         "cannot initialize pointer '" + decl->name +
                         "' of type '" + decl->type.to_string() + "' with '" +
                         init_type.to_string() + "'");
                 }
-               else if (!is_null || decl->type.kind != TypeKind::Pointer) {
+               else if ((!is_null || decl->type.kind != TypeKind::Pointer) &&
+                   !const_drop_reported) {
                    if (!can_implicit_convert(init_type, decl->type)) {
                       if (is_null && decl->type.kind == TypeKind::File) {
                       }
@@ -991,7 +1136,7 @@ namespace gallt {
 
     void TypeChecker::check_expression_statement(AST::ExpressionStatement* expr_stmt) {
         if (expr_stmt->expr) {
-            check_expression(expr_stmt->expr.get());
+            check_expression(expr_stmt->expr.get(), true);
         }
     }
 
@@ -1071,11 +1216,14 @@ namespace gallt {
             }
         }
         if (op == "++" || op == "--") {
-            if (node->parameters[0].kind == TypeKind::Pointer &&
-                node->parameters[0].pointee_type != nullptr &&
-                is_custom_type(*node->parameters[0].pointee_type)) {
-                node->operator_postfix_dummy = node->parameters.size() == 2;
+            if (node->parameters[0].kind != TypeKind::Pointer ||
+                node->parameters[0].pointee_type == nullptr ||
+                !is_custom_type(*node->parameters[0].pointee_type)) {
+                report_error(node->location,
+                    ErrorCode::ModifyingOperatorFirstParameterNotPointer, op);
+                return false;
             }
+            node->operator_postfix_dummy = node->parameters.size() == 2;
         }
         if (op == "[]") {
             if (node->return_type.kind != TypeKind::Pointer) {
@@ -1145,40 +1293,80 @@ namespace gallt {
         if (it == operator_overloads_.end()) {
             return nullptr;
         }
-        AST::FunctionDefinition* best = nullptr;
-        int best_rank = -1;
-        bool ambiguous = false;
+        std::unordered_set<std::string> operand_structs;
+        for (const AST::Type& type : operand_types) {
+            collect_struct_names_from_type(type, operand_structs);
+        }
+
+        struct Candidate {
+            AST::FunctionDefinition* node = nullptr;
+            std::vector<int> ranks;
+        };
+        std::vector<Candidate> viable;
         for (AST::FunctionDefinition* candidate : it->second) {
             if (candidate->parameters.size() != operand_types.size()) {
                 continue;
             }
-            int total_rank = 0;
-            bool viable = true;
+            if (!operand_structs.empty()) {
+                std::unordered_set<std::string> declared_structs;
+                for (const AST::Type& parameter : candidate->parameters) {
+                    collect_struct_names_from_type(parameter, declared_structs);
+                }
+                bool associated = false;
+                for (const std::string& name : declared_structs) {
+                    if (operand_structs.count(name) != 0) {
+                        associated = true;
+                        break;
+                    }
+                }
+                if (!associated) continue;
+            }
+            Candidate entry;
+            entry.node = candidate;
+            bool ok = true;
             for (std::size_t i = 0; i < operand_types.size(); ++i) {
                 int rank = conversion_rank(operand_types[i], candidate->parameters[i]);
                 if (rank < 0) {
-                    viable = false;
+                    ok = false;
                     break;
                 }
-                total_rank += rank;
+                entry.ranks.push_back(rank);
             }
-            if (!viable) {
-                continue;
-            }
-            if (best == nullptr || total_rank < best_rank) {
-                best = candidate;
-                best_rank = total_rank;
-                ambiguous = false;
-            }
-            else if (total_rank == best_rank) {
-                ambiguous = true;
-            }
+            if (ok) viable.push_back(std::move(entry));
         }
-        if (ambiguous && best != nullptr) {
+        if (viable.empty()) {
+            return nullptr;
+        }
+
+        auto dominates = [](const std::vector<int>& a, const std::vector<int>& b) {
+            bool strictly_better = false;
+            for (std::size_t i = 0; i < a.size(); ++i) {
+                if (a[i] > b[i]) return false;
+                if (a[i] < b[i]) strictly_better = true;
+            }
+            return strictly_better;
+        };
+
+        std::vector<std::size_t> maximal;
+        for (std::size_t i = 0; i < viable.size(); ++i) {
+            bool dominated = false;
+            for (std::size_t j = 0; j < viable.size(); ++j) {
+                if (i == j) continue;
+                if (dominates(viable[j].ranks, viable[i].ranks)) {
+                    dominated = true;
+                    break;
+                }
+            }
+            if (!dominated) maximal.push_back(i);
+        }
+        if (maximal.empty()) {
+            return nullptr;
+        }
+        if (maximal.size() > 1) {
             report_error(loc, ErrorCode::OperatorOverloadAmbiguous, op);
             return nullptr;
         }
-        return best;
+        return viable[maximal.front()].node;
     }
 
     bool TypeChecker::try_user_defined_operator(AST::Expression* expr, AST::Type& out) {
@@ -1375,6 +1563,19 @@ namespace gallt {
         if (expr == nullptr) {
             return AST::Type::make_void();
         }
+        {
+            auto site = expression_call_sites_.find(expr);
+            if (site != expression_call_sites_.end() &&
+                site->second.kind == TypeKind::Void) {
+                if (!allow_void) {
+                    diag_.report_error_template(expr->location,
+                        ErrorCode::ExprParameterExpansionTypeError,
+                        { expression_display_name(expr), "void", "value" });
+                }
+                expression_types_[expr] = AST::Type::make_void();
+                return AST::Type::make_void();
+            }
+        }
         AST::Type operator_result;
         if (try_user_defined_operator(expr, operator_result)) {
             expression_types_[expr] = operator_result;
@@ -1454,11 +1655,22 @@ namespace gallt {
                 "array type does not support assignment");
             return left_type;
         }
-        if (left_type.kind == TypeKind::Pointer && right_type.kind == TypeKind::Pointer &&
+        const bool const_address_assignment =
+            left_type.kind == TypeKind::Pointer &&
+            right_type.kind == TypeKind::Pointer &&
+            left_type.pointee_type && right_type.pointee_type &&
+            !const_qualification_ok(*right_type.pointee_type,
+                *left_type.pointee_type) &&
+            is_address_of_const_identifier(expr->right.get());
+        if (!const_address_assignment &&
+            left_type.kind == TypeKind::Pointer && right_type.kind == TypeKind::Pointer &&
             left_type.pointee_type && right_type.pointee_type &&
             left_type.pointee_type->kind != TypeKind::Void &&
             right_type.pointee_type->kind != TypeKind::Void &&
-            !(*left_type.pointee_type == *right_type.pointee_type)) {
+            !(types_equal_modulo_const(*left_type.pointee_type,
+                *right_type.pointee_type) &&
+                const_qualification_ok(*right_type.pointee_type,
+                    *left_type.pointee_type))) {
             report_error(expr->location, ErrorCode::PointerTypeMismatch,
                 "cannot assign pointer type '" + right_type.to_string() +
                 "' to '" + left_type.to_string() + "'");
@@ -1497,7 +1709,7 @@ namespace gallt {
                 }
             }
         }
-        if (!ok) {
+        if (!ok && !const_address_assignment) {
             auto* target = dynamic_cast<AST::PrimaryExpression*>(expr->left.get());
             if (target != nullptr && target->kind == AST::PrimaryExpression::Kind::Identifier &&
                 target->identifier.rfind("__glt_expr", 0) == 0) {
@@ -1756,7 +1968,7 @@ namespace gallt {
             return AST::Type::make_void();
         }
         if (is_numeric_type(left) && is_numeric_type(right)) {
-            return left;
+            return usual_arithmetic_conversion(left, right);
         }
         else {
             report_error(expr->location, ErrorCode::BinaryOperatorTypeMismatch,
@@ -1834,9 +2046,6 @@ namespace gallt {
                     "' requires arithmetic type, got '" + operand.to_string() + "'");
                 return AST::Type::make_void();
             }
-            if (operand.is_integer()) {
-                return AST::Type::make_int();
-            }
             return operand;
         }
         case AST::UnaryExpression::Operator::AddressOf:
@@ -1861,6 +2070,11 @@ namespace gallt {
                 return AST::Type::make_void();
             }
             if (operand.pointee_type) {
+                if (operand.pointee_type->kind == TypeKind::Void) {
+                    report_error(expr->location, ErrorCode::DerefNonPointer,
+                        "dereference operator cannot be applied to 'void*'");
+                    return AST::Type::make_void();
+                }
                 return *operand.pointee_type;
             }
             else {
@@ -1923,13 +2137,19 @@ namespace gallt {
                 else if (base_type.kind == TypeKind::Array &&
                     base_type.array_size.has_value()) {
                     auto index_value =
-                        evaluate_const_integer_expression(expr->subscript_expr.get());
-                    if (index_value.has_value() &&
-                        static_cast<std::size_t>(*index_value) >= *base_type.array_size) {
-                        diag_.report_error_template(expr->subscript_expr->location,
-                            ErrorCode::SubscriptOutOfBounds,
-                            { std::to_string(*index_value),
-                              std::to_string(*base_type.array_size) });
+                        evaluate_signed_const_integer_expression(
+                            expr->subscript_expr.get());
+                    if (index_value.has_value()) {
+                        const bool negative = *index_value < 0;
+                        const bool too_large = !negative &&
+                            static_cast<std::size_t>(*index_value) >=
+                                *base_type.array_size;
+                        if (negative || too_large) {
+                            diag_.report_error_template(expr->subscript_expr->location,
+                                ErrorCode::SubscriptOutOfBounds,
+                                { std::to_string(*index_value),
+                                  std::to_string(*base_type.array_size) });
+                        }
                     }
                 }
             }
@@ -1967,8 +2187,20 @@ namespace gallt {
                 return check_file_builtin_call(expr, func_name);
             }
             if (func_name == "output") {
-                for (auto& arg : expr->arguments) {
-                    check_expression(arg.get());
+                for (std::size_t i = 0; i < expr->arguments.size(); ++i) {
+                    AST::Type arg_type = check_expression(expr->arguments[i].get());
+                    const bool printable = arg_type.is_arithmetic() ||
+                        arg_type.kind == TypeKind::Bool ||
+                        arg_type.kind == TypeKind::String ||
+                        arg_type.kind == TypeKind::Pointer ||
+                        arg_type.kind == TypeKind::Function ||
+                        arg_type.kind == TypeKind::Array;
+                    if (!printable) {
+                        diag_.report_error_template(expr->arguments[i]->location,
+                            ErrorCode::FunctionArgTypeMismatch,
+                            { std::to_string(i + 1), "printable value",
+                              arg_type.to_string() });
+                    }
                 }
                 return AST::Type::make_void();
             }
@@ -2037,6 +2269,21 @@ namespace gallt {
                         report_error(arg->location, ErrorCode::ExpressionSyntaxError,
                             "input cannot read directly into an array; use an element or pointer");
                     }
+                    else if (arg_type.kind != TypeKind::Int &&
+                        arg_type.kind != TypeKind::Uint &&
+                        arg_type.kind != TypeKind::Lint &&
+                        arg_type.kind != TypeKind::Luint &&
+                        arg_type.kind != TypeKind::Char &&
+                        arg_type.kind != TypeKind::Uchar &&
+                        arg_type.kind != TypeKind::Bool &&
+                        arg_type.kind != TypeKind::Float &&
+                        arg_type.kind != TypeKind::Double &&
+                        arg_type.kind != TypeKind::String) {
+                        diag_.report_error_template(arg->location,
+                            ErrorCode::FunctionArgTypeMismatch,
+                            { std::to_string(1), "input-compatible type",
+                              arg_type.to_string() });
+                    }
                     return AST::Type::make_void();
                 }
                 return AST::Type::make_int();
@@ -2052,6 +2299,26 @@ namespace gallt {
                         if (prim->kind == AST::PrimaryExpression::Kind::Null) is_null = true;
                     }
                     arg_is_null.push_back(is_null);
+                }
+                bool has_declared_constructor = false;
+                if (AST::StructDefinition* definition = get_struct_definition(func_name)) {
+                    for (const auto& member : definition->special_members) {
+                        if (member->kind ==
+                            AST::SpecialMemberFunction::Kind::Constructor) {
+                            has_declared_constructor = true;
+                        }
+                    }
+                }
+                if (!has_declared_constructor && arg_types.size() == 1 &&
+                    (arg_types[0].kind == TypeKind::Pointer ||
+                        arg_types[0].kind == TypeKind::Function)) {
+                    AST::Type converted_type = AST::Type::make_struct(func_name);
+                    expr->cast_type = converted_type;
+                    expr->base = std::move(expr->arguments[0]);
+                    expr->arguments.clear();
+                    expr->op = AST::PostfixExpression::Operator::Cast;
+                    expression_types_[expr] = converted_type;
+                    return converted_type;
                 }
                 Symbol* ctor = resolve_constructor_overload(func_name, arg_types, arg_is_null,
                     expr->location);
@@ -2196,6 +2463,10 @@ namespace gallt {
                 allowed = true;
             }
             else if (is_integer_type(base_type) && expr->cast_type.kind == TypeKind::Pointer) {
+                allowed = true;
+            }
+            else if (base_type.kind == TypeKind::Pointer ||
+                base_type.kind == TypeKind::Function) {
                 allowed = true;
             }
             else if (can_implicit_convert(base_type, expr->cast_type)) {
@@ -2494,6 +2765,10 @@ namespace gallt {
                     ErrorCode::ExprParameterFreeIdentifierUndefined,
                     { from_expression->second });
             }
+            else if (sym_table_.was_declared(expr->identifier)) {
+                diag_.report_error_template(expr->location,
+                    ErrorCode::IdentifierNotInScope, { expr->identifier });
+            }
             else {
                 report_error(expr->location, ErrorCode::UndefinedIdentifier,
                     "undefined identifier '" + expr->identifier + "'");
@@ -2628,13 +2903,30 @@ namespace gallt {
 
     bool TypeChecker::can_implicit_convert(const AST::Type& from, const AST::Type& to) {
         if (from == to) return true;
-        if (is_numeric_type(from) && is_numeric_type(to)) {
+        auto documented_lattice_rank = [](const AST::Type& type) -> int {
+            switch (type.kind) {
+            case TypeKind::Char: return 0;
+            case TypeKind::Uchar: return 1;
+            case TypeKind::Int: return 2;
+            case TypeKind::Uint: return 3;
+            case TypeKind::Lint: return 4;
+            case TypeKind::Luint: return 5;
+            case TypeKind::Float: return 6;
+            case TypeKind::Double: return 7;
+            default: return -1;
+            }
+        };
+        if (documented_lattice_rank(from) >= 0 &&
+            documented_lattice_rank(to) >= 0) {
             return true;
         }
+        if (to.kind == TypeKind::Bool && from.is_arithmetic()) return true;
+        if (from.kind == TypeKind::Bool && to.is_arithmetic()) return true;
         if (from.kind == TypeKind::Pointer && to.kind == TypeKind::Pointer) {
             if (from.pointee_type && from.pointee_type->kind == TypeKind::Void) return true;
             if (to.pointee_type && to.pointee_type->kind == TypeKind::Void) return true;
-            return from == to;
+            if (!const_qualification_ok(from, to)) return false;
+            return types_equal_modulo_const(from, to);
         }
         if (from.kind == TypeKind::Pointer && to.kind == TypeKind::Function) {
             if (from.pointee_type && from.pointee_type->kind == TypeKind::Void) return true;
@@ -2642,10 +2934,12 @@ namespace gallt {
         if (from.kind == TypeKind::Function && to.kind == TypeKind::Pointer) {
             if (to.pointee_type && to.pointee_type->kind == TypeKind::Void) return true;
         }
-        if (to.kind == TypeKind::Bool && from.is_integer()) return true;
         if (from.kind == TypeKind::Array && to.kind == TypeKind::Pointer) {
             if (from.element_type && to.pointee_type) {
-                return *from.element_type == *to.pointee_type;
+                if (!const_qualification_ok(*from.element_type, *to.pointee_type)) {
+                    return false;
+                }
+                return types_equal_modulo_const(*from.element_type, *to.pointee_type);
             }
         }
         return false;
@@ -2733,6 +3027,192 @@ namespace gallt {
             type.pointee_type->kind == TypeKind::File;
     }
 
+    void TypeChecker::collect_local_structs(AST::Statement* stmt) {
+        if (stmt == nullptr) return;
+        if (auto* def = dynamic_cast<AST::StructDefinition*>(stmt)) {
+            if (struct_defs_.find(def->name) == struct_defs_.end() &&
+                predeclared_structs_.find(def->name) == predeclared_structs_.end()) {
+                predeclared_structs_[def->name] = def;
+            }
+        }
+        if (auto* block = dynamic_cast<AST::Block*>(stmt)) {
+            for (auto& inner : block->statements) {
+                collect_local_structs(inner.get());
+            }
+            return;
+        }
+        if (auto* ifs = dynamic_cast<AST::IfStatement*>(stmt)) {
+            collect_local_structs(ifs->then_block.get());
+            if (ifs->else_block) collect_local_structs(ifs->else_block.get());
+            return;
+        }
+        if (auto* for_stmt = dynamic_cast<AST::ForStatement*>(stmt)) {
+            if (for_stmt->init) collect_local_structs(for_stmt->init.get());
+            if (for_stmt->body) collect_local_structs(for_stmt->body.get());
+            return;
+        }
+        if (auto* while_stmt = dynamic_cast<AST::WhileStatement*>(stmt)) {
+            if (while_stmt->body) collect_local_structs(while_stmt->body.get());
+            return;
+        }
+    }
+
+    bool TypeChecker::type_contains_struct_by_value(const AST::Type& type,
+        const std::string& target, std::vector<std::string>& visited) {
+        if (type.kind == TypeKind::Array) {
+            return type.element_type != nullptr &&
+                type_contains_struct_by_value(*type.element_type, target, visited);
+        }
+        if (type.kind != TypeKind::Struct) {
+            return false;
+        }
+        if (type.struct_name == target) {
+            return true;
+        }
+        if (std::find(visited.begin(), visited.end(), type.struct_name) != visited.end()) {
+            return false;
+        }
+        visited.push_back(type.struct_name);
+        AST::StructDefinition* def = get_struct_definition(type.struct_name);
+        if (def == nullptr) return false;
+        for (const auto& member : def->members) {
+            if (type_contains_struct_by_value(member.type, target, visited)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    std::size_t TypeChecker::type_size_of(const AST::Type& type) {
+        auto round_up = [](std::size_t value, std::size_t alignment) -> std::size_t {
+            if (alignment <= 1) return value;
+            return (value + alignment - 1) / alignment * alignment;
+        };
+        switch (type.kind) {
+        case TypeKind::Int:
+        case TypeKind::Uint:
+        case TypeKind::Float:
+            return 4;
+        case TypeKind::Lint:
+        case TypeKind::Luint:
+        case TypeKind::Double:
+            return 8;
+        case TypeKind::Char:
+        case TypeKind::Uchar:
+        case TypeKind::Bool:
+            return 1;
+        case TypeKind::String:
+            return 32;
+        case TypeKind::File:
+            return 8;
+        case TypeKind::Pointer:
+        case TypeKind::Function:
+            return 8;
+        case TypeKind::Void:
+            return 0;
+        case TypeKind::Array:
+            return type.array_size.value_or(0) *
+                (type.element_type ? type_size_of(*type.element_type) : 0u);
+        case TypeKind::Struct: {
+            if (layout_depth_ > 64) return 0;
+            struct DepthGuard {
+                int& depth;
+                explicit DepthGuard(int& d) : depth(d) { ++depth; }
+                ~DepthGuard() { --depth; }
+            } guard(layout_depth_);
+            AST::StructDefinition* def = get_struct_definition(type.struct_name);
+            if (def == nullptr) return 0;
+            std::size_t offset = 0;
+            std::size_t alignment = 1;
+            for (const auto& member : def->members) {
+                const std::size_t member_align = type_align_of(member.type);
+                if (member_align > alignment) alignment = member_align;
+                offset = round_up(offset, member_align);
+                offset += type_size_of(member.type);
+            }
+            return round_up(offset, alignment);
+        }
+        }
+        return 0;
+    }
+
+    std::size_t TypeChecker::type_align_of(const AST::Type& type) {
+        switch (type.kind) {
+        case TypeKind::Int:
+        case TypeKind::Uint:
+        case TypeKind::Float:
+            return 4;
+        case TypeKind::Lint:
+        case TypeKind::Luint:
+        case TypeKind::Double:
+            return 8;
+        case TypeKind::Char:
+        case TypeKind::Uchar:
+        case TypeKind::Bool:
+            return 1;
+        case TypeKind::String:
+            return 8;
+        case TypeKind::File:
+            return 8;
+        case TypeKind::Pointer:
+        case TypeKind::Function:
+            return 8;
+        case TypeKind::Void:
+            return 1;
+        case TypeKind::Array:
+            return type.element_type ? type_align_of(*type.element_type) : 1u;
+        case TypeKind::Struct: {
+            if (layout_depth_ > 64) return 1;
+            struct DepthGuard {
+                int& depth;
+                explicit DepthGuard(int& d) : depth(d) { ++depth; }
+                ~DepthGuard() { --depth; }
+            } guard(layout_depth_);
+            std::size_t alignment = 1;
+            AST::StructDefinition* def = get_struct_definition(type.struct_name);
+            if (def == nullptr) return alignment;
+            for (const auto& member : def->members) {
+                const std::size_t member_align = type_align_of(member.type);
+                if (member_align > alignment) alignment = member_align;
+            }
+            return alignment;
+        }
+        }
+        return 1;
+    }
+
+    bool TypeChecker::type_layout_of_name(const std::string& name, std::size_t& size,
+        std::size_t& align) {
+        AST::Type named;
+        if (name == "int" || name == "uint" || name == "float") {
+            named = AST::Type::make_int();
+            if (name == "uint") named = AST::Type::make_uint();
+            else if (name == "float") named = AST::Type::make_float();
+        }
+        else if (name == "lint") named = AST::Type::make_lint();
+        else if (name == "luint") named = AST::Type::make_luint();
+        else if (name == "double") named = AST::Type::make_double();
+        else if (name == "char") named = AST::Type::make_char();
+        else if (name == "uchar") named = AST::Type::make_uchar();
+        else if (name == "bool") named = AST::Type::make_bool();
+        else if (name == "string") named = AST::Type::make_string();
+        else if (name == "file") named = AST::Type::make_file();
+        else if (name == "void") named = AST::Type::make_void();
+        else if (struct_defs_.find(name) != struct_defs_.end()) {
+            named = AST::Type::make_struct(name);
+        }
+        else {
+            const Symbol* symbol = sym_table_.lookup(name);
+            if (symbol == nullptr || symbol->kind == SymbolKind::Function) {
+                return false;
+            }
+            named = symbol->type;
+        }
+        size = type_size_of(named);
+        align = type_align_of(named);
+        return size > 0;
+    }
+
     bool TypeChecker::is_complete_type(const AST::Type& type) {
         if (type.kind == TypeKind::Void) return true;
         if (type.kind == TypeKind::Int || type.kind == TypeKind::Lint ||
@@ -2754,7 +3234,9 @@ namespace gallt {
         }
         if (type.kind == TypeKind::Struct) {
             auto it = struct_defs_.find(type.struct_name);
-            return it != struct_defs_.end();
+            if (it != struct_defs_.end()) return true;
+            return predeclared_structs_.find(type.struct_name) !=
+                predeclared_structs_.end();
         }
         if (type.kind == TypeKind::Function) {
             if (type.return_type && !is_complete_type(*type.return_type) && type.return_type->kind != TypeKind::Void) {
@@ -2772,7 +3254,9 @@ namespace gallt {
 
     AST::StructDefinition* TypeChecker::get_struct_definition(const std::string& name) const {
         auto it = struct_defs_.find(name);
-        return (it != struct_defs_.end()) ? it->second : nullptr;
+        if (it != struct_defs_.end()) return it->second;
+        auto predeclared = predeclared_structs_.find(name);
+        return (predeclared != predeclared_structs_.end()) ? predeclared->second : nullptr;
     }
 
     const AST::StructDefinition::Member* TypeChecker::get_struct_member(const AST::Type& struct_type,
@@ -2971,6 +3455,10 @@ namespace gallt {
         AST::Expression* expr) {
         if (expr == nullptr) return std::nullopt;
         ConstantEvaluationContext ctx;
+        ctx.type_layout = [this](const std::string& type_name, std::size_t& size,
+            std::size_t& align) {
+            return type_layout_of_name(type_name, size, align);
+        };
         ctx.lookup_constant = [this](const std::string& name, long long& int_value,
             double& float_value, bool& is_float) {
             for (auto it = const_values_.rbegin(); it != const_values_.rend(); ++it) {
@@ -2999,10 +3487,49 @@ namespace gallt {
         return int_value;
     }
 
+    std::optional<long long> TypeChecker::evaluate_signed_const_integer_expression(
+        AST::Expression* expr) {
+        if (expr == nullptr) return std::nullopt;
+        ConstantEvaluationContext ctx;
+        ctx.type_layout = [this](const std::string& type_name, std::size_t& size,
+            std::size_t& align) {
+            return type_layout_of_name(type_name, size, align);
+        };
+        ctx.lookup_constant = [this](const std::string& name, long long& int_value,
+            double& float_value, bool& is_float) {
+            for (auto it = const_values_.rbegin(); it != const_values_.rend(); ++it) {
+                auto found = it->find(name);
+                if (found != it->end()) {
+                    int_value = found->second.int_value;
+                    float_value = found->second.float_value;
+                    is_float = found->second.is_float;
+                    return true;
+                }
+            }
+            return false;
+        };
+        long long int_value = 0;
+        double float_value = 0.0;
+        bool is_float = false;
+        if (!evaluate_constant_expression(expr, int_value, float_value, is_float, ctx)) {
+            return std::nullopt;
+        }
+        if (is_float) {
+            const auto truncated = static_cast<long long>(float_value);
+            if (static_cast<double>(truncated) != float_value) return std::nullopt;
+            int_value = truncated;
+        }
+        return int_value;
+    }
+
     void TypeChecker::record_const_value(const std::string& name, AST::Expression* initializer,
         const AST::Type& type) {
         if (!type.is_integer() && !type.is_floating()) return;
         ConstantEvaluationContext ctx;
+        ctx.type_layout = [this](const std::string& type_name, std::size_t& size,
+            std::size_t& align) {
+            return type_layout_of_name(type_name, size, align);
+        };
         ctx.lookup_constant = [this](const std::string& lookup, long long& int_value,
             double& float_value, bool& is_float) {
             for (auto it = const_values_.rbegin(); it != const_values_.rend(); ++it) {
@@ -3074,6 +3601,22 @@ namespace gallt {
             }
         }
         return "<expression>";
+    }
+
+    bool TypeChecker::is_address_of_const_identifier(const AST::Expression* expr) {
+        auto* unary = dynamic_cast<const AST::UnaryExpression*>(expr);
+        if (unary == nullptr ||
+            unary->op != AST::UnaryExpression::Operator::AddressOf) {
+            return false;
+        }
+        auto* target = dynamic_cast<const AST::PrimaryExpression*>(unary->operand.get());
+        if (target == nullptr ||
+            target->kind != AST::PrimaryExpression::Kind::Identifier) {
+            return false;
+        }
+        const Symbol* symbol = sym_table_.lookup(target->identifier);
+        return symbol != nullptr && symbol->kind != SymbolKind::Function &&
+            symbol->type.is_const;
     }
 
     bool TypeChecker::is_compile_time_constant_expression(AST::Expression* expr) {
@@ -3152,8 +3695,20 @@ namespace gallt {
                 if (callee->identifier != "size" && callee->identifier != "align") {
                     return false;
                 }
-                return post->arguments.size() == 1 &&
-                    is_compile_time_constant_expression(post->arguments[0].get());
+                if (post->arguments.size() != 1) {
+                    return false;
+                }
+                if (auto* prim_arg = dynamic_cast<PrimaryExpression*>(
+                    post->arguments[0].get())) {
+                    if (prim_arg->kind == PrimaryExpression::Kind::Identifier) {
+                        std::size_t size = 0;
+                        std::size_t align = 0;
+                        if (type_layout_of_name(prim_arg->identifier, size, align)) {
+                            return true;
+                        }
+                    }
+                }
+                return is_compile_time_constant_expression(post->arguments[0].get());
             }
             default:
                 return false;
@@ -3565,10 +4120,12 @@ namespace gallt {
         };
         if (from == to) return 0;
         if (from.kind == TypeKind::Pointer && to.kind == TypeKind::Pointer) {
-            if (from.pointee_type && to.pointee_type && *from.pointee_type == *to.pointee_type) {
+            if (from.pointee_type && to.pointee_type &&
+                types_equal_modulo_const(*from.pointee_type, *to.pointee_type) &&
+                const_qualification_ok(from, to)) {
                 return kExact;
             }
-            return kConversion;
+            return can_implicit_convert(from, to) ? kConversion : -1;
         }
         const int from_pos = arithmetic_position(from);
         const int to_pos = arithmetic_position(to);

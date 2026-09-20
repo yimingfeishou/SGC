@@ -66,11 +66,6 @@ namespace gallt {
 
         char parse_escape_sequence(std::size_t& pos, SourceLocation loc, bool is_char);
 
-        std::string_view parse_number();
-
-        std::optional<int> parse_hex_digit(char c) const;
-        std::optional<int> parse_octal_digit(char c) const;
-
         bool validate_line_endings();
         bool validate_utf8();
     };

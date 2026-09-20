@@ -116,7 +116,8 @@ namespace gallt {
         }
         if (dynamic_cast<const CondDefinition*>(stmt) != nullptr ||
             dynamic_cast<const UncondDefinition*>(stmt) != nullptr ||
-            dynamic_cast<const ConditionalBlock*>(stmt) != nullptr) {
+            dynamic_cast<const ConditionalBlock*>(stmt) != nullptr ||
+            dynamic_cast<const TopLevelBlock*>(stmt) != nullptr) {
             bad_loc = stmt->location;
             code = ErrorCode::ExprParameterBlockDisallowedConstruct;
             detail = "condition";
@@ -807,6 +808,12 @@ namespace gallt {
                 std::vector<std::string>{ name });
             return nullptr;
         }
+        ExpressionCallSite call_site;
+        call_site.name = name;
+        call_site.declared_return_type = binding.return_type;
+        call_site.declared_parameter_types = binding.parameter_types;
+        call_site.location = loc;
+        call_site.depth = expression_expansion_depth_;
         if (void_result) {
             for (auto& stmt : emitted) {
                 pending_hoisted_->push_back(std::move(stmt));
@@ -815,7 +822,9 @@ namespace gallt {
             lexeme_pool_.push_back("0");
             Token placeholder(TokenType::IntegerLiteral, loc,
                 std::string_view(lexeme_pool_.back()));
-            return std::make_unique<PrimaryExpression>(loc, placeholder);
+            auto node = std::make_unique<PrimaryExpression>(loc, placeholder);
+            expression_call_sites_[node.get()] = call_site;
+            return node;
         }
         auto declaration = std::make_unique<VariableDeclaration>(loc,
             binding.return_type, temp_name, std::nullopt, std::nullopt, nullptr);
@@ -824,7 +833,9 @@ namespace gallt {
             pending_hoisted_->push_back(std::move(stmt));
         }
         ok = true;
-        return std::make_unique<PrimaryExpression>(loc, temp_name);
+        auto node = std::make_unique<PrimaryExpression>(loc, temp_name);
+        expression_call_sites_[node.get()] = call_site;
+        return node;
     }
 
     bool GenericExpander::substitute_type(const Type& in, const Substitution& sub, Type& out) {
@@ -1791,7 +1802,10 @@ namespace gallt {
                         binding.target = mangled;
                         binding.is_type = false;
                         binding.instance = instance_key;
-                        register_short_name(fd->name, binding, ref.generic_name, fd->location);
+                        if (!fd->is_operator) {
+                            register_short_name(fd->name, binding, ref.generic_name,
+                                fd->location);
+                        }
                     }
                     if (!member_name.empty() && first_target.empty()) {
                         first_target = mangled;
@@ -1884,7 +1898,10 @@ namespace gallt {
             for (const auto& element : arr_init->elements) {
                 elements.push_back(clone_initializer(element.get(), sub));
             }
-            return std::make_unique<ArrayInitializer>(init->location, std::move(elements));
+            auto clone = std::make_unique<ArrayInitializer>(init->location,
+                std::move(elements));
+            clone->from_paren_call = arr_init->from_paren_call;
+            return clone;
         }
         return nullptr;
     }
@@ -2419,6 +2436,24 @@ namespace gallt {
             return clone;
         }
         if (auto* s = dynamic_cast<const IfStatement*>(stmt)) {
+            bool compile_time = false;
+            bool taken = false;
+            if (eval_compile_time_condition(s->condition.get(), sub, taken)) {
+                compile_time = true;
+            }
+            if (compile_time) {
+                const Statement* branch = taken ? s->then_block.get() : s->else_block.get();
+                if (branch == nullptr) {
+                    return std::make_unique<Block>(s->location,
+                        std::vector<std::unique_ptr<Statement>>{});
+                }
+                if (dynamic_cast<const Block*>(branch) != nullptr) {
+                    return clone_substatement(branch, sub);
+                }
+                std::vector<std::unique_ptr<Statement>> wrapped;
+                wrapped.push_back(clone_substatement(branch, sub));
+                return std::make_unique<Block>(s->location, std::move(wrapped));
+            }
             return std::make_unique<IfStatement>(s->location,
                 clone_expression(s->condition.get(), sub),
                 clone_substatement(s->then_block.get(), sub),
@@ -2498,6 +2533,17 @@ namespace gallt {
         }
         auto clone = std::make_unique<FunctionDefinition>(func->location, std::move(ret), name,
             params, func->param_names, clone_statement(func->body.get(), body_sub));
+        clone->is_operator = func->is_operator;
+        clone->overloaded_operator = func->overloaded_operator;
+        clone->is_conversion_operator = func->is_conversion_operator;
+        if (func->is_conversion_operator) {
+            Type target = Type::make_void();
+            substitute_type(func->conversion_target_type, sub, target);
+            clone->conversion_target_type = std::move(target);
+        }
+        else {
+            clone->conversion_target_type = func->conversion_target_type;
+        }
         clone->param_defaults.reserve(func->param_defaults.size());
         for (const auto& default_value : func->param_defaults) {
             if (default_value == nullptr) {
@@ -2773,14 +2819,36 @@ namespace gallt {
     bool GenericExpander::property_convertible(const AST::Type& from,
         const AST::Type& to) const {
         if (from == to) return true;
-        auto numeric = [](const AST::Type& t) {
-            return t.kind == TypeKind::Int || t.kind == TypeKind::Char ||
-                t.kind == TypeKind::Bool || t.kind == TypeKind::Float ||
-                t.kind == TypeKind::Double;
+        auto arithmetic_rank = [](const AST::Type& t) -> int {
+            switch (t.kind) {
+            case TypeKind::Bool: return 0;
+            case TypeKind::Char: return 0;
+            case TypeKind::Uchar: return 1;
+            case TypeKind::Int: return 2;
+            case TypeKind::Uint: return 3;
+            case TypeKind::Lint: return 4;
+            case TypeKind::Luint: return 5;
+            case TypeKind::Float: return 6;
+            case TypeKind::Double: return 7;
+            default: return -1;
+            }
         };
-        if (numeric(from) && numeric(to)) return true;
-        if (from.kind == TypeKind::Pointer && to.kind == TypeKind::Pointer) return true;
-        if (from.kind == TypeKind::Array && to.kind == TypeKind::Pointer) return true;
+        if (arithmetic_rank(from) >= 0 && arithmetic_rank(to) >= 0) return true;
+        if (to.kind == TypeKind::Bool && from.is_integer()) return true;
+        if (from.kind == TypeKind::Pointer && to.kind == TypeKind::Pointer) {
+            if (from.pointee_type && from.pointee_type->kind == TypeKind::Void) {
+                return true;
+            }
+            if (to.pointee_type && to.pointee_type->kind == TypeKind::Void) {
+                return true;
+            }
+            return from == to;
+        }
+        if (from.kind == TypeKind::Array && to.kind == TypeKind::Pointer) {
+            if (!from.element_type || !to.pointee_type) return false;
+            if (to.pointee_type->kind == TypeKind::Void) return true;
+            return *from.element_type == *to.pointee_type;
+        }
         return false;
     }
 
@@ -2791,12 +2859,50 @@ namespace gallt {
         if (!param_type_of(parameter, sub, type)) return false;
         std::size_t size = 0;
         std::size_t align = 0;
-        std::string name = type.to_string();
-        if (!resolve_type_layout(name, size, align, sub)) {
-            if (!resolve_type_layout(type.struct_name, size, align, sub)) return false;
+        if (!layout_of_composite_type(type, size, align, sub) &&
+            !resolve_type_layout(type.to_string(), size, align, sub) &&
+            !resolve_type_layout(type.struct_name, size, align, sub)) {
+            return false;
         }
         out = static_cast<long long>(want_align ? align : size);
         return true;
+    }
+
+    bool GenericExpander::layout_of_composite_type(const AST::Type& type,
+        std::size_t& size, std::size_t& align, const Substitution& sub) const {
+        switch (type.kind) {
+        case TypeKind::Int:
+        case TypeKind::Uint:
+        case TypeKind::Float:
+            size = 4; align = 4; return true;
+        case TypeKind::Lint:
+        case TypeKind::Luint:
+        case TypeKind::Double:
+            size = 8; align = 8; return true;
+        case TypeKind::Char:
+        case TypeKind::Uchar:
+        case TypeKind::Bool:
+            size = 1; align = 1; return true;
+        case TypeKind::String:
+            size = 32; align = 8; return true;
+        case TypeKind::File:
+            size = 8; align = 8; return true;
+        case TypeKind::Pointer:
+        case TypeKind::Function:
+            size = 8; align = 8; return true;
+        case TypeKind::Void:
+            size = 0; align = 1; return true;
+        case TypeKind::Array:
+            if (!type.element_type) return false;
+            if (!layout_of_composite_type(*type.element_type, size, align, sub)) {
+                return false;
+            }
+            size *= type.array_size.value_or(0);
+            return true;
+        case TypeKind::Struct:
+            return resolve_type_layout(type.struct_name, size, align, sub);
+        }
+        return false;
     }
 
     bool GenericExpander::eval_bool_property(const Expression* receiver,
@@ -2881,7 +2987,9 @@ namespace gallt {
         }
         if (property == "is_integer") {
             out = type.kind == TypeKind::Int || type.kind == TypeKind::Lint ||
-                type.kind == TypeKind::Uint || type.kind == TypeKind::Luint;
+                type.kind == TypeKind::Uint || type.kind == TypeKind::Luint ||
+                type.kind == TypeKind::Char || type.kind == TypeKind::Uchar ||
+                type.kind == TypeKind::Bool;
             return true;
         }
         if (property == "is_float") return matches(TypeKind::Float);

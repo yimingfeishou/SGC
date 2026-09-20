@@ -126,7 +126,6 @@ namespace gallt {
 
         void collect_generics();
         void collect_declarations();
-        void expand_top_levels();
         void expand_top_level(AST::TopLevel* node);
         void expand_statement(AST::Statement* stmt);
         void expand_expression(std::unique_ptr<AST::Expression>& expr);
@@ -192,6 +191,8 @@ namespace gallt {
             ConstantValue& out);
         bool resolve_type_layout(const std::string& type_name, std::size_t& size,
             std::size_t& align, const Substitution& sub) const;
+        bool layout_of_composite_type(const AST::Type& type, std::size_t& size,
+            std::size_t& align, const Substitution& sub) const;
         std::unique_ptr<AST::Expression> make_typed_constant_literal(SourceLocation loc,
             const ConstantValue& value, const AST::Type& type);
 
@@ -237,26 +238,6 @@ namespace gallt {
 
         static std::string signature_text(const std::vector<AST::Type>& types);
         static constexpr int kMaxExpressionExpansionDepth = 64;
-        std::unique_ptr<AST::Expression> expand_expression_body(
-            const AST::FunctionDefinition* owner, const Substitution& sub,
-            const Substitution::ExpressionBinding& binding,
-            const std::unordered_map<std::string, const AST::Expression*>& parameter_arguments,
-            const std::unordered_map<std::string, AST::Type>& parameter_types,
-            const std::unordered_set<std::string>& locals);
-        std::unique_ptr<AST::Expression> substitute_expression_with_bindings(
-            const AST::Expression* expr, const Substitution& sub,
-            const std::unordered_map<std::string, const AST::Expression*>& parameter_arguments,
-            const std::unordered_map<std::string, AST::Type>& parameter_types,
-            const std::unordered_map<std::string, const AST::Expression*>& local_values,
-            const std::unordered_set<std::string>& locals);
-        bool expand_statement_sequence(
-            const std::vector<std::unique_ptr<AST::Statement>>& statements,
-            const Substitution& sub,
-            const std::unordered_map<std::string, const AST::Expression*>& parameter_arguments,
-            const std::unordered_map<std::string, AST::Type>& parameter_types,
-            const std::unordered_set<std::string>& locals,
-            std::unordered_map<std::string, const AST::Expression*>& local_values,
-            std::unique_ptr<AST::Expression>& out, SourceLocation& out_loc);
         bool validate_expression_body(const AST::GenericParameter& param,
             const Substitution::ExpressionBinding& binding, SourceLocation loc);
         bool statement_is_allowed_in_expression_body(const AST::Statement* stmt,
