@@ -44,7 +44,7 @@ sgc --version
 - 当前为早期预览版本，部分语法和边缘情况可能仍有问题。
 - 临时后端文件默认写入 `%TEMP%`。设置 `SGC_KEEP_TEMP=1` 可保留生成的 `.ll` 与 `.c` 文件。
 - 输出文件未指定扩展名时，会自动追加 `.exe`。
-- SGC 预计将在 0.5.x-0.6.x 版本之后完成对 Linux 版本的基本适配，适配后的 Linux 版本可能比 Windows 版本落后 1-3 个构建，敬请谅解。
+- SGC 预计将在 0.5.x-0.6.x 版本之后完成对 Linux 版本的基本适配。
 
 ---
 
@@ -92,4 +92,4 @@ sgc --version
 - This is an early preview release. Some syntax and edge cases may still be incomplete or incorrect.
 - Temporary backend files are written to `%TEMP%` by default. Set `SGC_KEEP_TEMP=1` to keep the generated `.ll` and `.c` files.
 - If no extension is specified for the output file, `.exe` is appended automatically.
-- SGC is expected to complete the basic adaptation for the Linux version after versions 0.5.x-0.6.x. The adapted Linux version may lag 1-3 builds behind the Windows version. We appreciate your understanding.
+- SGC is expected to complete the basic adaptation for the Linux version after versions 0.5.x-0.6.x.
