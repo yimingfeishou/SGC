@@ -182,7 +182,7 @@ namespace gallt {
                         if (!decode_char_literal(tok.lexeme, value)) return Value{};
                         return make_int(value);
                     }
-                    return Value{};   
+                    return Value{};
                 }
                 case PrimaryExpression::Kind::Identifier: {
                     if (ctx.lookup_constant) {
@@ -211,6 +211,9 @@ namespace gallt {
                 case UnaryExpression::Operator::LogicalNot:
                     return make_int((operand.is_float ? (operand.float_value == 0.0)
                                                       : (operand.int_value == 0)) ? 1 : 0);
+                case UnaryExpression::Operator::BitwiseNot:
+                    if (operand.is_float) return Value{};
+                    return make_int(~operand.int_value);
                 default:
                     return Value{};
                 }
@@ -315,6 +318,40 @@ namespace gallt {
                 }
                 return Value{};
             }
+            if (auto* bit = dynamic_cast<const BitwiseExpression*>(expr)) {
+                Value l = evaluate(bit->left.get(), ctx);
+                Value r = evaluate(bit->right.get(), ctx);
+                if (!l.valid || !r.valid) return Value{};
+                if (l.is_float || r.is_float) return Value{};
+                switch (bit->op) {
+                case BitwiseExpression::Operator::And:
+                    return make_int(l.int_value & r.int_value);
+                case BitwiseExpression::Operator::Xor:
+                    return make_int(l.int_value ^ r.int_value);
+                case BitwiseExpression::Operator::Or:
+                    return make_int(l.int_value | r.int_value);
+                }
+                return Value{};
+            }
+            if (auto* shift = dynamic_cast<const ShiftExpression*>(expr)) {
+                Value l = evaluate(shift->left.get(), ctx);
+                Value r = evaluate(shift->right.get(), ctx);
+                if (!l.valid || !r.valid) return Value{};
+                if (l.is_float || r.is_float) return Value{};
+                if (r.int_value < 0 || r.int_value >= 64) return Value{};
+                if (shift->op == ShiftExpression::Operator::Left) {
+                    return make_int(l.int_value << r.int_value);
+                }
+                return make_int(l.int_value >> r.int_value);
+            }
+            if (auto* cond = dynamic_cast<const ConditionalExpression*>(expr)) {
+                Value condition = evaluate(cond->condition.get(), ctx);
+                if (!condition.valid) return Value{};
+                const bool taken = condition.is_float
+                    ? (condition.float_value != 0.0)
+                    : (condition.int_value != 0);
+                return evaluate(taken ? cond->then_expr.get() : cond->else_expr.get(), ctx);
+            }
             if (auto* land = dynamic_cast<const LogicalAndExpression*>(expr)) {
                 Value l = evaluate(land->left.get(), ctx);
                 Value r = evaluate(land->right.get(), ctx);
@@ -333,7 +370,7 @@ namespace gallt {
             }
             return Value{};
         }
-    } 
+    }
 
     bool evaluate_constant_expression(const AST::Expression* expr, long long& int_out,
         double& float_out, bool& is_float_out, const ConstantEvaluationContext& context) {
@@ -350,4 +387,4 @@ namespace gallt {
         return true;
     }
 
-} 
+}

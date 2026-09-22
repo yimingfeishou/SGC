@@ -37,6 +37,7 @@ namespace gallt {
                 {"access", TokenType::Keyword_Access},
                 {"addition", TokenType::Keyword_Addition},
                 {"emit", TokenType::Keyword_Emit},
+                {"export", TokenType::Keyword_Export},
                 {"const", TokenType::Keyword_Const},
             };
             return table;
@@ -75,6 +76,7 @@ namespace gallt {
         case TokenType::Keyword_Access: return "access";
         case TokenType::Keyword_Addition: return "addition";
         case TokenType::Keyword_Emit: return "emit";
+        case TokenType::Keyword_Export: return "export";
         case TokenType::Keyword_Const: return "const";
         case TokenType::Identifier: return "identifier";
         case TokenType::IntegerLiteral: return "integer literal";
@@ -85,6 +87,9 @@ namespace gallt {
         case TokenType::Assign: return "=";
         case TokenType::PlusAssign: return "+=";
         case TokenType::MinusAssign: return "-=";
+        case TokenType::AndAssign: return "&=";
+        case TokenType::OrAssign: return "|=";
+        case TokenType::XorAssign: return "^=";
         case TokenType::Equal: return "==";
         case TokenType::NotEqual: return "!=";
         case TokenType::Greater: return ">";
@@ -97,6 +102,8 @@ namespace gallt {
         case TokenType::Slash: return "/";
         case TokenType::Percent: return "%";
         case TokenType::Pipe: return "|";
+        case TokenType::Caret: return "^";
+        case TokenType::Tilde: return "~";
         case TokenType::Power: return "**";
         case TokenType::Increment: return "++";
         case TokenType::Decrement: return "--";
@@ -106,6 +113,7 @@ namespace gallt {
         case TokenType::LogicalNot: return "!";
         case TokenType::Dot: return ".";
         case TokenType::Arrow: return "->";
+        case TokenType::Question: return "?";
         case TokenType::ColonColon: return "::";
         case TokenType::LeftParen: return "(";
         case TokenType::RightParen: return ")";
@@ -137,4 +145,4 @@ namespace gallt {
         return it == keyword_table().end() ? TokenType::Identifier : it->second;
     }
 
-} 
+}

@@ -13,10 +13,18 @@ namespace gallt {
         Invalid,
     };
 
+    enum class OutputKind {
+        Executable,
+        StaticLibrary,
+        DynamicLibrary,
+    };
+
+    OutputKind classify_output_path(const std::string& path);
+
     struct CommandOptions {
         CommandMode mode = CommandMode::Compile;
-        std::string input;       
-        std::string output;      
+        std::string input;
+        std::string output;
         int optimization_level = 2;
         int debug_symbols_level = 0;
         bool debug_mode = false;
@@ -34,6 +42,6 @@ namespace gallt {
     std::string help_text();
     std::string version_text();
 
-} 
+}
 
-#endif 
+#endif

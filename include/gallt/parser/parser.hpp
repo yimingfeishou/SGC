@@ -30,10 +30,10 @@ namespace gallt {
     private:
         Lexer& lexer_;
         DiagnosticEngine& diag_;
-        Token current_;          
-        Token peek_;             
-        bool has_peek_ = false;  
-        bool has_error_ = false; 
+        Token current_;
+        Token peek_;
+        bool has_peek_ = false;
+        bool has_error_ = false;
 
         mutable std::vector<Token> tokens_;
         std::size_t token_index_ = 0;
@@ -50,20 +50,20 @@ namespace gallt {
         std::unordered_set<std::string> declared_type_names_;
         std::unordered_set<std::string> declared_value_names_;
 
-        int loop_depth_ = 0;     
+        int loop_depth_ = 0;
 
         static constexpr int kMaxExpressionNesting = 1024;
         static constexpr std::size_t kMaxExpressionTokens = 10000;
         static constexpr int kMaxBlockNesting = 1024;
         static constexpr int kMaxInitializerNesting = 1024;
 
-        int expression_depth_ = 0;             
-        std::size_t expression_tokens_ = 0;    
-        bool complexity_limit_hit_ = false;    
-        int block_depth_ = 0;                  
-        int initializer_depth_ = 0;            
+        int expression_depth_ = 0;
+        std::size_t expression_tokens_ = 0;
+        bool complexity_limit_hit_ = false;
+        int block_depth_ = 0;
+        int initializer_depth_ = 0;
 
-        bool in_error_recovery_ = false; 
+        bool in_error_recovery_ = false;
         int generic_ct_depth_ = 0;
         bool in_expr_argument_ = false;
 
@@ -85,10 +85,17 @@ namespace gallt {
         std::unique_ptr<AST::GuideStatement> parse_guide_statement();
         std::unique_ptr<AST::ClibStatement> parse_clib_statement();
         std::unique_ptr<AST::ExternDeclaration> parse_extern_declaration();
-        std::unique_ptr<AST::TopLevel> parse_function_definition();
+        std::unique_ptr<AST::TopLevel> parse_function_definition(
+            bool exported = false, SourceLocation export_location = SourceLocation{});
+        std::unique_ptr<AST::TopLevel> parse_export_definition();
+        std::unique_ptr<AST::TopLevel> parse_export_member(const char* context);
+        const char* export_kind_for_token(TokenType type) const;
         bool at_operator_definition() const;
         bool at_operator_parameter_list() const;
         bool at_operator_symbol(TokenType type) const;
+        bool compound_shift_assignment() const;
+        bool shift_followed_by_assign() const;
+        bool at_shift_or_assign_head() const;
         std::unique_ptr<AST::TopLevel> parse_operator_definition();
         bool looks_like_operator_definition() const;
         std::string operator_token_text() const;
@@ -127,7 +134,7 @@ namespace gallt {
             AST::Type base_type, bool allow_empty_array = true);
 
         std::unique_ptr<AST::Statement> parse_statement();
-        std::unique_ptr<AST::Statement> parse_declaration_or_statement(); 
+        std::unique_ptr<AST::Statement> parse_declaration_or_statement();
         std::unique_ptr<AST::VariableDeclaration> parse_variable_declaration();
         std::unique_ptr<AST::IfStatement> parse_if_statement();
         std::unique_ptr<AST::ForStatement> parse_for_statement();
@@ -153,17 +160,20 @@ namespace gallt {
 
         std::unique_ptr<AST::Initializer> parse_initializer();
 
-        std::unique_ptr<AST::Expression> parse_expression();                     
-        std::unique_ptr<AST::Expression> parse_assignment_expression();          
-        std::unique_ptr<AST::Expression> parse_logical_or_expression();          
-        std::unique_ptr<AST::Expression> parse_logical_and_expression();         
-        std::unique_ptr<AST::Expression> parse_comparison_expression();          
-        std::unique_ptr<AST::Expression> parse_additive_expression();            
-        std::unique_ptr<AST::Expression> parse_multiplicative_expression();      
-        std::unique_ptr<AST::Expression> parse_power_expression();               
-        std::unique_ptr<AST::Expression> parse_unary_expression();               
-        std::unique_ptr<AST::Expression> parse_postfix_expression();             
-        std::unique_ptr<AST::Expression> parse_primary_expression();             
+        std::unique_ptr<AST::Expression> parse_expression();
+        std::unique_ptr<AST::Expression> parse_assignment_expression();
+        std::unique_ptr<AST::Expression> parse_conditional_expression();
+        std::unique_ptr<AST::Expression> parse_logical_or_expression();
+        std::unique_ptr<AST::Expression> parse_logical_and_expression();
+        std::unique_ptr<AST::Expression> parse_bitwise_expression();
+        std::unique_ptr<AST::Expression> parse_comparison_expression();
+        std::unique_ptr<AST::Expression> parse_shift_expression();
+        std::unique_ptr<AST::Expression> parse_additive_expression();
+        std::unique_ptr<AST::Expression> parse_multiplicative_expression();
+        std::unique_ptr<AST::Expression> parse_power_expression();
+        std::unique_ptr<AST::Expression> parse_unary_expression();
+        std::unique_ptr<AST::Expression> parse_postfix_expression();
+        std::unique_ptr<AST::Expression> parse_primary_expression();
 
         std::unique_ptr<AST::Expression> parse_postfix_operator(
             std::unique_ptr<AST::Expression> base);
@@ -190,6 +200,6 @@ namespace gallt {
         bool is_valid_identifier(const std::string& name) const;
     };
 
-} 
+}
 
-#endif 
+#endif

@@ -83,7 +83,7 @@ namespace gallt {
             }
             return true;
         }
-    } 
+    }
 
     NamespaceLowering::NamespaceLowering(DiagnosticEngine& diag) : diag_(diag) {}
 
@@ -113,7 +113,6 @@ namespace gallt {
         const std::string& name) {
         return prefix.empty() ? name : prefix + "::" + name;
     }
-
 
     void NamespaceLowering::declare_namespace_member(const std::string& prefix,
         const std::string& name, const std::string& kind, bool addition,
@@ -163,14 +162,13 @@ namespace gallt {
             if (dynamic_cast<AccessNamespaceStatement*>(node.get()) != nullptr) {
                 continue;
             }
-            if (prefix.empty()) continue;   
+            if (prefix.empty()) continue;
             std::string name = declaration_name(node.get());
             if (name.empty()) continue;
             declare_namespace_member(prefix, name, declaration_kind(node.get()), addition,
                 node->location);
         }
     }
-
 
     void NamespaceLowering::push_scope() { scopes_.emplace_back(); }
 
@@ -226,7 +224,6 @@ namespace gallt {
             scope.aliases[child] = join_path(full_name, child);
         }
     }
-
 
     std::optional<std::string> NamespaceLowering::resolve_qualified(
         const std::vector<std::string>& path, SourceLocation loc, bool type_context) {
@@ -284,7 +281,6 @@ namespace gallt {
         report(loc, ErrorCode::NamespaceUndefined, std::vector<std::string>{ path[0] });
         return std::nullopt;
     }
-
 
     std::optional<std::string> NamespaceLowering::resolve_namespace_path(
         const std::vector<std::string>& parts, SourceLocation loc) {
@@ -491,6 +487,22 @@ namespace gallt {
         if (auto* e = dynamic_cast<PowerExpression*>(expr)) {
             rewrite_expression(e->left);
             rewrite_expression(e->right);
+            return;
+        }
+        if (auto* e = dynamic_cast<BitwiseExpression*>(expr)) {
+            rewrite_expression(e->left);
+            rewrite_expression(e->right);
+            return;
+        }
+        if (auto* e = dynamic_cast<ShiftExpression*>(expr)) {
+            rewrite_expression(e->left);
+            rewrite_expression(e->right);
+            return;
+        }
+        if (auto* e = dynamic_cast<ConditionalExpression*>(expr)) {
+            rewrite_expression(e->condition);
+            rewrite_expression(e->then_expr);
+            rewrite_expression(e->else_expr);
             return;
         }
         if (auto* e = dynamic_cast<UnaryExpression*>(expr)) {
@@ -818,7 +830,7 @@ namespace gallt {
     void NamespaceLowering::lower_addition_body(AdditionNamespaceStatement* def,
         std::vector<std::unique_ptr<TopLevel>>& out) {
         std::string full = join_path(namespace_prefix_, def->name);
-        if (namespaces_.count(full) == 0) return;   
+        if (namespaces_.count(full) == 0) return;
         std::string saved = namespace_prefix_;
         namespace_prefix_ = full;
         push_scope();
@@ -853,4 +865,4 @@ namespace gallt {
         return !had_error_;
     }
 
-} 
+}

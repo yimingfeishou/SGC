@@ -19,7 +19,8 @@ namespace gallt {
                 expression_free_identifiers = {},
             const std::unordered_map<const AST::Expression*,
                 std::tuple<std::string, std::size_t, AST::Type>>&
-                expression_argument_casts = {});
+                expression_argument_casts = {},
+            bool require_main = true);
         ~TypeChecker() = default;
 
         TypeChecker(const TypeChecker&) = delete;
@@ -63,6 +64,7 @@ namespace gallt {
         AST::FunctionDefinition* current_function_ = nullptr;
 
         int loop_depth_ = 0;
+        bool require_main_ = true;
 
         bool builtins_declared_ = false;
 
@@ -89,6 +91,7 @@ namespace gallt {
         const AST::Type* expected_type_ = nullptr;
 
         void check_top_level(AST::TopLevel* node);
+        bool validate_export_function(AST::FunctionDefinition* node);
         void check_guide_statement(AST::GuideStatement* node);
         void check_clib_statement(AST::ClibStatement* node);
         void check_extern_declaration(AST::ExternDeclaration* node);
@@ -112,9 +115,12 @@ namespace gallt {
         AST::Type check_expression(AST::Expression* expr, bool allow_void = false);
 
         AST::Type check_assignment(AST::AssignmentExpression* expr);
+        AST::Type check_conditional(AST::ConditionalExpression* expr);
         AST::Type check_logical_or(AST::LogicalOrExpression* expr);
         AST::Type check_logical_and(AST::LogicalAndExpression* expr);
+        AST::Type check_bitwise(AST::BitwiseExpression* expr);
         AST::Type check_comparison(AST::ComparisonExpression* expr);
+        AST::Type check_shift(AST::ShiftExpression* expr);
         AST::Type check_additive(AST::AdditiveExpression* expr);
         AST::Type check_multiplicative(AST::MultiplicativeExpression* expr);
         AST::Type check_power(AST::PowerExpression* expr);
@@ -123,6 +129,8 @@ namespace gallt {
         AST::Type check_primary(AST::PrimaryExpression* expr);
 
         AST::Type check_file_builtin_call(AST::PostfixExpression* expr,
+            const std::string& func_name);
+        AST::Type check_string_builtin_call(AST::PostfixExpression* expr,
             const std::string& func_name);
 
         bool can_implicit_convert(const AST::Type& from, const AST::Type& to);
@@ -163,7 +171,7 @@ namespace gallt {
         const Symbol* lookup_symbol(std::string_view name, bool report_error = true) const;
 
         void report_error(SourceLocation loc, ErrorCode code, const std::string& msg);
-        void report_error(ErrorCode code, const std::string& msg);  
+        void report_error(ErrorCode code, const std::string& msg);
         void report_warning(SourceLocation loc, ErrorCode code, const std::string& msg);
 
         void mangle_overload_set(const std::string& name);
@@ -224,6 +232,6 @@ namespace gallt {
 
     };
 
-} 
+}
 
-#endif 
+#endif

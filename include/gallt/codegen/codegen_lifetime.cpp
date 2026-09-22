@@ -1,9 +1,11 @@
 #include "codegen.hpp"
+#include "codegen_detail.hpp"
 #include <algorithm>
 
 using namespace gallt::AST;
 
 namespace gallt {
+    using namespace codegen_detail;
 
     bool CodeGenerator::type_is_copyable(const AST::Type& type) const {
         switch (type.kind) {
@@ -48,7 +50,6 @@ namespace gallt {
         return type_size(pointee) > 0;
     }
 
-
     void CodeGenerator::emit_shallow_copy(const AST::Type& type, const std::string& dst,
         const std::string& src) {
         std::size_t size = type_size(type);
@@ -56,7 +57,6 @@ namespace gallt {
         emit_line("call void @llvm.memcpy.p0.p0.i64(ptr " + dst + ", ptr " + src +
             ", i64 " + std::to_string(size) + ", i1 false)");
     }
-
 
     void CodeGenerator::emit_memberwise_copy(const AST::Type& type, const std::string& dst,
         const std::string& src, bool is_assignment) {
@@ -292,7 +292,7 @@ namespace gallt {
             return false;
         }
         if (extern_by_name_.find(base->identifier) != extern_by_name_.end()) {
-            return false;   
+            return false;
         }
         auto it = function_by_name_.find(base->identifier);
         if (it == function_by_name_.end() || it->second == nullptr) return false;
@@ -341,4 +341,160 @@ namespace gallt {
         }
     }
 
-} 
+
+    std::string CodeGenerator::lifecycle_symbol(const AST::StructDefinition* def,
+        LifecycleKind kind) const {
+        if (def == nullptr) return std::string();
+        switch (kind) {
+        case LifecycleKind::Constructor:
+            return def->constructor_names.empty()
+                ? ("__sgc_ctor$" + def->name) : std::string();
+        case LifecycleKind::Destructor:
+            return def->destructor_name.empty()
+                ? ("__sgc_dtor$" + def->name) : std::string();
+        case LifecycleKind::CopyConstructor:
+            if (def->no_copy || ast_function_exists(def->copy_constructor_name)) {
+                return std::string();
+            }
+            return "__sgc_copyctor$" + def->name;
+        case LifecycleKind::MoveConstructor:
+            if (def->no_move || ast_function_exists(def->move_constructor_name)) {
+                return std::string();
+            }
+            return "__sgc_movector$" + def->name;
+        case LifecycleKind::CopyAssignment:
+            if (def->no_copy || ast_function_exists(def->copy_assignment_name)) {
+                return std::string();
+            }
+            return "__sgc_copyassign$" + def->name;
+        case LifecycleKind::MoveAssignment:
+            if (def->no_move || ast_function_exists(def->move_assignment_name)) {
+                return std::string();
+            }
+            return "__sgc_moveassign$" + def->name;
+        }
+        return std::string();
+    }
+
+    void CodeGenerator::emit_lifecycle_functions() {
+        const LifecycleKind kinds[] = {
+            LifecycleKind::Constructor,
+            LifecycleKind::Destructor,
+            LifecycleKind::CopyConstructor,
+            LifecycleKind::MoveConstructor,
+            LifecycleKind::CopyAssignment,
+            LifecycleKind::MoveAssignment,
+        };
+        for (AST::StructDefinition* def : struct_defs_) {
+            if (def == nullptr) continue;
+            for (LifecycleKind kind : kinds) {
+                const std::string symbol = lifecycle_symbol(def, kind);
+                if (symbol.empty() || lifecycle_symbols_.count(symbol) == 0) continue;
+                emit_lifecycle_body(def, kind, symbol);
+            }
+        }
+    }
+
+    void CodeGenerator::register_lifecycle_symbols() {
+        const LifecycleKind kinds[] = {
+            LifecycleKind::Constructor,
+            LifecycleKind::Destructor,
+            LifecycleKind::CopyConstructor,
+            LifecycleKind::MoveConstructor,
+            LifecycleKind::CopyAssignment,
+            LifecycleKind::MoveAssignment,
+        };
+        for (AST::StructDefinition* def : struct_defs_) {
+            if (def == nullptr) continue;
+            const AST::Type struct_type = AST::Type::make_struct(def->name);
+            for (LifecycleKind kind : kinds) {
+                std::string symbol = lifecycle_symbol(def, kind);
+                if (symbol.empty()) continue;
+                if (kind == LifecycleKind::CopyConstructor ||
+                    kind == LifecycleKind::CopyAssignment) {
+                    if (!type_is_copyable(struct_type)) continue;
+                }
+                if (kind == LifecycleKind::MoveConstructor ||
+                    kind == LifecycleKind::MoveAssignment) {
+                    if (!type_is_movable(struct_type)) continue;
+                }
+                lifecycle_symbols_.insert(symbol);
+            }
+        }
+    }
+
+    void CodeGenerator::emit_lifecycle_body(AST::StructDefinition* def,
+        LifecycleKind kind, const std::string& name) {
+        debug_subprogram_id_ = 0;
+        debug_location_valid_ = false;
+        const AST::Type struct_type = AST::Type::make_struct(def->name);
+        scopes_.clear();
+        cleanup_scopes_.clear();
+        push_scope();
+        emitted_labels_.clear();
+        current_label_.clear();
+        break_labels_.clear();
+        current_function_ = nullptr;
+        hoisted_allocas_.clear();
+        hoist_insert_index_ = 0;
+        current_block_terminated_ = true;
+        current_sret_pointer_.clear();
+        pending_sret_destination_.clear();
+        statement_temporaries_.clear();
+
+        const bool two_parameters = kind != LifecycleKind::Constructor &&
+            kind != LifecycleKind::Destructor;
+        std::string header = "define void @glt_" + name + "(ptr %this";
+        if (two_parameters) header += ", ptr %source";
+        header += ") {";
+        emit_line(header);
+        start_block(new_label("entry"));
+        hoist_insert_index_ = lines_.size();
+
+        emitting_lifecycle_body_ = true;
+        lifecycle_owner_ = def;
+        switch (kind) {
+        case LifecycleKind::Constructor: {
+            AST::ArrayInitializer empty(def->location,
+                std::vector<std::unique_ptr<AST::Initializer>>{});
+            emit_struct_brace_initialization("%this", struct_type, &empty);
+            break;
+        }
+        case LifecycleKind::Destructor: {
+            const std::string ir = llvm_type(struct_type);
+            for (std::size_t i = 0; i < def->members.size(); ++i) {
+                std::string field = new_temp("dtor_field");
+                emit_line(field + " = getelementptr " + ir + ", ptr %this, i32 0, i32 " +
+                    std::to_string(i));
+                emit_destroy_string_at(def->members[i].type, field);
+            }
+            break;
+        }
+        case LifecycleKind::CopyConstructor:
+            emit_memberwise_copy(struct_type, "%this", "%source", false);
+            break;
+        case LifecycleKind::MoveConstructor:
+            emit_memberwise_move(struct_type, "%this", "%source", false);
+            break;
+        case LifecycleKind::CopyAssignment:
+            emit_memberwise_copy(struct_type, "%this", "%source", true);
+            break;
+        case LifecycleKind::MoveAssignment:
+            emit_memberwise_move(struct_type, "%this", "%source", true);
+            break;
+        }
+        lifecycle_owner_ = nullptr;
+        emitting_lifecycle_body_ = false;
+
+        if (!current_block_terminated_) {
+            destroy_active_cleanup_scopes(0);
+            emit_line("ret void");
+        }
+        flush_hoisted_allocas();
+        emit_line("}");
+        discard_current_cleanup_scope();
+        pop_scope();
+        emitted_lifecycle_bodies_.insert(name);
+    }
+
+}

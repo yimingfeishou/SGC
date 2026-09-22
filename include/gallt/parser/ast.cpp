@@ -167,5 +167,5 @@ namespace gallt {
             return out.str();
         }
 
-    } 
-} 
+    }
+}

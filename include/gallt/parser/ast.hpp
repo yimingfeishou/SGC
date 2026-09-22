@@ -37,8 +37,8 @@ namespace gallt {
 
 
 
-        struct GenericArgument;  
-        struct GenericRef;       
+        struct GenericArgument;
+        struct GenericRef;
 
         enum class TypeKind {
             Int, Lint, Uint, Luint, Float, Double, Char, Uchar, Bool, String, File, Void,
@@ -169,14 +169,14 @@ namespace gallt {
         struct ExpressionParameterBody;
 
         struct GenericArgument {
-            bool is_type = true;              
-            Type type;                        
-            long long int_value = 0;          
-            double float_value = 0.0;         
-            bool float_constant = false;      
+            bool is_type = true;
+            Type type;
+            long long int_value = 0;
+            double float_value = 0.0;
+            bool float_constant = false;
             bool is_string_constant = false;
-            std::string string_constant;      
-            std::string text;                 
+            std::string string_constant;
+            std::string text;
             Type constant_actual_type;
             std::shared_ptr<Expression> expression;
             bool is_expr = false;
@@ -200,7 +200,7 @@ namespace gallt {
             std::vector<std::string> namespace_path;
             std::string display_name;
             std::vector<GenericArgument> arguments;
-            std::string member;               
+            std::string member;
             bool member_scope_access = false;
             SourceLocation location;
 
@@ -397,6 +397,7 @@ namespace gallt {
             bool is_conversion_operator = false;
             Type conversion_target_type;
             bool operator_postfix_dummy = false;
+            bool is_export = false;
 
             FunctionDefinition(SourceLocation loc, Type ret, std::string_view n,
                 std::vector<Type> params, std::vector<std::string> pnames,
@@ -420,9 +421,9 @@ namespace gallt {
             };
 
             Kind kind = Kind::Constructor;
-            Type parameter_type;             
-            std::string parameter_name;      
-            std::vector<Type> parameters;    
+            Type parameter_type;
+            std::string parameter_name;
+            std::vector<Type> parameters;
             std::vector<std::string> parameter_names;
             std::vector<std::unique_ptr<Expression>> parameter_defaults;
             std::unique_ptr<Statement> body;
@@ -484,14 +485,14 @@ namespace gallt {
             }
             virtual ~StructDefinition() noexcept = default;
 
-            bool is_block() const override { return false; } 
+            bool is_block() const override { return false; }
         };
 
         struct GenericConstraint {
             enum class Kind { Any, Struct, Pointer, Array, File, Types };
             Kind kind = Kind::Any;
-            std::vector<Type> types;          
-            std::string text;                 
+            std::vector<Type> types;
+            std::string text;
 
             std::string to_string() const {
                 if (!text.empty()) return text;
@@ -509,11 +510,11 @@ namespace gallt {
 
         struct GenericParameter {
             std::string name;
-            bool is_type = true;              
-            Type constant_type;               
-            bool constant_type_is_parameter = false; 
+            bool is_type = true;
+            Type constant_type;
+            bool constant_type_is_parameter = false;
             std::string constant_type_parameter;
-            GenericConstraint constraint;     
+            GenericConstraint constraint;
             SourceLocation location;
             bool is_expr = false;
             std::vector<Type> expr_param_types;
@@ -524,7 +525,7 @@ namespace gallt {
         struct GenericPatternArg {
             bool is_constant = false;
             bool free_constant = false;
-            Type type;                        
+            Type type;
             long long int_value = 0;
             double float_value = 0.0;
             bool float_constant = false;
@@ -537,10 +538,10 @@ namespace gallt {
         public:
             std::string name;
             std::vector<GenericParameter> parameters;
-            std::vector<GenericPatternArg> patterns;   
+            std::vector<GenericPatternArg> patterns;
             bool is_specialization = false;
             bool primary_shaped = true;
-            std::vector<std::unique_ptr<TopLevel>> members; 
+            std::vector<std::unique_ptr<TopLevel>> members;
             std::vector<std::unique_ptr<Statement>> compile_time_items;
             SourceLocation location;
 
@@ -815,7 +816,10 @@ namespace gallt {
 
         class AssignmentExpression : public Expression {
         public:
-            enum class Operator { Assign, PlusAssign, MinusAssign };
+            enum class Operator {
+                Assign, PlusAssign, MinusAssign, AndAssign, OrAssign, XorAssign,
+                ShiftLeftAssign, ShiftRightAssign
+            };
 
             std::unique_ptr<Expression> left;
             Operator op;
@@ -844,6 +848,22 @@ namespace gallt {
             virtual ~LogicalOrExpression() noexcept = default;
         };
 
+        class ConditionalExpression : public Expression {
+        public:
+            std::unique_ptr<Expression> condition;
+            std::unique_ptr<Expression> then_expr;
+            std::unique_ptr<Expression> else_expr;
+
+            ConditionalExpression(SourceLocation loc,
+                std::unique_ptr<Expression> cond,
+                std::unique_ptr<Expression> then_value,
+                std::unique_ptr<Expression> else_value)
+                : Expression(loc), condition(std::move(cond)),
+                then_expr(std::move(then_value)), else_expr(std::move(else_value)) {
+            }
+            virtual ~ConditionalExpression() noexcept = default;
+        };
+
         class LogicalAndExpression : public Expression {
         public:
             std::unique_ptr<Expression> left;
@@ -855,6 +875,23 @@ namespace gallt {
                 : Expression(loc), left(std::move(lhs)), right(std::move(rhs)) {
             }
             virtual ~LogicalAndExpression() noexcept = default;
+        };
+
+        class BitwiseExpression : public Expression {
+        public:
+            enum class Operator { And, Xor, Or };
+
+            std::unique_ptr<Expression> left;
+            Operator op;
+            std::unique_ptr<Expression> right;
+
+            BitwiseExpression(SourceLocation loc,
+                std::unique_ptr<Expression> lhs,
+                Operator op_,
+                std::unique_ptr<Expression> rhs)
+                : Expression(loc), left(std::move(lhs)), op(op_), right(std::move(rhs)) {
+            }
+            virtual ~BitwiseExpression() noexcept = default;
         };
 
         class ComparisonExpression : public Expression {
@@ -872,6 +909,23 @@ namespace gallt {
                 : Expression(loc), left(std::move(lhs)), op(op_), right(std::move(rhs)) {
             }
             virtual ~ComparisonExpression() noexcept = default;
+        };
+
+        class ShiftExpression : public Expression {
+        public:
+            enum class Operator { Left, Right };
+
+            std::unique_ptr<Expression> left;
+            Operator op;
+            std::unique_ptr<Expression> right;
+
+            ShiftExpression(SourceLocation loc,
+                std::unique_ptr<Expression> lhs,
+                Operator op_,
+                std::unique_ptr<Expression> rhs)
+                : Expression(loc), left(std::move(lhs)), op(op_), right(std::move(rhs)) {
+            }
+            virtual ~ShiftExpression() noexcept = default;
         };
 
         class AdditiveExpression : public Expression {
@@ -925,7 +979,7 @@ namespace gallt {
         public:
             enum class Operator {
                 Increment, Decrement, LogicalNot, AddressOf, Dereference,
-                UnaryPlus, UnaryMinus
+                UnaryPlus, UnaryMinus, BitwiseNot
             };
 
             Operator op;
@@ -986,9 +1040,9 @@ namespace gallt {
 
         class CompileTimePropertyExpression : public Expression {
         public:
-            std::unique_ptr<Expression> receiver;     
-            std::string property;                     
-            std::vector<std::unique_ptr<Expression>> arguments;  
+            std::unique_ptr<Expression> receiver;
+            std::string property;
+            std::vector<std::unique_ptr<Expression>> arguments;
 
             CompileTimePropertyExpression(SourceLocation loc,
                 std::unique_ptr<Expression> recv, std::string_view prop,
@@ -1080,7 +1134,7 @@ namespace gallt {
             }
         };
 
-    } 
-} 
+    }
+}
 
-#endif 
+#endif

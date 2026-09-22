@@ -160,8 +160,14 @@ namespace gallt {
             { ErrorCode::ExprParameterShorthandRequiresParameterNames, "the shorthand expression parameter form requires the declared parameter list to be empty, or every parameter to have a name" },
             { ErrorCode::ExprParameterBlockDisallowedDeclaration, "function, struct, generic, namespace or special member definitions are not allowed inside an expression parameter block" },
             { ErrorCode::ExprParameterBlockDisallowedConstruct, "emit, guide, clib, extern and conditional compilation are not allowed inside an expression parameter block" },
+            { ErrorCode::ExportNotAllowedInContext, "export is not allowed in '[context]'" },
+            { ErrorCode::ExportRequiresFunctionDefinition, "export can only be applied to a function definition, but the declaration is '[kind]'" },
+            { ErrorCode::ExportMainNotAllowed, "'main' cannot be declared export" },
+            { ErrorCode::ExportFunctionNameInvalid, "export function name '[name]' is not a legal identifier" },
+            { ErrorCode::ExportFunctionCannotBeOverloaded, "export function '[name]' cannot be overloaded" },
+            { ErrorCode::ExportFunctionDeclarationConflict, "export function '[name]' conflicts with an existing '[kind]' declaration" },
         };
-    } 
+    }
 
     std::string Diagnostic::error_template(ErrorCode code) {
         for (const ErrorTemplateEntry& entry : kErrorTemplates) {
@@ -251,7 +257,7 @@ namespace gallt {
         Diagnostic d;
         d.severity = sev;
         d.location = loc;
-        d.code = ErrorCode::ExpressionSyntaxError; 
+        d.code = ErrorCode::ExpressionSyntaxError;
         d.message = std::string(msg);
         diagnostics_.push_back(std::move(d));
         if (sev == DiagnosticSeverity::Error) {
@@ -344,4 +350,4 @@ namespace gallt {
         }
     }
 
-} 
+}

@@ -81,9 +81,9 @@ namespace gallt {
         };
 
         struct ShortBinding {
-            std::string target;      
-            bool is_type = false;    
-            std::string instance;    
+            std::string target;
+            bool is_type = false;
+            std::string instance;
         };
 
         DiagnosticEngine& diag_;
@@ -256,6 +256,6 @@ namespace gallt {
             SourceLocation loc, bool& ok);
     };
 
-} 
+}
 
-#endif 
+#endif

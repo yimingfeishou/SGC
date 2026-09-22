@@ -31,28 +31,28 @@ namespace gallt {
         void validate_file();
 
     private:
-        std::string_view source_;           
-        std::string_view filename_;         
-        DiagnosticEngine& diag_;            
+        std::string_view source_;
+        std::string_view filename_;
+        DiagnosticEngine& diag_;
 
-        std::size_t position_ = 0;          
-        std::size_t line_ = 1;              
-        std::size_t column_ = 1;            
+        std::size_t position_ = 0;
+        std::size_t line_ = 1;
+        std::size_t column_ = 1;
 
-        bool has_error_ = false;            
+        bool has_error_ = false;
 
-        std::optional<Token> peeked_token_; 
+        std::optional<Token> peeked_token_;
 
         void skip_whitespace();
 
         Token scan_token();
 
-        Token read_identifier();            
-        Token read_number();                
-        Token read_char_literal();          
-        Token read_string_literal();        
-        Token read_comment();               
-        Token read_operator_or_delimiter(); 
+        Token read_identifier();
+        Token read_number();
+        Token read_char_literal();
+        Token read_string_literal();
+        Token read_comment();
+        Token read_operator_or_delimiter();
 
         char advance();
         char peek() const;
@@ -70,6 +70,6 @@ namespace gallt {
         bool validate_utf8();
     };
 
-} 
+}
 
-#endif 
+#endif

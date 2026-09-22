@@ -28,16 +28,16 @@ namespace gallt {
         };
 
         struct Scope {
-            std::unordered_map<std::string, std::string> declared;  
-            std::unordered_map<std::string, std::string> aliases;   
+            std::unordered_map<std::string, std::string> declared;
+            std::unordered_map<std::string, std::string> aliases;
         };
 
         DiagnosticEngine& diag_;
         AST::Program* program_ = nullptr;
 
-        std::map<std::string, NamespaceInfo> namespaces_;   
+        std::map<std::string, NamespaceInfo> namespaces_;
         std::vector<Scope> scopes_;
-        std::string namespace_prefix_;                      
+        std::string namespace_prefix_;
         bool had_error_ = false;
         SourceLocation type_location_hint_;
 
@@ -86,6 +86,6 @@ namespace gallt {
         static std::string join_path(const std::string& prefix, const std::string& name);
     };
 
-} 
+}
 
-#endif 
+#endif

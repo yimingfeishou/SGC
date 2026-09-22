@@ -21,13 +21,17 @@ namespace gallt {
             const std::unordered_map<const AST::Expression*,
                 AST::FunctionDefinition*>& resolved_operators = {},
             DiagnosticEngine* diagnostics = nullptr,
-            int debug_symbols_level = 0);
+            int debug_symbols_level = 0,
+            bool emit_entry_point = true);
 
         bool generate();
 
         const std::string& ir() const { return ir_; }
 
         const std::vector<std::string>& link_libraries() const { return link_libraries_; }
+        const std::vector<std::string>& exported_functions() const {
+            return exported_functions_;
+        }
 
         static std::string runtime_c_source();
 
@@ -42,6 +46,7 @@ namespace gallt {
             resolved_operators_;
         DiagnosticEngine* diagnostics_ = nullptr;
         int debug_level_ = 0;
+        bool emit_entry_point_ = true;
         bool debug_location_valid_ = false;
         SourceLocation debug_location_;
         unsigned debug_next_id_ = 5;
@@ -96,6 +101,7 @@ namespace gallt {
         std::unordered_map<std::string, LocalInfo> global_symbols_;
         std::unordered_map<std::string, AST::FunctionDefinition*> function_by_name_;
         std::unordered_map<std::string, AST::ExternDeclaration*> extern_by_name_;
+        std::vector<std::string> exported_functions_;
         struct StringLiteralConstant {
             std::string bytes;
             std::string llvm_name;
@@ -115,8 +121,8 @@ namespace gallt {
         static bool returns_via_sret(const AST::Type& type) {
             return type.kind == AST::TypeKind::Struct;
         }
-        std::string current_sret_pointer_;      
-        std::string pending_sret_destination_;  
+        std::string current_sret_pointer_;
+        std::string pending_sret_destination_;
 
         std::vector<std::string> hoisted_allocas_;
         std::size_t hoist_insert_index_ = 0;
@@ -166,6 +172,8 @@ namespace gallt {
         void emit_initializer_to_address(AST::VariableDeclaration* decl,
             const std::string& address);
         std::string function_llvm_name_for_source(std::string_view name) const;
+        std::string source_function_symbol(const std::string& name) const;
+        bool is_exported_function(const std::string& name) const;
         std::string function_reference(const std::string& name);
         std::string function_reference_for(const AST::PrimaryExpression* callee);
         std::string extern_ir_symbol(const AST::ExternDeclaration* ext) const;
@@ -202,11 +210,11 @@ namespace gallt {
         void discard_current_cleanup_scope();
 
         struct ExprValue {
-            AST::Type type;      
-            std::string value;   
-            std::string address; 
+            AST::Type type;
+            std::string value;
+            std::string address;
             bool is_lvalue = false;
-            std::string owned_string; 
+            std::string owned_string;
         };
 
         ExprValue gen_expr(AST::Expression* expr);
@@ -230,6 +238,9 @@ namespace gallt {
             const AST::Type& array_type, AST::ArrayInitializer* init);
         void emit_aggregate_assign(const std::string& dest_address,
             const AST::Type& dest_type, ExprValue& source, bool is_assignment = false);
+        static bool aggregate_parameter_uses_pointer(const AST::Type& type);
+        std::string parameter_ir_type(const AST::Type& type);
+        std::string aggregate_argument_pointer(const AST::Type& type, ExprValue& value);
         void emit_memberwise_copy(const AST::Type& type, const std::string& dst,
             const std::string& src, bool is_assignment);
         void emit_memberwise_move(const AST::Type& type, const std::string& dst,
@@ -262,11 +273,13 @@ namespace gallt {
         ExprValue emit_size_align_call(AST::PostfixExpression* call, bool is_size);
         ExprValue emit_file_builtin_call(AST::PostfixExpression* call,
             const std::string& name);
+        ExprValue emit_string_builtin_call(AST::PostfixExpression* call,
+            const std::string& name);
 
         std::size_t type_size(const AST::Type& type) const;
         std::size_t type_align(const AST::Type& type) const;
     };
 
-} 
+}
 
-#endif 
+#endif

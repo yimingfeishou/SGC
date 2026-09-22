@@ -12,20 +12,40 @@ $ObjRoot = Join-Path $Root 'build\obj'
 $Sources = @(
     'SGC.cpp',
     'include\gallt\codegen\codegen.cpp',
+    'include\gallt\codegen\codegen_constant.cpp',
+    'include\gallt\codegen\codegen_aggregate.cpp',
+    'include\gallt\codegen\codegen_expression.cpp',
+    'include\gallt\codegen\codegen_builtin.cpp',
     'include\gallt\codegen\codegen_lifetime.cpp',
     'include\gallt\common\diagnostics.cpp',
     'include\gallt\common\token.cpp',
     'include\gallt\driver\command_line.cpp',
     'include\gallt\driver\compiler.cpp',
     'include\gallt\lexer\lexer.cpp',
+    'include\gallt\pal\platform_paths.cpp',
+    'include\gallt\pal\platform_windows.cpp',
+    'include\gallt\pal\platform_linux.cpp',
     'include\gallt\parser\ast.cpp',
     'include\gallt\parser\parser.cpp',
+    'include\gallt\parser\parser_expression.cpp',
+    'include\gallt\parser\parser_declaration.cpp',
+    'include\gallt\parser\parser_generic.cpp',
+    'include\gallt\parser\parser_statement.cpp',
     'include\gallt\semantic\generic_expander.cpp',
+    'include\gallt\semantic\generic_expander_pattern.cpp',
+    'include\gallt\semantic\generic_expander_clone.cpp',
+    'include\gallt\semantic\generic_expander_property.cpp',
     'include\gallt\semantic\condition_compiler.cpp',
     'include\gallt\semantic\constant_folding.cpp',
     'include\gallt\semantic\lifecycle.cpp',
+    'include\gallt\semantic\lifecycle_rewrite.cpp',
     'include\gallt\semantic\namespace_lowering.cpp',
-    'include\gallt\semantic\type_checker.cpp'
+    'include\gallt\semantic\type_checker.cpp',
+    'include\gallt\semantic\type_checker_expression.cpp',
+    'include\gallt\semantic\type_checker_overload.cpp',
+    'include\gallt\semantic\type_checker_declaration.cpp',
+    'include\gallt\semantic\type_checker_control.cpp',
+    'include\gallt\semantic\type_checker_layout.cpp'
 )
 
 function Find-VcVars {
@@ -87,7 +107,7 @@ function Invoke-EmbedRuntime {
     if (-not (Test-Path -LiteralPath $generator)) {
         throw "runtime embedding script not found: $generator"
     }
-    Write-Host '==> embedding runtime (crt.c -> crt_embedded.hpp)'
+    Write-Host '==> embedding runtime (crt_core.c + crt_file.c + crt_string.c -> crt_embedded.hpp)'
     & $generator
     $header = Join-Path $Root 'include\gallt\runtime\crt_embedded.hpp'
     if (-not (Test-Path -LiteralPath $header)) {

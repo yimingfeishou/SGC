@@ -618,6 +618,59 @@ namespace {
             }
             return true;
         }
+        if (auto* bit = dynamic_cast<AST::BitwiseExpression*>(expr)) {
+            Evaluation left;
+            Evaluation right;
+            if (!evaluate_condition(bit->left.get(), left) ||
+                !evaluate_condition(bit->right.get(), right)) {
+                return false;
+            }
+            sanitize_condition_references(bit->left.get());
+            sanitize_condition_references(bit->right.get());
+            out.defined = true;
+            switch (bit->op) {
+            case AST::BitwiseExpression::Operator::And:
+                out.value = left.value & right.value;
+                break;
+            case AST::BitwiseExpression::Operator::Xor:
+                out.value = left.value ^ right.value;
+                break;
+            case AST::BitwiseExpression::Operator::Or:
+                out.value = left.value | right.value;
+                break;
+            }
+            return true;
+        }
+        if (auto* shift = dynamic_cast<AST::ShiftExpression*>(expr)) {
+            Evaluation left;
+            Evaluation right;
+            if (!evaluate_condition(shift->left.get(), left) ||
+                !evaluate_condition(shift->right.get(), right)) {
+                return false;
+            }
+            sanitize_condition_references(shift->left.get());
+            sanitize_condition_references(shift->right.get());
+            if (right.value < 0 || right.value >= 64) {
+                report(expr->location, ErrorCode::ExpressionSyntaxError,
+                    "shift count out of range in condition expression");
+                return false;
+            }
+            out.defined = true;
+            out.value = shift->op == AST::ShiftExpression::Operator::Left
+                ? (left.value << right.value)
+                : (left.value >> right.value);
+            return true;
+        }
+        if (auto* cond = dynamic_cast<AST::ConditionalExpression*>(expr)) {
+            Evaluation condition;
+            if (!evaluate_condition(cond->condition.get(), condition)) {
+                return false;
+            }
+            sanitize_condition_references(cond->condition.get());
+            return evaluate_condition(
+                condition.value != 0 ? cond->then_expr.get() : cond->else_expr.get(),
+                out);
+        }
         report(expr->location, ErrorCode::ExpressionSyntaxError,
             "unsupported construct in condition expression");
         return false;
@@ -755,6 +808,22 @@ namespace {
             sanitize_condition_references(power->right.get());
             return;
         }
+        if (auto* bit = dynamic_cast<AST::BitwiseExpression*>(expr)) {
+            sanitize_condition_references(bit->left.get());
+            sanitize_condition_references(bit->right.get());
+            return;
+        }
+        if (auto* shift = dynamic_cast<AST::ShiftExpression*>(expr)) {
+            sanitize_condition_references(shift->left.get());
+            sanitize_condition_references(shift->right.get());
+            return;
+        }
+        if (auto* cond = dynamic_cast<AST::ConditionalExpression*>(expr)) {
+            sanitize_condition_references(cond->condition.get());
+            sanitize_condition_references(cond->then_expr.get());
+            sanitize_condition_references(cond->else_expr.get());
+            return;
+        }
         if (auto* unary = dynamic_cast<AST::UnaryExpression*>(expr)) {
             sanitize_condition_references(unary->operand.get());
             return;
@@ -874,6 +943,22 @@ namespace {
         if (auto* power = dynamic_cast<AST::PowerExpression*>(expr)) {
             transform_expression(power->left.get());
             transform_expression(power->right.get());
+            return;
+        }
+        if (auto* bit = dynamic_cast<AST::BitwiseExpression*>(expr)) {
+            transform_expression(bit->left.get());
+            transform_expression(bit->right.get());
+            return;
+        }
+        if (auto* shift = dynamic_cast<AST::ShiftExpression*>(expr)) {
+            transform_expression(shift->left.get());
+            transform_expression(shift->right.get());
+            return;
+        }
+        if (auto* cond = dynamic_cast<AST::ConditionalExpression*>(expr)) {
+            transform_expression(cond->condition.get());
+            transform_expression(cond->then_expr.get());
+            transform_expression(cond->else_expr.get());
             return;
         }
         if (auto* unary = dynamic_cast<AST::UnaryExpression*>(expr)) {

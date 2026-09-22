@@ -7,6 +7,6 @@ namespace gallt {
 
     int run_compiler(const CommandOptions& options);
 
-} 
+}
 
-#endif 
+#endif

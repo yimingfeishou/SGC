@@ -95,6 +95,6 @@ namespace gallt {
         void report(SourceLocation loc, ErrorCode code, const std::string& message);
     };
 
-} 
+}
 
-#endif 
+#endif

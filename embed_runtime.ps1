@@ -1,5 +1,5 @@
 param(
-    [string]$RuntimeC = '',
+    [string[]]$RuntimeC = @(),
     [string]$OutHeader = ''
 )
 
@@ -8,20 +8,31 @@ $ErrorActionPreference = 'Stop'
 $Root = $PSScriptRoot
 
 if ([string]::IsNullOrEmpty($RuntimeC)) {
-    $RuntimeC = Join-Path $Root 'include\gallt\runtime\crt.c'
+    $RuntimeC = @(
+        (Join-Path $Root 'include\gallt\runtime\crt_core.c'),
+        (Join-Path $Root 'include\gallt\runtime\crt_file.c'),
+        (Join-Path $Root 'include\gallt\runtime\crt_string.c')
+    )
 }
 if ([string]::IsNullOrEmpty($OutHeader)) {
     $OutHeader = Join-Path $Root 'include\gallt\runtime\crt_embedded.hpp'
 }
 
-if (-not (Test-Path -LiteralPath $RuntimeC)) {
-    throw "runtime source not found: $RuntimeC"
+foreach ($Part in $RuntimeC) {
+    if (-not (Test-Path -LiteralPath $Part)) {
+        throw "runtime source not found: $Part"
+    }
 }
 
 $Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 $Lf = [string][char]10
 
-$content = [System.IO.File]::ReadAllText($RuntimeC, $Utf8NoBom)
+$content = ''
+$rawBytes = New-Object System.Collections.Generic.List[byte]
+foreach ($Part in $RuntimeC) {
+    $content += [System.IO.File]::ReadAllText($Part, $Utf8NoBom)
+    $rawBytes.AddRange([System.IO.File]::ReadAllBytes($Part))
+}
 
 $content = $content.Replace([string][char]13 + $Lf, $Lf)
 
@@ -31,12 +42,15 @@ if ($content.Contains($delimiter)) {
 }
 
 $sha = [System.Security.Cryptography.SHA256]::Create()
-$hash = (($sha.ComputeHash([System.IO.File]::ReadAllBytes($RuntimeC))) |
+$hash = (($sha.ComputeHash($rawBytes.ToArray())) |
     ForEach-Object { $_.ToString('x2') }) -join ''
 
-$relativeSource = $RuntimeC.Substring($Root.Length).TrimStart('\', '/')
+$relativeSource = ($RuntimeC | ForEach-Object {
+        $_.Substring($Root.Length).TrimStart('\', '/') }) -join ', '
 
 $prologue = @'
+// WARNING: embed_runtime.ps1 AUTO-GENERATED FILE - DO NOT EDIT BY HAND
+
 #ifndef GALLT_RUNTIME_CRT_EMBEDDED_HPP
 #define GALLT_RUNTIME_CRT_EMBEDDED_HPP
 
@@ -56,8 +70,7 @@ $epilogue = @'
 $prologue = $prologue.TrimEnd([char]13, [char]10) + $Lf
 $epilogue = $epilogue.TrimEnd([char]13, [char]10) + $Lf
 
-$text = $prologue.Replace('<SOURCE>', $relativeSource).Replace('<SHA>', $hash) +
-        $content + $epilogue
+$text = $prologue + $content + $epilogue
 
 $existing = ''
 if (Test-Path -LiteralPath $OutHeader) {

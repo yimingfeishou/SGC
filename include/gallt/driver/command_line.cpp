@@ -1,18 +1,22 @@
 #include "command_line.hpp"
-#include <windows.h>
+#include "../pal/platform.hpp"
 
 namespace gallt {
 namespace {
     std::string narrow_utf8(const std::wstring& w) {
-        if (w.empty()) return std::string();
-        int len = ::WideCharToMultiByte(CP_UTF8, 0, w.c_str(),
-            static_cast<int>(w.size()), nullptr, 0, nullptr, nullptr);
-        std::string out(static_cast<size_t>(len), '\0');
-        ::WideCharToMultiByte(CP_UTF8, 0, w.c_str(), static_cast<int>(w.size()),
-            out.data(), len, nullptr, nullptr);
-        return out;
+        return pal::to_utf8(w);
     }
 }
+
+    OutputKind classify_output_path(const std::string& path) {
+        std::string extension = pal::extension(path);
+        for (char& c : extension) {
+            if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
+        }
+        if (extension == ".lib") return OutputKind::StaticLibrary;
+        if (extension == ".dll") return OutputKind::DynamicLibrary;
+        return OutputKind::Executable;
+    }
 
     bool parse_command_line(int argc, const wchar_t* const* argv, CommandOptions& out) {
         out = CommandOptions{};
@@ -171,10 +175,10 @@ namespace {
 
     std::string version_text() {
         return
-            "sgc Standard Gallt Compiler 0.4.2-0919 Preview (LLVM backend, x86-64 Windows)\n"
+            "sgc Standard Gallt Compiler 0.4.2-0922 Preview (LLVM backend, x86-64 Windows)\n"
             "Gallt Lang Standard Version 26.09 (Preview)\n"
-            "Build date: 2026-09-19\n"
+            "Build date: 2026-09-22\n"
             "The compiler is an early preview version, and support for certain syntax and edge cases may not be fully covered. We appreciate your understanding";
     }
 
-} 
+}

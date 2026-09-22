@@ -18,6 +18,6 @@ namespace gallt {
     bool evaluate_constant_expression(const AST::Expression* expr, long long& int_out,
         double& float_out, bool& is_float_out, const ConstantEvaluationContext& context);
 
-} 
+}
 
-#endif 
+#endif

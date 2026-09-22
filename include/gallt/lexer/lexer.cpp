@@ -39,6 +39,7 @@ namespace gallt {
             {"access", TokenType::Keyword_Access},
             {"addition", TokenType::Keyword_Addition},
             {"emit", TokenType::Keyword_Emit},
+            {"export", TokenType::Keyword_Export},
             {"const", TokenType::Keyword_Const},
         };
 
@@ -86,7 +87,7 @@ namespace gallt {
             return suffix.size() == 1 &&
                 (suffix[0] == 'f' || suffix[0] == 'F');
         }
-    } 
+    }
 
     Lexer::Lexer(std::string_view source, std::string_view filename, DiagnosticEngine& diag)
         : source_(source)
@@ -163,9 +164,9 @@ namespace gallt {
             char c = source_[pos];
             if (c == '\r') {
                 if (pos + 1 < source_.size() && source_[pos + 1] == '\n') {
-                    return false; 
+                    return false;
                 }
-                return false; 
+                return false;
             }
             pos++;
         }
@@ -183,26 +184,26 @@ namespace gallt {
             }
 
             int expected_bytes = 0;
-            if ((c & 0xE0) == 0xC0) {      
+            if ((c & 0xE0) == 0xC0) {
                 expected_bytes = 2;
             }
-            else if ((c & 0xF0) == 0xE0) { 
+            else if ((c & 0xF0) == 0xE0) {
                 expected_bytes = 3;
             }
-            else if ((c & 0xF8) == 0xF0) { 
+            else if ((c & 0xF8) == 0xF0) {
                 expected_bytes = 4;
             }
             else {
-                return false; 
+                return false;
             }
 
             for (int i = 1; i < expected_bytes; i++) {
                 if (pos + i >= source_.size()) {
-                    return false; 
+                    return false;
                 }
                 unsigned char cont = static_cast<unsigned char>(source_[pos + i]);
                 if ((cont & 0xC0) != 0x80) {
-                    return false; 
+                    return false;
                 }
             }
             pos += expected_bytes;
@@ -242,7 +243,7 @@ namespace gallt {
             SourceLocation loc = current_location();
             advance();
             if (!is_at_end() && peek() == '\n') {
-                advance(); 
+                advance();
             }
             line_++;
             column_ = 1;
@@ -326,8 +327,8 @@ namespace gallt {
         };
 
         if (peek() == '0' && (peek_next() == 'x' || peek_next() == 'X')) {
-            advance(); 
-            advance(); 
+            advance();
+            advance();
 
             if (!is_hex_digit(peek())) {
                 return Token{ TokenType::IntegerLiteral, start_loc, source_.substr(start_pos, 1) };
@@ -341,7 +342,7 @@ namespace gallt {
         }
 
         if (peek() == '0' && is_octal_digit(peek_next())) {
-            advance(); 
+            advance();
             while (!is_at_end() && is_octal_digit(peek())) {
                 advance();
             }
@@ -356,7 +357,7 @@ namespace gallt {
             char next = peek_next();
             if (is_digit(next)) {
                 is_float = true;
-                advance(); 
+                advance();
                 while (!is_at_end() && is_digit(peek())) {
                     advance();
                 }
@@ -368,10 +369,10 @@ namespace gallt {
             if (is_digit(next) || next == '+' || next == '-') {
                 is_float = true;
                 has_exponent = true;
-                advance(); 
+                advance();
 
                 if (!is_at_end() && (peek() == '+' || peek() == '-')) {
-                    advance(); 
+                    advance();
                 }
 
                 if (!is_at_end() && is_digit(peek())) {
@@ -393,11 +394,11 @@ namespace gallt {
         std::size_t start_pos = position_;
 
 
-        advance(); 
+        advance();
 
         if (is_at_end() || peek() == '\'') {
             report_error(ErrorCode::InvalidCharLiteral, "empty character literal");
-            if (!is_at_end()) advance(); 
+            if (!is_at_end()) advance();
             return Token{ TokenType::CharLiteral, start_loc, source_.substr(start_pos, position_ - start_pos) };
         }
 
@@ -415,11 +416,11 @@ namespace gallt {
                 advance();
             }
             if (!is_at_end() && peek() == '\'') {
-                advance(); 
+                advance();
             }
         }
         else {
-            advance(); 
+            advance();
         }
 
         std::string_view lexeme = source_.substr(start_pos, position_ - start_pos);
@@ -431,13 +432,13 @@ namespace gallt {
         std::size_t start_pos = position_;
 
 
-        advance(); 
+        advance();
 
         bool is_closed = false;
         while (!is_at_end()) {
             char c = peek();
             if (c == '"') {
-                advance(); 
+                advance();
                 is_closed = true;
                 break;
             }
@@ -461,23 +462,23 @@ namespace gallt {
         SourceLocation start_loc = current_location();
         std::size_t start_pos = position_;
 
-        advance(); 
+        advance();
 
         if (peek() == '/') {
-            advance(); 
+            advance();
             while (!is_at_end() && peek() != '\n') {
                 advance();
             }
             return scan_token();
         }
         else if (peek() == '*') {
-            advance(); 
+            advance();
 
             bool is_closed = false;
             while (!is_at_end()) {
                 if (peek() == '*' && peek_next() == '/') {
-                    advance(); 
-                    advance(); 
+                    advance();
+                    advance();
                     is_closed = true;
                     break;
                 }
@@ -502,7 +503,7 @@ namespace gallt {
 
     Token Lexer::read_operator_or_delimiter() {
         SourceLocation start_loc = current_location();
-        char c = advance(); 
+        char c = advance();
 
         switch (c) {
         case '=':
@@ -551,6 +552,19 @@ namespace gallt {
         case '%':
             return Token{ TokenType::Percent, start_loc, "%" };
 
+        case '^':
+            if (!is_at_end() && peek() == '=') {
+                advance();
+                return Token{ TokenType::XorAssign, start_loc, "^=" };
+            }
+            return Token{ TokenType::Caret, start_loc, "^" };
+
+        case '~':
+            return Token{ TokenType::Tilde, start_loc, "~" };
+
+        case '?':
+            return Token{ TokenType::Question, start_loc, "?" };
+
         case '>':
             if (!is_at_end() && peek() == '=') {
                 advance();
@@ -577,12 +591,20 @@ namespace gallt {
                 advance();
                 return Token{ TokenType::LogicalAnd, start_loc, "&&" };
             }
+            if (!is_at_end() && peek() == '=') {
+                advance();
+                return Token{ TokenType::AndAssign, start_loc, "&=" };
+            }
             return Token{ TokenType::AddressOf, start_loc, "&" };
 
         case '|':
             if (!is_at_end() && peek() == '|') {
                 advance();
                 return Token{ TokenType::LogicalOr, start_loc, "||" };
+            }
+            if (!is_at_end() && peek() == '=') {
+                advance();
+                return Token{ TokenType::OrAssign, start_loc, "|=" };
             }
             return Token{ TokenType::Pipe, start_loc, "|" };
 
@@ -626,17 +648,17 @@ namespace gallt {
     char Lexer::parse_escape_sequence(std::size_t& pos, SourceLocation loc, bool is_char) {
 
         if (pos >= source_.size() || source_[pos] != '\\') {
-            return '\\'; 
+            return '\\';
         }
 
-        pos++; 
+        pos++;
         if (pos >= source_.size()) {
             report_error(ErrorCode::InvalidCharLiteral, "unexpected end after escape sequence");
             return '\\';
         }
 
         char c = source_[pos];
-        pos++; 
+        pos++;
 
         switch (c) {
         case 'n':  return '\n';
@@ -706,7 +728,7 @@ namespace gallt {
             msg.push_back(c);
             msg.push_back('\'');
             report_error(ErrorCode::InvalidCharLiteral, msg);
-            return c; 
+            return c;
         }
         }
     }
@@ -764,4 +786,4 @@ namespace gallt {
         has_error_ = true;
     }
 
-} 
+}

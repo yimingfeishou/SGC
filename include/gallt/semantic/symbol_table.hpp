@@ -13,29 +13,29 @@
 namespace gallt {
 
     enum class SymbolKind {
-        Variable,           
-        Function,           
-        Struct,             
-        Parameter,          
-        FunctionPointer,    
+        Variable,
+        Function,
+        Struct,
+        Parameter,
+        FunctionPointer,
     };
 
     struct Symbol {
         std::string name;
         SymbolKind kind;
-        AST::Type type;                 
-        SourceLocation declaration_loc; 
-        bool is_initialized = false;    
-        bool is_mutable = true;         
+        AST::Type type;
+        SourceLocation declaration_loc;
+        bool is_initialized = false;
+        bool is_mutable = true;
 
         std::vector<AST::Type> param_types;
         std::vector<std::string> param_names;
-        AST::FunctionDefinition* function_node = nullptr; 
+        AST::FunctionDefinition* function_node = nullptr;
         AST::ExternDeclaration* extern_node = nullptr;
 
         AST::StructDefinition* struct_node = nullptr;
 
-        size_t param_index = 0;         
+        size_t param_index = 0;
 
         Symbol() = default;
         Symbol(std::string_view n, SymbolKind k, AST::Type t, SourceLocation loc)
@@ -89,8 +89,8 @@ namespace gallt {
         const std::unordered_map<std::string, Symbol>& get_symbols() const { return symbols_; }
 
     private:
-        std::unordered_map<std::string, Symbol> symbols_; 
-        std::unordered_map<std::string, std::vector<Symbol>> overloads_; 
+        std::unordered_map<std::string, Symbol> symbols_;
+        std::unordered_map<std::string, std::vector<Symbol>> overloads_;
     };
 
     class SymbolTable {
@@ -212,7 +212,7 @@ namespace gallt {
                 return set;
             }
             if ((*it)->lookup(name) != nullptr) {
-                return nullptr;   
+                return nullptr;
             }
         }
         return nullptr;
@@ -248,6 +248,6 @@ namespace gallt {
         return nullptr;
     }
 
-} 
+}
 
-#endif 
+#endif
