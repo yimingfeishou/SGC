@@ -20,41 +20,33 @@ namespace gallt {
         if (found == resolved_operators_.end() || found->second == nullptr) {
             return false;
         }
+
         AST::FunctionDefinition* callee = found->second;
         std::vector<AST::Expression*> final_arguments;
         bool postfix_dummy = false;
+
         if (auto* comp = dynamic_cast<AST::ComparisonExpression*>(expr)) {
             final_arguments = { comp->left.get(), comp->right.get() };
-        }
-        else if (auto* add = dynamic_cast<AST::AdditiveExpression*>(expr)) {
+        } else if (auto* add = dynamic_cast<AST::AdditiveExpression*>(expr)) {
             final_arguments = { add->left.get(), add->right.get() };
-        }
-        else if (auto* mul = dynamic_cast<AST::MultiplicativeExpression*>(expr)) {
+        } else if (auto* mul = dynamic_cast<AST::MultiplicativeExpression*>(expr)) {
             final_arguments = { mul->left.get(), mul->right.get() };
-        }
-        else if (auto* bit = dynamic_cast<AST::BitwiseExpression*>(expr)) {
+        } else if (auto* bit = dynamic_cast<AST::BitwiseExpression*>(expr)) {
             final_arguments = { bit->left.get(), bit->right.get() };
-        }
-        else if (auto* shift = dynamic_cast<AST::ShiftExpression*>(expr)) {
+        } else if (auto* shift = dynamic_cast<AST::ShiftExpression*>(expr)) {
             final_arguments = { shift->left.get(), shift->right.get() };
-        }
-        else if (auto* cond = dynamic_cast<AST::ConditionalExpression*>(expr)) {
+        } else if (auto* cond = dynamic_cast<AST::ConditionalExpression*>(expr)) {
             final_arguments = { cond->condition.get(), cond->then_expr.get(),
                 cond->else_expr.get() };
-        }
-        else if (auto* pow = dynamic_cast<AST::PowerExpression*>(expr)) {
+        } else if (auto* pow = dynamic_cast<AST::PowerExpression*>(expr)) {
             final_arguments = { pow->left.get(), pow->right.get() };
-        }
-        else if (auto* land = dynamic_cast<AST::LogicalAndExpression*>(expr)) {
+        } else if (auto* land = dynamic_cast<AST::LogicalAndExpression*>(expr)) {
             final_arguments = { land->left.get(), land->right.get() };
-        }
-        else if (auto* lor = dynamic_cast<AST::LogicalOrExpression*>(expr)) {
+        } else if (auto* lor = dynamic_cast<AST::LogicalOrExpression*>(expr)) {
             final_arguments = { lor->left.get(), lor->right.get() };
-        }
-        else if (auto* unary = dynamic_cast<AST::UnaryExpression*>(expr)) {
+        } else if (auto* unary = dynamic_cast<AST::UnaryExpression*>(expr)) {
             final_arguments = { unary->operand.get() };
-        }
-        else if (auto* post = dynamic_cast<AST::PostfixExpression*>(expr)) {
+        } else if (auto* post = dynamic_cast<AST::PostfixExpression*>(expr)) {
             final_arguments = { post->base.get() };
             postfix_dummy = post->op == AST::PostfixExpression::Operator::Increment ||
                 post->op == AST::PostfixExpression::Operator::Decrement;
@@ -62,16 +54,15 @@ namespace gallt {
                 post->subscript_expr != nullptr) {
                 final_arguments.push_back(post->subscript_expr.get());
             }
-        }
-        else if (auto* assign = dynamic_cast<AST::AssignmentExpression*>(expr)) {
+        } else if (auto* assign = dynamic_cast<AST::AssignmentExpression*>(expr)) {
             if (assign->op == AST::AssignmentExpression::Operator::Assign) {
                 return false;
             }
             final_arguments = { assign->left.get(), assign->right.get() };
-        }
-        else {
+        } else {
             return false;
         }
+
         out = emit_operator_invocation(callee, final_arguments, postfix_dummy,
             expr->location);
         return true;
@@ -84,8 +75,10 @@ namespace gallt {
         if (postfix_dummy && callee->parameters.size() != 2) {
             postfix_dummy = false;
         }
+
         std::vector<std::unique_ptr<AST::Expression>> address_wrappers;
         std::vector<AST::UnaryExpression*> borrowed_wrappers;
+
         for (std::size_t i = 0; i < final_arguments.size(); ++i) {
             AST::Expression* operand = final_arguments[i];
             if (operand == nullptr || i >= callee->parameters.size()) {
@@ -113,6 +106,7 @@ namespace gallt {
             borrowed_wrappers.push_back(wrapper_ptr);
             address_wrappers.push_back(std::move(wrapper));
         }
+
         if (postfix_dummy) {
             lexeme_pool_.push_back("0");
             Token dummy(TokenType::IntegerLiteral, loc,
@@ -121,6 +115,7 @@ namespace gallt {
             final_arguments.push_back(dummy_node.get());
             address_wrappers.push_back(std::move(dummy_node));
         }
+
         lexeme_pool_.push_back(callee->name);
         auto callee_name = std::make_unique<AST::PrimaryExpression>(loc,
             std::string_view(lexeme_pool_.back()));
@@ -131,12 +126,15 @@ namespace gallt {
         call->borrowed_arguments = final_arguments;
         AST::PostfixExpression* call_ptr = call.get();
         operator_extra_nodes_.push_back(std::move(call));
+
         for (auto& wrapper : address_wrappers) {
             operator_extra_nodes_.push_back(std::move(wrapper));
         }
+
         resolved_functions_[callee_ptr] = callee;
         expression_types_[call_ptr] = callee->return_type;
         ExprValue result = gen_postfix(call_ptr);
+
         for (AST::UnaryExpression* wrapper : borrowed_wrappers) {
             if (wrapper->operand != nullptr) {
                 wrapper->operand.release();
@@ -155,31 +153,34 @@ namespace gallt {
                 return operator_value;
             }
         }
+
         if (auto* assign = dynamic_cast<AST::AssignmentExpression*>(expr)) {
             ExprValue left = gen_expr(assign->left.get());
-            if (left.address.empty()) return ExprValue{};
+            if (left.address.empty()) { return ExprValue{}; }
 
             if (assign->op == AST::AssignmentExpression::Operator::Assign) {
                 bool is_move = false;
                 AST::Expression* source_expr = assign->right.get();
+
                 if (auto* cm = dynamic_cast<AST::PrimaryExpression*>(source_expr)) {
                     if (cm->kind == AST::PrimaryExpression::Kind::CopyMove) {
                         source_expr = cm->paren_expr.get();
                     }
                 }
+
                 if (auto* cm = dynamic_cast<AST::PrimaryExpression*>(assign->right.get())) {
                     if (cm->kind == AST::PrimaryExpression::Kind::CopyMove &&
                         cm->copy_move_kind == AST::PrimaryExpression::CopyMoveKind::Move) {
                         is_move = true;
                     }
                 }
+
                 if (left.type.kind == AST::TypeKind::Struct && source_expr != nullptr) {
                     std::string source_address = operand_address(source_expr);
                     if (!source_address.empty()) {
                         if (is_move) {
                             emit_memberwise_move(left.type, left.address, source_address, true);
-                        }
-                        else {
+                        } else {
                             emit_memberwise_copy(left.type, left.address, source_address, true);
                         }
                         ExprValue result;
@@ -193,7 +194,9 @@ namespace gallt {
                     }
                 }
             }
+
             ExprValue right = gen_expr(assign->right.get());
+
             if (assign->op == AST::AssignmentExpression::Operator::Assign) {
                 emit_aggregate_assign(left.address, left.type, right, true);
             } else {
@@ -202,6 +205,7 @@ namespace gallt {
                 emit_line(old_value + " = load " + type_text + ", ptr " + left.address);
                 std::string right_value = right.value;
                 AST::Type rhs_type = right.type;
+
                 if (left.type.kind == TypeKind::Pointer && rhs_type.is_integer()) {
                     std::string idx64 = convert_value(right_value, rhs_type, Type::make_int());
                     std::string idx = new_temp("pari");
@@ -228,28 +232,28 @@ namespace gallt {
                         assign->op == AST::AssignmentExpression::Operator::ShiftLeftAssign ||
                         assign->op == AST::AssignmentExpression::Operator::ShiftRightAssign;
                     AST::Type op_type = left.type;
+
                     if (left.type.is_integer()) {
                         if (!integer_compound_new || left.type.integer_bit_width() <= 8) {
                             op_type = Type::make_int();
                         }
                     }
+
                     std::string lv = convert_value(old_value, left.type, op_type);
                     std::string rv = convert_value(right_value, rhs_type, op_type);
                     std::string opcode;
                     std::string ir_type = llvm_type(op_type);
                     bool applied = true;
+
                     if (op_type.kind == TypeKind::Float || op_type.kind == TypeKind::Double) {
                         if (assign->op == AST::AssignmentExpression::Operator::PlusAssign) {
                             opcode = "fadd";
-                        }
-                        else if (assign->op == AST::AssignmentExpression::Operator::MinusAssign) {
+                        } else if (assign->op == AST::AssignmentExpression::Operator::MinusAssign) {
                             opcode = "fsub";
-                        }
-                        else {
+                        } else {
                             applied = false;
                         }
-                    }
-                    else {
+                    } else {
                         switch (assign->op) {
                         case AST::AssignmentExpression::Operator::PlusAssign:
                             opcode = "add"; break;
@@ -271,14 +275,17 @@ namespace gallt {
                             break;
                         }
                     }
+
                     if (applied) {
                         emit_line(result + " = " + opcode + " " + ir_type + " " +
                             lv + ", " + rv);
                     }
+
                     std::string converted = convert_value(result, op_type, left.type);
                     emit_line("store " + type_text2 + " " + converted + ", ptr " + left.address);
                 }
             }
+
             ExprValue result;
             result.type = resolved_type(expr);
             result.address = left.address;
@@ -288,15 +295,19 @@ namespace gallt {
             emit_line(result.value + " = load " + type_text + ", ptr " + result.address);
             return result;
         }
+
         if (auto* paren = dynamic_cast<AST::PrimaryExpression*>(expr)) {
             return gen_primary(paren);
         }
+
         if (auto* unary = dynamic_cast<AST::UnaryExpression*>(expr)) {
             return gen_unary(unary);
         }
+
         if (auto* post = dynamic_cast<AST::PostfixExpression*>(expr)) {
             return gen_postfix(post);
         }
+
         if (auto* logical = dynamic_cast<AST::LogicalOrExpression*>(expr)) {
             ExprValue left = gen_expr(logical->left.get());
             std::string left_i1 = truth_condition(left.value, left.type);
@@ -324,6 +335,7 @@ namespace gallt {
                 " ], [ " + rhs_i8 + ", %" + eval_label + " ]");
             return result;
         }
+
         if (auto* logical_and = dynamic_cast<AST::LogicalAndExpression*>(expr)) {
             ExprValue left = gen_expr(logical_and->left.get());
             std::string left_i1 = truth_condition(left.value, left.type);
@@ -351,6 +363,7 @@ namespace gallt {
                 " ], [ " + rhs_i8 + ", %" + eval_label + " ]");
             return result;
         }
+
         if (auto* comp = dynamic_cast<AST::ComparisonExpression*>(expr)) {
             ExprValue l = gen_expr(comp->left.get());
             ExprValue r = gen_expr(comp->right.get());
@@ -381,6 +394,7 @@ namespace gallt {
                 emit_line(result.value + " = zext i1 " + t + " to i8");
                 return result;
             }
+
             bool left_is_address = l.type.kind == TypeKind::Pointer ||
                 l.type.kind == TypeKind::File || l.type.kind == TypeKind::Function;
             bool right_is_address = r.type.kind == TypeKind::Pointer ||
@@ -388,18 +402,21 @@ namespace gallt {
             if (left_is_address || right_is_address) {
                 std::string lv;
                 std::string rv;
+
                 if (left_is_address) {
                     lv = new_temp("ptrtoint_l");
                     emit_line(lv + " = ptrtoint ptr " + l.value + " to i64");
                 } else {
                     lv = to_i64_value(l.value, l.type);
                 }
+
                 if (right_is_address) {
                     rv = new_temp("ptrtoint_r");
                     emit_line(rv + " = ptrtoint ptr " + r.value + " to i64");
                 } else {
                     rv = to_i64_value(r.value, r.type);
                 }
+
                 std::string op;
                 switch (comp->op) {
                 case AST::ComparisonExpression::Operator::Equal: op = "eq"; break;
@@ -417,6 +434,7 @@ namespace gallt {
                 emit_line(result.value + " = zext i1 " + t + " to i8");
                 return result;
             }
+
             AST::Type common = Type::make_int();
             if (l.type.integer_bit_width() > 0 && r.type.integer_bit_width() > 0) {
                 common = (l.type.promotion_rank() >= r.type.promotion_rank())
@@ -425,13 +443,16 @@ namespace gallt {
                     common = Type::make_int();
                 }
             }
+
             if (common.kind == TypeKind::Float || common.kind == TypeKind::Double) {
                 return ExprValue{};
             }
+
             std::string lv = convert_value(l.value, l.type, common);
             std::string rv = convert_value(r.value, r.type, common);
             const char* prefix = common.is_unsigned_integer() ? "u" : "s";
             std::string op;
+
             switch (comp->op) {
             case AST::ComparisonExpression::Operator::Equal: op = "eq"; break;
             case AST::ComparisonExpression::Operator::NotEqual: op = "ne"; break;
@@ -440,6 +461,7 @@ namespace gallt {
             case AST::ComparisonExpression::Operator::GreaterEqual: op = std::string(prefix) + "ge"; break;
             case AST::ComparisonExpression::Operator::LessEqual: op = std::string(prefix) + "le"; break;
             }
+
             std::string t = new_temp("icmp");
             emit_line(t + " = icmp " + op + " " + llvm_type(common) + " " + lv + ", " + rv);
             ExprValue result;
@@ -448,43 +470,55 @@ namespace gallt {
             emit_line(result.value + " = zext i1 " + t + " to i8");
             return result;
         }
+
         if (auto* bit = dynamic_cast<AST::BitwiseExpression*>(expr)) {
             ExprValue l = gen_expr(bit->left.get());
             ExprValue r = gen_expr(bit->right.get());
             ExprValue v;
             v.type = resolved_type(expr);
+
             if (!l.type.is_integer() || !r.type.is_integer()) {
                 return v;
             }
+
             AST::Type work = v.type.is_integer() ? v.type : Type::make_int();
             if (work.integer_bit_width() == 8) {
                 work = Type::make_int();
             }
+
             std::string ir_type = llvm_type(work);
             std::string lv = convert_value(l.value, l.type, work);
             std::string rv = convert_value(r.value, r.type, work);
             std::string opcode = "and";
-            if (bit->op == AST::BitwiseExpression::Operator::Xor) opcode = "xor";
-            else if (bit->op == AST::BitwiseExpression::Operator::Or) opcode = "or";
+            if (bit->op == AST::BitwiseExpression::Operator::Xor) {
+                opcode = "xor";
+            } else if (bit->op == AST::BitwiseExpression::Operator::Or) {
+                opcode = "or";
+            }
             std::string tmp = new_temp("bitop");
             emit_line(tmp + " = " + opcode + " " + ir_type + " " + lv + ", " + rv);
             v.value = convert_value(tmp, work, v.type);
             return v;
         }
+
         if (auto* shift = dynamic_cast<AST::ShiftExpression*>(expr)) {
             ExprValue l = gen_expr(shift->left.get());
             ExprValue r = gen_expr(shift->right.get());
             ExprValue v;
             v.type = resolved_type(expr);
+
             if (!l.type.is_integer() || !r.type.is_integer()) {
                 return v;
             }
+
             AST::Type work = v.type.is_integer() ? v.type : Type::make_int();
             if (work.integer_bit_width() == 8) {
                 work = Type::make_int();
             }
+
             const bool unsigned_shift = v.type.is_unsigned_integer();
             std::string opcode;
+
             if (shift->op == AST::ShiftExpression::Operator::Left) {
                 opcode = "shl";
             } else {
@@ -498,21 +532,24 @@ namespace gallt {
             v.value = convert_value(tmp, work, v.type);
             return v;
         }
+
         if (auto* cond = dynamic_cast<AST::ConditionalExpression*>(expr)) {
             ExprValue v;
             v.type = resolved_type(expr);
+
             ExprValue condition = gen_expr(cond->condition.get());
             std::string predicate = truth_condition(condition.value, condition.type);
             std::string slot = emit_alloca(llvm_type(v.type), "cond_slot");
+
             if (v.type.kind == TypeKind::String) {
                 emit_line("call void @llvm.memset.p0.i64(ptr " + slot +
                     ", i8 0, i64 32, i1 false)");
-            }
-            else if (v.type.kind == TypeKind::Struct || v.type.kind == TypeKind::Array) {
+            } else if (v.type.kind == TypeKind::Struct || v.type.kind == TypeKind::Array) {
                 emit_line("call void @llvm.memset.p0.i64(ptr " + slot +
                     ", i8 0, i64 " + std::to_string(type_size(v.type)) +
                     ", i1 false)");
             }
+
             std::string then_label = new_label("condthen");
             std::string else_label = new_label("condelse");
             std::string end_label = new_label("condend");
@@ -528,32 +565,38 @@ namespace gallt {
             emit_line("br label %" + end_label);
             start_block(end_label);
             v.address = slot;
+
             if (v.type.kind == TypeKind::String) {
                 v.owned_string = slot;
-            }
-            else if (type_contains_string(v.type)) {
+            } else if (type_contains_string(v.type)) {
                 register_string_cleanup(slot, v.type);
             }
+
             if (v.type.kind == TypeKind::Struct || v.type.kind == TypeKind::Array) {
                 return v;
             }
+
             v.value = new_temp("condval");
             emit_line(v.value + " = load " + llvm_type(v.type) + ", ptr " + slot);
             return v;
         }
+
         if (auto* add = dynamic_cast<AST::AdditiveExpression*>(expr)) {
             ExprValue l = gen_expr(add->left.get());
             ExprValue r = gen_expr(add->right.get());
             AST::Type result_type = resolved_type(expr);
+
             if (result_type.kind == TypeKind::String) {
                 return gen_binary_string_plus(add->left.get(), add->right.get());
             }
+
             if (l.type.kind == TypeKind::Pointer || r.type.kind == TypeKind::Pointer) {
                 bool left_ptr = l.type.kind == TypeKind::Pointer;
                 AST::Type ptr_type = left_ptr ? l.type : r.type;
                 std::string pointee_ir = ptr_type.pointee_type ? llvm_type(*ptr_type.pointee_type) : "i8";
                 std::string base_ptr = left_ptr ? l.value : r.value;
                 std::string out = new_temp("ptrmath");
+
                 if (add->op == AST::AdditiveExpression::Operator::Minus &&
                     l.type.kind == TypeKind::Pointer && r.type.kind == TypeKind::Pointer) {
                     std::string ia = new_temp("pia");
@@ -573,9 +616,11 @@ namespace gallt {
                     v.value = out;
                     return v;
                 }
+
                 AST::Type int_type = left_ptr ? r.type : l.type;
                 std::string int_val = left_ptr ? r.value : l.value;
                 std::string idx = to_i64_value(int_val, int_type);
+
                 if (add->op == AST::AdditiveExpression::Operator::Plus) {
                     emit_line(out + " = getelementptr " + pointee_ir +
                         ", ptr " + base_ptr + ", i64 " + idx);
@@ -590,11 +635,13 @@ namespace gallt {
                 v.value = out;
                 return v;
             }
+
             AST::Type common = result_type;
             std::string opcode;
             std::string lv = convert_value(l.value, l.type, common);
             std::string rv = convert_value(r.value, r.type, common);
             std::string ir_type = llvm_type(common);
+
             if (common.kind == TypeKind::Float || common.kind == TypeKind::Double) {
                 opcode = add->op == AST::AdditiveExpression::Operator::Plus ? "fadd" : "fsub";
             } else {
@@ -607,6 +654,7 @@ namespace gallt {
                 ir_type = llvm_type(wide);
                 opcode = add->op == AST::AdditiveExpression::Operator::Plus ? "add" : "sub";
             }
+
             std::string tmp = new_temp("arith");
             emit_line(tmp + " = " + opcode + " " + ir_type + " " + lv + ", " + rv);
             ExprValue v;
@@ -614,6 +662,7 @@ namespace gallt {
             v.value = convert_value(tmp, common, result_type);
             return v;
         }
+
         if (auto* mul = dynamic_cast<AST::MultiplicativeExpression*>(expr)) {
             ExprValue l = gen_expr(mul->left.get());
             ExprValue r = gen_expr(mul->right.get());
@@ -623,6 +672,7 @@ namespace gallt {
             std::string rv = convert_value(r.value, r.type, common);
             std::string ir_type = llvm_type(common);
             std::string opcode;
+
             if (common.kind == TypeKind::Float || common.kind == TypeKind::Double) {
                 opcode = mul->op == AST::MultiplicativeExpression::Operator::Multiply ? "fmul" : "fdiv";
             } else {
@@ -642,6 +692,7 @@ namespace gallt {
                     opcode = unsigned_op ? "urem" : "srem"; break;
                 }
             }
+
             std::string tmp = new_temp("mul");
             emit_line(tmp + " = " + opcode + " " + ir_type + " " + lv + ", " + rv);
             ExprValue v;
@@ -649,16 +700,19 @@ namespace gallt {
             v.value = convert_value(tmp, common, result_type);
             return v;
         }
+
         if (auto* pow = dynamic_cast<AST::PowerExpression*>(expr)) {
             ExprValue l = gen_expr(pow->left.get());
             ExprValue r = gen_expr(pow->right.get());
             AST::Type result_type = resolved_type(expr);
+
             if (result_type.is_integer() && l.type.is_integer() &&
                 r.type.is_integer()) {
                 AST::Type work_type = result_type;
                 if (work_type.integer_bit_width() == 8) {
                     work_type = Type::make_int();
                 }
+
                 std::string work_ir = llvm_type(work_type);
                 std::string base_addr = emit_alloca(work_ir, "powbase");
                 std::string acc_addr = emit_alloca(work_ir, "powacc");
@@ -669,6 +723,7 @@ namespace gallt {
                     convert_value("1", Type::make_int(), work_type) +
                     ", ptr " + acc_addr);
                 emit_line("store i64 0, ptr " + idx_addr);
+
                 std::string exponent = to_i64_value(r.value, r.type);
                 std::string cond_label = new_label("powcond");
                 std::string body_label = new_label("powbody");
@@ -701,6 +756,7 @@ namespace gallt {
                 v.value = convert_value(accumulated, work_type, result_type);
                 return v;
             }
+
             std::string ld = convert_value(l.value, l.type, Type::make_double());
             std::string rd = convert_value(r.value, r.type, Type::make_double());
             std::string tmp = new_temp("pow");
@@ -715,19 +771,22 @@ namespace gallt {
 
     std::string CodeGenerator::to_i64_value(const std::string& value, const AST::Type& type) {
         const int bits = type.integer_bit_width();
+
         if (bits > 0) {
-            if (bits == 64) return value;
+            if (bits == 64) { return value; }
             std::string out = new_temp("int64");
             const char* from_ir = (bits == 32) ? "i32" : "i8";
             const char* opcode = type.is_unsigned_integer() ? "zext" : "sext";
             emit_line(out + " = " + opcode + " " + from_ir + " " + value + " to i64");
             return out;
         }
+
         if (type.kind == TypeKind::Float) {
             std::string out = new_temp("fptosi");
             emit_line(out + " = fptosi float " + value + " to i64");
             return out;
         }
+
         if (type.kind == TypeKind::Double) {
             std::string out = new_temp("fptosi");
             emit_line(out + " = fptosi double " + value + " to i64");
@@ -742,7 +801,9 @@ namespace gallt {
         AST::Type to_type = to;
         from_type.is_const = false;
         to_type.is_const = false;
-        if (from_type == to_type) return value;
+
+        if (from_type == to_type) { return value; }
+
         auto int_ir = [](int bits) -> const char* {
             switch (bits) {
             case 64: return "i64";
@@ -750,19 +811,23 @@ namespace gallt {
             default: return "i8";
             }
         };
+
         if (from.kind == TypeKind::Array &&
             (to.kind == TypeKind::Pointer || to.kind == TypeKind::Function)) {
             return value;
         }
+
         if (from.kind == TypeKind::Pointer || from.kind == TypeKind::Function) {
             if (to.kind == TypeKind::Pointer || to.kind == TypeKind::Function ||
                 to.kind == TypeKind::File) {
                 return value;
             }
+
             if (to.kind == TypeKind::String || to.kind == TypeKind::Struct ||
                 to.kind == TypeKind::Array) {
                 return "zeroinitializer";
             }
+
             const int to_bits = to.integer_bit_width();
             if (to_bits > 0) {
                 std::string converted = new_temp("ptrtoint");
@@ -782,7 +847,7 @@ namespace gallt {
         }
         if (to.kind == TypeKind::Pointer || to.kind == TypeKind::Function ||
             to.kind == TypeKind::File || from.kind == TypeKind::File) {
-            if (from.kind == TypeKind::File) return value;
+            if (from.kind == TypeKind::File) { return value; }
             if (to.kind == TypeKind::Pointer || to.kind == TypeKind::Function) {
                 std::string out = new_temp("inttoptr");
                 const int from_bits = from.integer_bit_width();
@@ -822,7 +887,7 @@ namespace gallt {
         }
         if (from.kind == TypeKind::Float || from.kind == TypeKind::Double) {
             const int to_bits = to.integer_bit_width();
-            if (to_bits <= 0) return value;
+            if (to_bits <= 0) { return value; }
             const bool unsigned_to = to.is_unsigned_integer();
             emit_line(tmp + std::string(" = ") + (unsigned_to ? "fptoui " : "fptosi ") +
                 (from.kind == TypeKind::Float ? "float" : "double") + " " + value +
@@ -831,15 +896,14 @@ namespace gallt {
         }
         const int from_bits = from.integer_bit_width();
         const int to_bits = to.integer_bit_width();
-        if (from_bits <= 0 || to_bits <= 0) return value;
-        if (from_bits == to_bits) return value;
+        if (from_bits <= 0 || to_bits <= 0) { return value; }
+        if (from_bits == to_bits) { return value; }
         const char* from_ir = int_ir(from_bits);
         const char* to_ir = int_ir(to_bits);
         if (from_bits < to_bits) {
             const char* opcode = from.is_unsigned_integer() ? "zext" : "sext";
             emit_line(tmp + " = " + opcode + " " + from_ir + " " + value + " to " + to_ir);
-        }
-        else {
+        } else {
             emit_line(tmp + " = trunc " + from_ir + " " + value + " to " + to_ir);
         }
         return tmp;
@@ -863,11 +927,13 @@ namespace gallt {
             emit_line(tmp + " = fcmp une float " + value + ", 0.0");
             return tmp;
         }
+
         if (type.kind == TypeKind::Double) {
             std::string tmp = new_temp("cond");
             emit_line(tmp + " = fcmp une double " + value + ", 0.0");
             return tmp;
         }
+
         if (type.kind == TypeKind::Pointer || type.kind == TypeKind::Function ||
             type.kind == TypeKind::File) {
             std::string tmp = new_temp("cond");
@@ -880,6 +946,7 @@ namespace gallt {
     CodeGenerator::ExprValue CodeGenerator::gen_primary(AST::PrimaryExpression* expr) {
         ExprValue out;
         out.type = resolved_type(expr);
+
         switch (expr->kind) {
         case AST::PrimaryExpression::Kind::Literal: {
             switch (expr->literal_token.type) {
@@ -895,13 +962,13 @@ namespace gallt {
                     base = 8;
                     lexeme = lexeme.substr(1);
                 }
+
                 long long value = 0;
                 auto res = std::from_chars(lexeme.data(), lexeme.data() + lexeme.size(),
                     value, base);
                 if (res.ec == std::errc()) {
                     out.value = std::to_string(value);
-                }
-                else {
+                } else {
                     unsigned long long uvalue = 0;
                     auto ures = std::from_chars(lexeme.data(),
                         lexeme.data() + lexeme.size(), uvalue, base);
@@ -918,10 +985,12 @@ namespace gallt {
                     text.pop_back();
                     single_precision = true;
                 }
+
                 double d = std::strtod(text.c_str(), nullptr);
                 if (single_precision || resolved_type(expr).kind == TypeKind::Float) {
                     d = static_cast<double>(static_cast<float>(d));
                 }
+
                 std::ostringstream fmt;
                 fmt.precision(17);
                 fmt << d;
@@ -943,6 +1012,7 @@ namespace gallt {
                 std::string bytes = decode_escaped_bytes(expr->literal_token.lexeme, false);
                 auto found = string_literal_ids_.find(bytes);
                 std::string global;
+
                 if (found != string_literal_ids_.end()) {
                     global = found->second;
                 } else {
@@ -950,6 +1020,7 @@ namespace gallt {
                     string_literal_ids_[bytes] = global;
                     string_literals_.push_back({ bytes, global });
                 }
+
                 std::string ptr = new_temp("strdata");
                 std::size_t array_len = bytes.empty() ? 1u : bytes.size();
                 emit_line(ptr + " = getelementptr [" + std::to_string(array_len) +
@@ -992,8 +1063,10 @@ namespace gallt {
                     out.value = local->constant_text;
                     return out;
                 }
+
                 out.is_lvalue = true;
                 out.address = local->address;
+
                 if (local->type.kind == TypeKind::Array) {
                     out.value = new_temp("arraydecay");
                     std::string elem_type = llvm_type(*local->type.element_type);
@@ -1028,10 +1101,12 @@ namespace gallt {
         case AST::PrimaryExpression::Kind::Heap: {
             AST::Type alloc_type = expr->heap_type;
             std::string count = "1";
+
             if (expr->heap_size) {
                 ExprValue n = gen_expr(expr->heap_size.get());
                 count = to_i64_value(n.value, n.type);
             }
+
             std::size_t elem_size = type_size(alloc_type);
             std::string total = new_temp("heapsize");
             emit_line(total + " = mul i64 " + count + ", " + std::to_string(elem_size));
@@ -1043,18 +1118,20 @@ namespace gallt {
         case AST::PrimaryExpression::Kind::PlacementConstruct: {
             AST::Type constructed = expr->construct_type;
             std::string storage;
+
             if (expr->kind == AST::PrimaryExpression::Kind::PlacementConstruct) {
                 ExprValue target = gen_expr(expr->placement_target.get());
                 storage = target.value;
-            }
-            else {
+            } else {
                 std::size_t elem_size = type_size(constructed);
                 storage = new_temp("construct");
                 emit_line(storage + " = call ptr @gallt_alloc_bytes(i64 " +
                     std::to_string(elem_size) + ")");
             }
+
             out.type = AST::Type::make_pointer(std::make_shared<AST::Type>(constructed));
             out.value = storage;
+
             if (!expr->lowered_ctor.empty()) {
                 std::string ctor_name = expr->lowered_ctor;
                 if (auto resolved = resolved_functions_.find(expr);
@@ -1064,12 +1141,14 @@ namespace gallt {
                 std::string callee = function_reference(ctor_name);
                 if (!callee.empty()) {
                     std::vector<AST::Expression*> ctor_args;
-                    for (auto& arg : expr->construct_args) ctor_args.push_back(arg.get());
+
+                    for (auto& arg : expr->construct_args) { ctor_args.push_back(arg.get()); }
                     collect_constructor_defaults(ctor_name, ctor_args);
                     std::string call_text = "call void " + callee + "(ptr " + storage;
                     for (AST::Expression* arg : ctor_args) {
                         ExprValue value = gen_expr(arg);
                         std::string type_text = llvm_type(value.type);
+
                         if (value.type.kind == TypeKind::String) {
                             std::string addr = !value.address.empty() ? value.address : value.value;
                             std::string agg = new_temp("ctorstr");
@@ -1085,6 +1164,7 @@ namespace gallt {
                 }
                 return out;
             }
+
             AST::ArrayInitializer empty_init(expr->location,
                 std::vector<std::unique_ptr<AST::Initializer>>{});
             emit_struct_brace_initialization(storage, constructed, &empty_init);
@@ -1098,8 +1178,10 @@ namespace gallt {
                     operand_type.kind != AST::TypeKind::String)) {
                 return gen_expr(expr->paren_expr.get());
             }
+
             std::string temp = emit_alloca(llvm_type(operand_type), "copy_move_temp");
             emit_line("store " + llvm_type(operand_type) + " zeroinitializer, ptr " + temp);
+
             switch (expr->copy_move_kind) {
             case AST::PrimaryExpression::CopyMoveKind::Copy:
                 emit_memberwise_copy(operand_type, temp, source_address, false);
@@ -1114,19 +1196,23 @@ namespace gallt {
                 emit_shallow_copy(operand_type, temp, source_address);
                 break;
             }
+
             bool needs_cleanup = operand_type.kind == AST::TypeKind::String ||
                 type_contains_string(operand_type);
+
             if (!needs_cleanup && operand_type.kind == AST::TypeKind::Struct) {
                 auto def_it = struct_by_name_.find(operand_type.struct_name);
                 needs_cleanup = def_it != struct_by_name_.end() && def_it->second != nullptr &&
                     def_it->second->needs_destruction;
             }
+
             if (needs_cleanup) {
                 CleanupRecord record;
                 record.type = operand_type;
                 record.address = temp;
                 statement_temporaries_.push_back(record);
             }
+
             out.type = operand_type;
             out.address = temp;
             out.is_lvalue = true;
@@ -1146,13 +1232,14 @@ namespace gallt {
         if (auto* prim = dynamic_cast<AST::PrimaryExpression*>(expr)) {
             if (prim->kind == AST::PrimaryExpression::Kind::Identifier) {
                 LocalInfo* local = lookup_local(prim->identifier);
-                if (local) return local->address;
+                if (local) { return local->address; }
             }
             if (prim->kind == AST::PrimaryExpression::Kind::Parens && prim->paren_expr) {
                 return gen_address(prim->paren_expr.get());
             }
             return std::string();
         }
+
         if (auto* unary = dynamic_cast<AST::UnaryExpression*>(expr)) {
             if (unary->op == AST::UnaryExpression::Operator::Dereference) {
                 ExprValue p = gen_expr(unary->operand.get());
@@ -1160,13 +1247,26 @@ namespace gallt {
             }
             return std::string();
         }
+
         if (auto* post = dynamic_cast<AST::PostfixExpression*>(expr)) {
             if (post->op == AST::PostfixExpression::Operator::Subscript) {
+                std::string pack_name;
+                if (pack_identifier_base(post->base.get(), pack_name)) {
+                    const VariadicPackLocal* pack = find_variadic_local(pack_name);
+                    if (pack != nullptr && post->subscript_expr != nullptr) {
+                        ExprValue idx = gen_expr(post->subscript_expr.get());
+                        std::string index_text = convert_value(idx.value, idx.type,
+                            AST::Type::make_int());
+                        return pack_element_address(*pack, index_text);
+                    }
+                }
+
                 ExprValue base = gen_expr(post->base.get());
                 ExprValue idx = gen_expr(post->subscript_expr.get());
                 std::string i64 = to_i64_value(idx.value, idx.type);
                 std::string elem_type;
                 std::string base_pointer = base.value;
+
                 if (base.type.kind == TypeKind::Array && base.type.element_type) {
                     elem_type = llvm_type(*base.type.element_type);
                     std::string address = gen_address(post->base.get());
@@ -1183,10 +1283,12 @@ namespace gallt {
                     ", ptr " + base_pointer + ", i64 " + i64);
                 return ptr;
             }
+
             if (post->op == AST::PostfixExpression::Operator::Dot ||
                 post->op == AST::PostfixExpression::Operator::Arrow) {
                 ExprValue base;
                 bool operator_arrow = false;
+
                 if (post->op == AST::PostfixExpression::Operator::Arrow) {
                     auto arrow_it = resolved_operators_.find(post->base.get());
                     if (arrow_it != resolved_operators_.end() &&
@@ -1202,11 +1304,14 @@ namespace gallt {
                         }
                     }
                 }
+
                 if (!operator_arrow) {
                     base = gen_expr(post->base.get());
                 }
+
                 AST::Type struct_type;
                 std::string base_addr;
+
                 if (post->op == AST::PostfixExpression::Operator::Arrow) {
                     if (base.type.kind == TypeKind::Pointer && base.type.pointee_type) {
                         struct_type = *base.type.pointee_type;
@@ -1220,11 +1325,14 @@ namespace gallt {
                         return std::string();
                     }
                 }
-                if (struct_type.kind != TypeKind::Struct) return std::string();
+
+                if (struct_type.kind != TypeKind::Struct) { return std::string(); }
                 auto struct_it = struct_by_name_.find(struct_type.struct_name);
-                if (struct_it == struct_by_name_.end()) return std::string();
+                if (struct_it == struct_by_name_.end()) { return std::string(); }
+
                 size_t index = 0;
                 bool found = false;
+
                 for (size_t i = 0; i < struct_it->second->members.size(); ++i) {
                     if (struct_it->second->members[i].name == post->member_name) {
                         index = i;
@@ -1232,7 +1340,8 @@ namespace gallt {
                         break;
                     }
                 }
-                if (!found) return std::string();
+
+                if (!found) { return std::string(); }
                 std::string ptr = new_temp("memberptr");
                 emit_line(ptr + " = getelementptr " + llvm_type(struct_type) +
                     ", ptr " + base_addr + ", i32 0, i32 " + std::to_string(index));
@@ -1254,6 +1363,7 @@ namespace gallt {
     CodeGenerator::ExprValue CodeGenerator::gen_unary(AST::UnaryExpression* expr) {
         ExprValue out;
         out.type = resolved_type(expr);
+
         if (expr->op == AST::UnaryExpression::Operator::AddressOf) {
             if (auto* prim = dynamic_cast<AST::PrimaryExpression*>(expr->operand.get())) {
                 if (prim->kind == AST::PrimaryExpression::Kind::Identifier) {
@@ -1267,15 +1377,17 @@ namespace gallt {
                     }
                 }
             }
+
             std::string address = gen_address(expr->operand.get());
             if (!address.empty()) {
                 out.value = address;
             }
             return out;
         }
+
         if (expr->op == AST::UnaryExpression::Operator::Dereference) {
             ExprValue p = gen_expr(expr->operand.get());
-            if (p.type.kind != TypeKind::Pointer) return out;
+            if (p.type.kind != TypeKind::Pointer) { return out; }
             out.is_lvalue = true;
             out.address = p.value;
             out.type = resolved_type(expr);
@@ -1284,6 +1396,7 @@ namespace gallt {
             emit_line(out.value + " = load " + type_text + ", ptr " + p.value);
             return out;
         }
+
         if (expr->op == AST::UnaryExpression::Operator::LogicalNot) {
             ExprValue v = gen_expr(expr->operand.get());
             std::string cond = truth_condition(v.value, v.type);
@@ -1293,9 +1406,10 @@ namespace gallt {
             emit_line(out.value + " = zext i1 " + notval + " to i8");
             return out;
         }
+
         if (expr->op == AST::UnaryExpression::Operator::BitwiseNot) {
             ExprValue v = gen_expr(expr->operand.get());
-            if (!v.type.is_integer()) return out;
+            if (!v.type.is_integer()) { return out; }
             AST::Type work = v.type.integer_bit_width() == 8 ? Type::make_int() : v.type;
             std::string operand_value = convert_value(v.value, v.type, work);
             std::string inverted = new_temp("bitnot");
@@ -1304,14 +1418,17 @@ namespace gallt {
             out.value = convert_value(inverted, work, out.type);
             return out;
         }
+
         if (expr->op == AST::UnaryExpression::Operator::UnaryPlus ||
             expr->op == AST::UnaryExpression::Operator::UnaryMinus) {
             ExprValue v = gen_expr(expr->operand.get());
             out.type = resolved_type(expr);
+
             if (expr->op == AST::UnaryExpression::Operator::UnaryPlus) {
                 out.value = convert_value(v.value, v.type, out.type);
                 return out;
             }
+
             if (out.type.kind == TypeKind::Float || out.type.kind == TypeKind::Double) {
                 std::string type_text = llvm_type(out.type);
                 std::string operand_value = convert_value(v.value, v.type, out.type);
@@ -1319,26 +1436,29 @@ namespace gallt {
                 emit_line(out.value + " = fneg " + type_text + " " + operand_value);
                 return out;
             }
+
             AST::Type neg_type = v.type;
             if (neg_type.integer_bit_width() <= 0) {
                 neg_type = Type::make_int();
-            }
-            else if (neg_type.integer_bit_width() == 8) {
+            } else if (neg_type.integer_bit_width() == 8) {
                 neg_type = Type::make_int();
             }
+
             std::string operand_value = convert_value(v.value, v.type, neg_type);
             std::string negated = new_temp("neg");
             emit_line(negated + " = sub " + llvm_type(neg_type) + " 0, " + operand_value);
             out.value = convert_value(negated, neg_type, out.type);
             return out;
         }
+
         if (expr->op == AST::UnaryExpression::Operator::Increment ||
             expr->op == AST::UnaryExpression::Operator::Decrement) {
             std::string address = gen_address(expr->operand.get());
             ExprValue old = gen_expr(expr->operand.get());
-            if (address.empty()) return out;
+            if (address.empty()) { return out; }
             std::string one;
             std::string type_text = llvm_type(old.type);
+
             if (old.type.kind == TypeKind::Pointer) {
                 std::string pointee = old.type.pointee_type ? llvm_type(*old.type.pointee_type) : "i8";
                 std::string delta = expr->op == AST::UnaryExpression::Operator::Increment ? "1" : "-1";
@@ -1349,6 +1469,7 @@ namespace gallt {
                 out.value = ptr;
                 return out;
             }
+
             std::string opcode;
             if (old.type.kind == TypeKind::Float || old.type.kind == TypeKind::Double) {
                 opcode = expr->op == AST::UnaryExpression::Operator::Increment ? "fadd" : "fsub";
@@ -1369,10 +1490,29 @@ namespace gallt {
     CodeGenerator::ExprValue CodeGenerator::gen_postfix(AST::PostfixExpression* expr) {
         ExprValue out;
         out.type = resolved_type(expr);
+
+        if (expr->op == AST::PostfixExpression::Operator::Subscript ||
+            expr->op == AST::PostfixExpression::Operator::Dot) {
+            std::string base_name;
+            if (pack_identifier_base(expr->base.get(), base_name)) {
+                const VariadicPackLocal* pack = find_variadic_local(base_name);
+                if (pack != nullptr) {
+                    if (expr->op == AST::PostfixExpression::Operator::Subscript) {
+                        return gen_pack_subscript(expr, *pack);
+                    }
+                    return gen_pack_property(expr, *pack);
+                }
+            }
+        }
+        if (expr->op == AST::PostfixExpression::Operator::PackExpand) {
+            return out;
+        }
         switch (expr->op) {
+        case AST::PostfixExpression::Operator::PackExpand:
+            return out;
         case AST::PostfixExpression::Operator::Subscript: {
             std::string address = gen_address(expr);
-            if (address.empty()) return out;
+            if (address.empty()) { return out; }
             out.is_lvalue = true;
             out.address = address;
             if (out.type.kind == TypeKind::Array && out.type.element_type) {
@@ -1381,6 +1521,7 @@ namespace gallt {
                     ", ptr " + address + ", i64 0, i64 0");
                 return out;
             }
+
             std::string type_text = llvm_type(out.type);
             out.value = new_temp("subscript_load");
             emit_line(out.value + " = load " + type_text + ", ptr " + address);
@@ -1389,7 +1530,7 @@ namespace gallt {
         case AST::PostfixExpression::Operator::Dot:
         case AST::PostfixExpression::Operator::Arrow: {
             std::string address = gen_address(expr);
-            if (address.empty()) return out;
+            if (address.empty()) { return out; }
             out.is_lvalue = true;
             out.address = address;
             if (out.type.kind == TypeKind::Array && out.type.element_type) {
@@ -1398,6 +1539,7 @@ namespace gallt {
                     ", ptr " + address + ", i64 0, i64 0");
                 return out;
             }
+
             std::string type_text = llvm_type(out.type);
             out.value = new_temp("member_load");
             emit_line(out.value + " = load " + type_text + ", ptr " + address);
@@ -1411,7 +1553,7 @@ namespace gallt {
         case AST::PostfixExpression::Operator::Increment:
         case AST::PostfixExpression::Operator::Decrement: {
             std::string address = gen_address(expr->base.get());
-            if (address.empty()) return out;
+            if (address.empty()) { return out; }
             std::string type_text = llvm_type(out.type);
             std::string old_val = new_temp("postold");
             emit_line(old_val + " = load " + type_text + ", ptr " + address);
@@ -1419,6 +1561,7 @@ namespace gallt {
             std::string one = (out.type.kind == TypeKind::Float ||
                 out.type.kind == TypeKind::Double) ? "1.0" : "1";
             std::string opcode;
+
             if (out.type.kind == TypeKind::Float || out.type.kind == TypeKind::Double) {
                 opcode = expr->op == AST::PostfixExpression::Operator::Increment ? "fadd" : "fsub";
             } else if (out.type.kind == TypeKind::Pointer) {
@@ -1443,34 +1586,58 @@ namespace gallt {
             return out;
         }
         case AST::PostfixExpression::Operator::FunctionCall: {
+            if (auto* member = dynamic_cast<AST::PostfixExpression*>(expr->base.get())) {
+                if (member->op == AST::PostfixExpression::Operator::Dot &&
+                    member->member_name == "get") {
+                    std::string base_name;
+                    if (pack_identifier_base(member->base.get(), base_name)) {
+                        const VariadicPackLocal* pack = find_variadic_local(base_name);
+                        if (pack != nullptr && expr->arguments.size() == 1) {
+                            ExprValue index = gen_expr(expr->arguments[0].get());
+                            std::string index_text = convert_value(index.value,
+                                index.type, AST::Type::make_int());
+                            return pack_guarded_element(*pack, index_text);
+                        }
+                    }
+                }
+            }
+
             AST::PrimaryExpression* direct = nullptr;
             if (auto* prim = dynamic_cast<AST::PrimaryExpression*>(expr->base.get())) {
                 if (prim->kind == AST::PrimaryExpression::Kind::Identifier) {
                     direct = prim;
                 }
             }
+
             std::string direct_name = direct ? direct->identifier : std::string();
+
             if (direct_name == "output") {
                 emit_output_call(expr);
                 return out;
             }
+
             if (direct_name == "input") {
                 emit_input_call(expr, out);
                 return out;
             }
+
             if (direct_name == "free") {
                 emit_free_call(expr);
                 return out;
             }
+
             if (is_file_builtin_name(direct_name)) {
                 return emit_file_builtin_call(expr, direct_name);
             }
+
             if (is_string_builtin_name(direct_name)) {
                 return emit_string_builtin_call(expr, direct_name);
             }
+
             if (direct_name == "size" || direct_name == "align") {
                 return emit_size_align_call(expr, direct_name == "size");
             }
+
             if (direct != nullptr) {
                 auto struct_it = struct_by_name_.find(direct->identifier);
                 if (struct_it != struct_by_name_.end() && struct_it->second != nullptr &&
@@ -1483,18 +1650,21 @@ namespace gallt {
                     if (!callee.empty()) {
                         emit_line("call void " + callee + "(ptr " + storage + ")");
                     }
+
                     if (def->needs_destruction) {
                         CleanupRecord record;
                         record.type = temp_type;
                         record.address = storage;
                         statement_temporaries_.push_back(record);
                     }
+
                     out.type = temp_type;
                     out.value = storage;
                     out.address = storage;
                     out.is_lvalue = true;
                     return out;
                 }
+
                 if (struct_it != struct_by_name_.end() && struct_it->second != nullptr &&
                     !struct_it->second->constructor_names.empty()) {
                     AST::StructDefinition* def = struct_it->second;
@@ -1505,7 +1675,9 @@ namespace gallt {
                         resolved != resolved_functions_.end() && resolved->second != nullptr) {
                         resolved_ctor_name = resolved->second->name;
                     }
+
                     std::size_t index = 0;
+
                     for (std::size_t i = 0; i < def->constructor_names.size(); ++i) {
                         const std::vector<AST::Type>& params = def->constructor_param_types[i];
                         std::size_t required = params.size();
@@ -1514,8 +1686,11 @@ namespace gallt {
                             const std::vector<std::unique_ptr<AST::Expression>>& defaults =
                                 fit->second->param_defaults;
                             for (std::size_t k = defaults.size(); k > 0; --k) {
-                                if (defaults[k - 1] != nullptr) required = k - 1;
-                                else break;
+                                if (defaults[k - 1] != nullptr) {
+                                    required = k - 1;
+                                } else {
+                                    break;
+                                }
                             }
                         }
                         if (expr->arguments.size() <= params.size() &&
@@ -1524,16 +1699,18 @@ namespace gallt {
                             break;
                         }
                     }
+
                     std::string ctor_name = resolved_ctor_name.empty()
                         ? def->constructor_names[index] : resolved_ctor_name;
                     std::string callee = function_reference(ctor_name);
                     if (!callee.empty()) {
                         std::vector<AST::Expression*> ctor_args;
-                        for (auto& arg : expr->arguments) ctor_args.push_back(arg.get());
+                        for (auto& arg : expr->arguments) { ctor_args.push_back(arg.get()); }
                         collect_constructor_defaults(ctor_name, ctor_args);
                         std::string call_text = "call void " + callee + "(ptr " + storage;
                         const std::vector<AST::Type>& params =
                             def->constructor_param_types[index];
+
                         for (std::size_t i = 0; i < ctor_args.size(); ++i) {
                             ExprValue value = gen_expr(ctor_args[i]);
                             AST::Type want = i < params.size() ? params[i] : value.type;
@@ -1542,8 +1719,7 @@ namespace gallt {
                                     value.type.kind == TypeKind::String)) {
                                 call_text += ", ptr " +
                                     aggregate_argument_pointer(want, value);
-                            }
-                            else {
+                            } else {
                                 call_text += ", " + llvm_type(want) + " " +
                                     convert_value(value.value, value.type, want);
                             }
@@ -1552,12 +1728,14 @@ namespace gallt {
                         call_text += ")";
                         emit_line(call_text);
                     }
+
                     if (def->needs_destruction) {
                         CleanupRecord record;
                         record.type = temp_type;
                         record.address = storage;
                         statement_temporaries_.push_back(record);
                     }
+
                     out.type = temp_type;
                     out.value = storage;
                     out.address = storage;
@@ -1565,32 +1743,36 @@ namespace gallt {
                     return out;
                 }
             }
+
             if (direct == nullptr) {
                 if (auto* member_access = dynamic_cast<AST::PostfixExpression*>(expr->base.get())) {
                     if ((member_access->op == AST::PostfixExpression::Operator::Dot ||
                         member_access->op == AST::PostfixExpression::Operator::Arrow) &&
                         member_access->member_name == "destructor") {
                         AST::Type owner = resolved_type(member_access->base.get());
-                        if (member_access->op == AST::PostfixExpression::Operator::Arrow &&
-                            owner.kind == TypeKind::Pointer && owner.pointee_type) {
-                            owner = *owner.pointee_type;
-                        }
-                        if (owner.kind == TypeKind::Struct) {
+                            if (member_access->op == AST::PostfixExpression::Operator::Arrow &&
+                                owner.kind == TypeKind::Pointer && owner.pointee_type) {
+                                owner = *owner.pointee_type;
+                            }
+
+                            if (owner.kind == TypeKind::Struct) {
                             ExprValue base_value = gen_expr(member_access->base.get());
                             std::string address = base_value.value;
                             if (member_access->op == AST::PostfixExpression::Operator::Dot) {
                                 std::string object_address =
                                     gen_address(member_access->base.get());
-                                if (!object_address.empty()) address = object_address;
+                                if (!object_address.empty()) { address = object_address; }
                             }
+
                             auto it = struct_by_name_.find(owner.struct_name);
                             if (it != struct_by_name_.end() && it->second != nullptr) {
-                                AST::StructDefinition* def = it->second;
-                                std::string symbol = def->destructor_name;
-                                if (symbol.empty()) {
-                                    symbol = "__sgc_dtor$" + def->name;
-                                }
-                                std::string callee = function_reference(symbol);
+                            AST::StructDefinition* def = it->second;
+                            std::string symbol = def->destructor_name;
+                            if (symbol.empty()) {
+                                symbol = "__sgc_dtor$" + def->name;
+                            }
+
+                            std::string callee = function_reference(symbol);
                                 if (!callee.empty() && !address.empty()) {
                                     emit_line("call void " + callee + "(ptr " + address + ")");
                                 }
@@ -1606,6 +1788,9 @@ namespace gallt {
             std::vector<AST::Type> params;
             std::string callee;
             bool pointer_call = false;
+            bool variadic_callee = false;
+            bool c_variadic_callee = false;
+
             if (!direct_name.empty()) {
                 if (direct_name == "main") {
                     callee = "@main";
@@ -1617,29 +1802,30 @@ namespace gallt {
                             const AST::FunctionDefinition* f = resolved->second;
                             callee = source_function_symbol(f->name);
                             params = f->parameters;
+                            variadic_callee = f->is_variadic;
                             func_type = AST::Type::make_function(
                                 std::make_shared<AST::Type>(f->return_type), params);
-                        }
-                        else {
+                        } else {
                             auto resolved_ext = resolved_externs_.find(callee_node);
                             if (resolved_ext != resolved_externs_.end() &&
                                 resolved_ext->second != nullptr) {
                                 const AST::ExternDeclaration* e = resolved_ext->second;
                                 callee = "@" + extern_ir_symbol(e);
                                 params = e->parameters;
+                                c_variadic_callee = e->c_variadic;
                                 func_type = AST::Type::make_function(
                                     std::make_shared<AST::Type>(e->return_type), params);
                             }
                         }
                     }
                     if (!callee.empty()) {
-                    }
-                    else {
+                    } else {
                     auto fit = function_by_name_.find(direct_name);
                     if (fit != function_by_name_.end()) {
                         AST::FunctionDefinition* f = fit->second;
                         callee = source_function_symbol(f->name);
                         params = f->parameters;
+                        variadic_callee = f->is_variadic;
                         func_type = AST::Type::make_function(
                             std::make_shared<AST::Type>(f->return_type), params);
                     } else {
@@ -1648,22 +1834,28 @@ namespace gallt {
                             AST::ExternDeclaration* e = eit->second;
                             callee = "@" + extern_ir_symbol(e);
                             params = e->parameters;
+                            c_variadic_callee = e->c_variadic;
                             func_type = AST::Type::make_function(
                                 std::make_shared<AST::Type>(e->return_type), params);
                         }
                     }
                     }
+
                     if (callee.empty()) {
                         direct_name.clear();
                         ExprValue base = gen_expr(expr->base.get());
                         if (base.type.kind == TypeKind::Function) {
                             func_type = base.type;
-                            params = func_type.parameter_types;
                         } else if (base.type.kind == TypeKind::Pointer &&
                             base.type.pointee_type &&
                             base.type.pointee_type->kind == TypeKind::Function) {
                             func_type = *base.type.pointee_type;
-                            params = func_type.parameter_types;
+                        }
+                        variadic_callee = func_type.is_variadic &&
+                            func_type.variadic_element_type != nullptr;
+                        params = func_type.parameter_types;
+                        if (variadic_callee) {
+                            params.push_back(*func_type.variadic_element_type);
                         }
                         pointer_call = true;
                         callee = base.value;
@@ -1673,31 +1865,44 @@ namespace gallt {
                 ExprValue base = gen_expr(expr->base.get());
                 if (base.type.kind == TypeKind::Function) {
                     func_type = base.type;
-                    params = func_type.parameter_types;
                 } else if (base.type.kind == TypeKind::Pointer && base.type.pointee_type &&
                     base.type.pointee_type->kind == TypeKind::Function) {
                     func_type = *base.type.pointee_type;
-                    params = func_type.parameter_types;
+                }
+                variadic_callee = func_type.is_variadic &&
+                    func_type.variadic_element_type != nullptr;
+                params = func_type.parameter_types;
+                if (variadic_callee) {
+                    params.push_back(*func_type.variadic_element_type);
                 }
                 pointer_call = true;
                 callee = base.value;
             }
+
             if (callee.empty() || func_type.return_type == nullptr) {
                 return out;
             }
+
             return_type = *func_type.return_type;
 
-           std::vector<std::string> ir_args;
+            std::vector<std::string> ir_args;
             std::vector<std::string> owned_args;
+            std::vector<std::string> ir_arg_types;
+            std::string pack_heap;
             std::vector<AST::Expression*> all_args;
+
             if (!expr->arguments.empty() || !expr->appended_defaults.empty()) {
                 all_args.reserve(expr->arguments.size() + expr->appended_defaults.size());
-                for (auto& a : expr->arguments) all_args.push_back(a.get());
-                for (AST::Expression* d : expr->appended_defaults) all_args.push_back(d);
-            }
-            else {
+                for (auto& a : expr->arguments) { all_args.push_back(a.get()); }
+                for (AST::Expression* d : expr->appended_defaults) { all_args.push_back(d); }
+            } else {
                 all_args = expr->borrowed_arguments;
             }
+
+            if (variadic_callee && !params.empty()) {
+                gen_variadic_call_arguments(all_args, params, ir_args, ir_arg_types,
+                    owned_args, pack_heap);
+            } else {
             for (size_t i = 0; i < all_args.size(); ++i) {
                 ExprValue arg = gen_expr(all_args[i]);
                 if (!arg.owned_string.empty()) {
@@ -1717,22 +1922,47 @@ namespace gallt {
                 } else {
                     ir_args.push_back(convert_value(arg.value, arg.type, want));
                 }
+                if (i < params.size()) {
+                    ir_arg_types.push_back(std::string());
+                } else if (arg.type.kind == TypeKind::String) {
+                    ir_arg_types.push_back("ptr");
+                } else if (arg.type.kind == TypeKind::Float) {
+                    std::string promoted = new_temp("cvararg");
+                    emit_line(promoted + " = fpext float " + ir_args.back() +
+                        " to double");
+                    ir_args.back() = promoted;
+                    ir_arg_types.push_back("double");
+                } else if (arg.type.kind == TypeKind::Char ||
+                    arg.type.kind == TypeKind::Uchar ||
+                    arg.type.kind == TypeKind::Bool) {
+                    std::string promoted = new_temp("cvararg");
+                    emit_line(promoted + " = sext i8 " + ir_args.back() +
+                        " to i32");
+                    ir_args.back() = promoted;
+                    ir_arg_types.push_back("i32");
+                } else {
+                    ir_arg_types.push_back(aggregate_parameter_uses_pointer(want)
+                        ? std::string("ptr") : llvm_type(arg.type));
+                }
+            }
             }
 
             std::string ret_ir = llvm_type(return_type);
-            if (return_type.kind == TypeKind::Function) ret_ir = "ptr";
+            if (return_type.kind == TypeKind::Function) { ret_ir = "ptr"; }
+
             if (pointer_call && !callee.empty()) {
                 emit_line("call void @gallt_check_fptr(ptr " + callee + ")");
             }
+
             bool extern_call = !direct_name.empty() && function_is_extern(direct_name);
             bool sret_call = returns_via_sret(return_type) && !extern_call;
             std::string sret_storage;
+
             if (sret_call) {
                 if (!pending_sret_destination_.empty()) {
                     sret_storage = pending_sret_destination_;
                     pending_sret_destination_.clear();
-                }
-                else {
+                } else {
                     sret_storage = emit_alloca(llvm_type(return_type), "sret_temp");
                     bool needs_cleanup = type_contains_string(return_type);
                     if (!needs_cleanup) {
@@ -1749,15 +1979,21 @@ namespace gallt {
                 }
                 ret_ir = "void";
             }
+
             std::string call_text = "call " + ret_ir + " " + callee + "(";
             if (sret_call) {
                 call_text += "ptr " + sret_storage;
             }
+
             for (size_t i = 0; i < ir_args.size(); ++i) {
-                if (i != 0 || sret_call) call_text += ", ";
+                if (i != 0 || sret_call) { call_text += ", "; }
+                if (i < ir_arg_types.size() && !ir_arg_types[i].empty()) {
+                    call_text += ir_arg_types[i] + " " + ir_args[i];
+                    continue;
+                }
                 AST::Type want = (i < params.size()) ? params[i] : out.type;
-                if (want.kind == TypeKind::Function) want = Type::make_pointer(
-                    std::make_shared<Type>(Type::make_void()));
+                if (want.kind == TypeKind::Function) { want = Type::make_pointer(
+                    std::make_shared<Type>(Type::make_void())); }
                 std::string want_type = llvm_type(want);
                 if (direct_name.empty()) {
                     want_type = i < params.size() ? parameter_ir_type(params[i]) : "ptr";
@@ -1769,6 +2005,7 @@ namespace gallt {
                 }
                 call_text += want_type + " " + ir_args[i];
             }
+
             call_text += ")";
             if (sret_call) {
                 emit_line(call_text);
@@ -1778,8 +2015,7 @@ namespace gallt {
                 out.value = new_temp("sret_value");
                 emit_line(out.value + " = load " + llvm_type(return_type) +
                     ", ptr " + sret_storage);
-            }
-            else if (return_type.kind == TypeKind::Void) {
+            } else if (return_type.kind == TypeKind::Void) {
                 emit_line(call_text);
             } else {
                 out.value = new_temp("callresult");
@@ -1793,8 +2029,13 @@ namespace gallt {
                     out.owned_string = storage;
                 }
             }
+
             for (const std::string& owned : owned_args) {
                 emit_line("call void @gallt_string_destroy(ptr " + owned + ")");
+            }
+
+            if (!pack_heap.empty()) {
+                emit_line("call void @gallt_free_ptr(ptr " + pack_heap + ")");
             }
             return out;
         }
@@ -1818,17 +2059,21 @@ namespace gallt {
         bool rs_owned = false;
         std::string ls = string_value_or_converted(l, &ls_owned);
         std::string rs = string_value_or_converted(r, &rs_owned);
+
         out.value = emit_alloca(llvm_type(Type::make_string()), "concat_result");
         emit_line("call void @llvm.memset.p0.i64(ptr " + out.value +
             ", i8 0, i64 32, i1 false)");
         emit_line("call void @gallt_string_concat(ptr " + out.value +
             ", ptr " + ls + ", ptr " + rs + ")");
+
         if (ls_owned) {
             emit_line("call void @gallt_string_destroy(ptr " + ls + ")");
         }
+
         if (rs_owned) {
             emit_line("call void @gallt_string_destroy(ptr " + rs + ")");
         }
+
         destroy_owned_string(l);
         destroy_owned_string(r);
         out.owned_string = out.value;
@@ -1836,12 +2081,15 @@ namespace gallt {
     }
 
     std::string CodeGenerator::string_value_or_converted(const ExprValue& v, bool* owned_temp) {
-        if (owned_temp != nullptr) *owned_temp = false;
+        if (owned_temp != nullptr) { *owned_temp = false; }
+
         if (v.type.kind == TypeKind::String) {
             return !v.address.empty() ? v.address : v.value;
         }
+
         std::string result = emit_alloca(llvm_type(Type::make_string()), "scalarstring");
-        if (owned_temp != nullptr) *owned_temp = true;
+        if (owned_temp != nullptr) { *owned_temp = true; }
+
         switch (v.type.kind) {
         case TypeKind::Int:
             emit_line("call void @gallt_string_from_i32(ptr " + result +

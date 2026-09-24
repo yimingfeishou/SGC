@@ -20,51 +20,61 @@ namespace gallt {
                 "invalid return type in extern declaration");
             return;
         }
+
         for (const auto& p : node->parameters) {
             if (p.kind == TypeKind::Void) {
                 report_error(node->location, ErrorCode::VoidParameter,
                     "parameter cannot have void type in extern declaration");
             }
+
             if (!is_complete_type(p)) {
                 report_error(node->location, ErrorCode::ExpressionSyntaxError,
                     "incomplete parameter type in extern declaration");
             }
         }
+
         Symbol sym = Symbol::make_function(
             node->name, node->return_type,
             node->parameters, node->param_names,
             node->location, nullptr);
         sym.extern_node = node;
         Symbol* existing = sym_table_.lookup_current(node->name);
+
         if (existing != nullptr) {
             if (existing->kind != SymbolKind::Function) {
                 report_error(node->location, ErrorCode::RedefinedIdentifier,
                     "identifier '" + node->name + "' already declared");
                 return;
             }
+
             if (!sym_table_.declare_overload(sym)) {
                 report_error(node->location, ErrorCode::RedefinedFunction,
                     "function '" + node->name +
                     "' already declared with the same parameter list");
                 return;
             }
+
             if (std::vector<Symbol>* set = sym_table_.lookup_overloads(node->name)) {
                 for (const Symbol& other : *set) {
-                    if (&other == &(*set).back()) continue;
+                    if (&other == &(*set).back()) { continue; }
+
                     if (overloads_ambiguous_by_defaults(other, (*set).back())) {
                         report_error(node->location, ErrorCode::OverloadAmbiguous, { node->name });
                         break;
                     }
                 }
             }
+
             mangle_overload_set(node->name);
             return;
         }
+
         if (!sym_table_.declare(sym)) {
             report_error(node->location, ErrorCode::RedefinedFunction,
                 "function '" + node->name + "' already declared");
             return;
         }
+
         sym_table_.declare_overload(sym);
     }
 
@@ -81,27 +91,29 @@ namespace gallt {
         }
 
         bool overloaded = false;
+
         for (auto& top : program_->top_levels) {
-            if (top.get() == node) continue;
+            if (top.get() == node) { continue; }
             if (auto* other = dynamic_cast<AST::FunctionDefinition*>(top.get())) {
                 if (other->name == node->name) {
                     overloaded = true;
                     break;
                 }
-            }
-            else if (auto* ext = dynamic_cast<AST::ExternDeclaration*>(top.get())) {
+            } else if (auto* ext = dynamic_cast<AST::ExternDeclaration*>(top.get())) {
                 if (ext->name == node->name) {
                     overloaded = true;
                     break;
                 }
             }
         }
+
         if (!overloaded) {
             if (const std::vector<Symbol>* set = sym_table_.lookup_overloads(
                 node->name)) {
-                if (set->size() > 1) overloaded = true;
+                if (set->size() > 1) { overloaded = true; }
             }
         }
+
         if (overloaded) {
             diag_.report_error_template(node->location,
                 ErrorCode::ExportFunctionCannotBeOverloaded, { node->name });
@@ -109,21 +121,22 @@ namespace gallt {
         }
 
         std::string conflict_kind;
+
         if (const Symbol* existing = sym_table_.lookup(node->name)) {
             if (existing->kind != SymbolKind::Function) {
                 conflict_kind = export_conflict_kind_name(existing->kind);
             }
         }
+
         if (conflict_kind.empty()) {
             for (auto& top : program_->top_levels) {
-                if (top.get() == node) continue;
+                if (top.get() == node) { continue; }
                 if (auto* var = dynamic_cast<AST::VariableDeclaration*>(top.get())) {
                     if (var->name == node->name) {
                         conflict_kind = "variable";
                         break;
                     }
-                }
-                else if (auto* def = dynamic_cast<AST::StructDefinition*>(top.get())) {
+                } else if (auto* def = dynamic_cast<AST::StructDefinition*>(top.get())) {
                     if (def->name == node->name) {
                         conflict_kind = "type";
                         break;
@@ -131,6 +144,7 @@ namespace gallt {
                 }
             }
         }
+
         if (!conflict_kind.empty()) {
             diag_.report_error_template(node->location,
                 ErrorCode::ExportFunctionDeclarationConflict,
@@ -141,24 +155,43 @@ namespace gallt {
     }
 
     void TypeChecker::check_function_definition(AST::FunctionDefinition* node) {
+        const std::size_t pack_depth = variadic_packs_.size();
         if (node->is_export) {
             validate_export_function(node);
         }
+
+        if (node->is_variadic) {
+            if (node->parameters.empty() ||
+                node->param_names.size() < node->parameters.size() ||
+                node->param_names.back().empty()) {
+                report_error(node->location, ErrorCode::VariadicParameterNotLast,
+                    "a variadic parameter must be the last parameter in the parameter list");
+            }
+
+            if (node->name == "main") {
+                report_error(node->location, ErrorCode::MainSignatureError,
+                    "main function may not declare a variadic parameter");
+            }
+        }
+
         if (!is_complete_type(node->return_type) && node->return_type.kind != TypeKind::Void) {
             report_error(node->location, ErrorCode::ExpressionSyntaxError,
                 "invalid return type in function definition");
             return;
         }
+
         for (size_t i = 0; i < node->parameters.size(); ++i) {
             const auto& p = node->parameters[i];
             if (p.kind == TypeKind::Void) {
                 report_error(node->location, ErrorCode::VoidParameter,
                     "parameter cannot have void type");
             }
+
             if (!is_complete_type(p) && p.kind != TypeKind::Void) {
                 report_error(node->location, ErrorCode::ExpressionSyntaxError,
                     "incomplete parameter type for parameter " + std::to_string(i));
             }
+
             if (i < node->param_names.size() && !node->param_names[i].empty()) {
                 for (size_t j = 0; j < i; ++j) {
                     if (node->param_names[j] == node->param_names[i]) {
@@ -169,6 +202,7 @@ namespace gallt {
                 }
             }
         }
+
         if (auto* existing = sym_table_.lookup(node->name)) {
             if (existing->kind == SymbolKind::Function) {
                 if (existing->function_node == nullptr) {
@@ -182,22 +216,24 @@ namespace gallt {
                                 "' does not match its extern declaration return type");
                         }
                         existing->function_node = node;
+
                         if (existing->param_names.empty() && !node->param_names.empty()) {
                             existing->param_names = node->param_names;
                         }
-                    }
-                    else {
+                    } else {
                         Symbol overload_sym = Symbol::make_function(node->name, node->return_type,
-                            node->parameters, node->param_names, node->location, node);
+                            node->parameters, node->param_names, node->location, node,
+                            node->is_variadic);
                         if (!sym_table_.declare_overload(overload_sym)) {
                             report_error(node->location, ErrorCode::RedefinedFunction,
                                 "function '" + node->name +
                                 "' already defined with the same parameter list");
                             return;
                         }
+
                         if (std::vector<Symbol>* set = sym_table_.lookup_overloads(node->name)) {
                             for (const Symbol& other : *set) {
-                                if (&other == &(*set).back()) continue;
+                                if (&other == &(*set).back()) { continue; }
                                 if (overloads_ambiguous_by_defaults(other, (*set).back())) {
                                     report_error(node->location, ErrorCode::OverloadAmbiguous,
                                         { node->name });
@@ -205,22 +241,23 @@ namespace gallt {
                                 }
                             }
                         }
+
                         mangle_overload_set(node->name);
                     }
-                }
-                else {
+                } else {
                     Symbol overload_sym = Symbol::make_function(
                         node->name, node->return_type, node->parameters, node->param_names,
-                        node->location, node);
+                        node->location, node, node->is_variadic);
                     if (!sym_table_.declare_overload(overload_sym)) {
                         report_error(node->location, ErrorCode::RedefinedFunction,
                             "function '" + node->name +
                             "' already defined with the same parameter list");
                         return;
                     }
+
                     if (std::vector<Symbol>* set = sym_table_.lookup_overloads(node->name)) {
                         for (const Symbol& other : *set) {
-                            if (&other == &(*set).back()) continue;
+                            if (&other == &(*set).back()) { continue; }
                             if (overloads_ambiguous_by_defaults(other, (*set).back())) {
                                 report_error(node->location, ErrorCode::OverloadAmbiguous,
                                     { node->name });
@@ -228,20 +265,19 @@ namespace gallt {
                             }
                         }
                     }
+
                     mangle_overload_set(node->name);
                 }
-            }
-            else {
+            } else {
                 report_error(node->location, ErrorCode::RedefinedIdentifier,
                     "identifier '" + node->name + "' already declared as non-function");
                 return;
             }
-        }
-        else {
+        } else {
             Symbol sym = Symbol::make_function(
                 node->name, node->return_type,
                 node->parameters, node->param_names,
-                node->location, node
+                node->location, node, node->is_variadic
             );
             if (!sym_table_.declare(sym)) {
                 report_error(node->location, ErrorCode::RedefinedFunction,
@@ -250,8 +286,10 @@ namespace gallt {
             }
             sym_table_.declare_overload(sym);
         }
-       enter_scope();
-       for (size_t i = 0; i < node->parameters.size(); ++i) {
+
+        enter_scope();
+
+        for (size_t i = 0; i < node->parameters.size(); ++i) {
             std::string pname = (i < node->param_names.size() && !node->param_names[i].empty())
                 ? node->param_names[i]
                 : "_param" + std::to_string(i);
@@ -264,10 +302,22 @@ namespace gallt {
                     "parameter '" + pname + "' already declared");
             }
         }
-       current_function_ = node;
+
+        current_function_ = node;
+
+        if (node->is_variadic && !node->parameters.empty() &&
+            node->param_names.size() == node->parameters.size() &&
+            !node->param_names.back().empty()) {
+            VariadicPack pack;
+            pack.name = node->param_names.back();
+            pack.element = node->parameters.back();
+            variadic_packs_.push_back(std::move(pack));
+        }
+
         for (size_t i = 0; i < node->param_defaults.size() && i < node->parameters.size(); ++i) {
-            if (node->param_defaults[i] == nullptr) continue;
+            if (node->param_defaults[i] == nullptr) { continue; }
             AST::Type default_type = check_expression(node->param_defaults[i].get());
+
             if (!can_implicit_convert(default_type, node->parameters[i])) {
                 report_error(node->param_defaults[i]->location,
                     ErrorCode::FunctionArgTypeMismatch,
@@ -277,40 +327,42 @@ namespace gallt {
                     node->parameters[i].to_string() + "'");
             }
         }
-       if (node->body) {
+
+        if (node->body) {
             check_statement(node->body.get());
         }
+
         if (node->return_type.kind != TypeKind::Void) {
             bool has_return = false;
             std::function<void(AST::Statement*)> check_return_presence = [&](AST::Statement* stmt) {
                 if (auto* ret = dynamic_cast<AST::ReturnStatement*>(stmt)) {
                     has_return = true;
-                }
-                else if (auto* block = dynamic_cast<AST::Block*>(stmt)) {
+                } else if (auto* block = dynamic_cast<AST::Block*>(stmt)) {
                     for (auto& s : block->statements) {
                         check_return_presence(s.get());
                     }
-                }
-                else if (auto* ifs = dynamic_cast<AST::IfStatement*>(stmt)) {
+                } else if (auto* ifs = dynamic_cast<AST::IfStatement*>(stmt)) {
                     check_return_presence(ifs->then_block.get());
                     if (ifs->else_block) {
                         check_return_presence(ifs->else_block.get());
                     }
-                }
-                else if (auto* for_ = dynamic_cast<AST::ForStatement*>(stmt)) {
+                } else if (auto* for_ = dynamic_cast<AST::ForStatement*>(stmt)) {
                     check_return_presence(for_->body.get());
-                }
-                else if (auto* while_ = dynamic_cast<AST::WhileStatement*>(stmt)) {
+                } else if (auto* while_ = dynamic_cast<AST::WhileStatement*>(stmt)) {
                     check_return_presence(while_->body.get());
                 }
                 };
+
             check_return_presence(node->body.get());
+
             if (!has_return) {
                 report_error(node->location, ErrorCode::MissingReturnStatement,
                     "non-void function '" + node->name + "' must return a value");
             }
         }
+
         exit_scope();
+        variadic_packs_.resize(pack_depth);
         current_function_ = nullptr;
     }
 
@@ -323,23 +375,25 @@ namespace gallt {
                 }
             }
         }
+
         for (auto& member : node->members) {
             if (member.array_size.has_value() && !member.type.array_size.has_value() &&
                 member.type.kind == TypeKind::Array) {
                 member.type.array_size = member.array_size;
             }
+
             if (member.type.kind == TypeKind::Array && !member.array_size.has_value() &&
                 member.array_size_expr != nullptr) {
                 auto value = evaluate_const_integer_expression(member.array_size_expr.get());
                 if (value.has_value() && *value > 0) {
                     member.array_size = static_cast<std::size_t>(*value);
                     member.type.array_size = member.array_size;
-                }
-                else {
+                } else {
                     report_error(member.location, ErrorCode::ArraySizeNotConstant,
-                        "array size in a declaration must be a constant integer expression");
+                    "array size in a declaration must be a constant integer expression");
                 }
             }
+
             AST::Type& mem_type = member.type;
             std::vector<std::string> containment_visited;
             containment_visited.push_back(node->name);
@@ -348,11 +402,13 @@ namespace gallt {
                 report_error(member.location, ErrorCode::StructSelfRefNonPtr,
                     "struct cannot directly contain itself; use pointer");
             }
+
             if (mem_type.kind == TypeKind::Pointer && mem_type.pointee_type) {
                 if (mem_type.pointee_type->kind == TypeKind::Struct &&
                     mem_type.pointee_type->struct_name == node->name) {
                 }
             }
+
             if (!is_complete_type(mem_type) && mem_type.kind != TypeKind::Void) {
                 if (!(mem_type.kind == TypeKind::Pointer && mem_type.pointee_type &&
                     mem_type.pointee_type->kind == TypeKind::Struct &&
@@ -361,6 +417,7 @@ namespace gallt {
                         "incomplete type for struct member '" + member.name + "'");
                 }
             }
+
             if (mem_type.kind == TypeKind::Function) {
                 if (!is_complete_type(*mem_type.return_type) && mem_type.return_type->kind != TypeKind::Void) {
                     report_error(member.location, ErrorCode::ExpressionSyntaxError,
@@ -373,10 +430,12 @@ namespace gallt {
                     }
                 }
             }
+
             if (member.array_size.has_value() && member.array_size.value() == 0) {
                 report_error(member.location, ErrorCode::ExpressionSyntaxError,
                     "array size must be positive");
             }
+
             if (member.initializer) {
                 if (auto* expr_init = dynamic_cast<AST::ExpressionInitializer*>(member.initializer.get())) {
                     AST::Type init_type = check_expression(expr_init->expr.get());
@@ -385,29 +444,28 @@ namespace gallt {
                             "initializer type '" + init_type.to_string() +
                             "' cannot be converted to member type '" + mem_type.to_string() + "'");
                     }
-                }
-                else if (auto* arr_init = dynamic_cast<AST::ArrayInitializer*>(member.initializer.get())) {
+                } else if (auto* arr_init = dynamic_cast<AST::ArrayInitializer*>(member.initializer.get())) {
                     if (mem_type.kind != TypeKind::Array) {
                         report_error(member.location, ErrorCode::StructMemberTypeMismatch,
                             "array initializer for non-array member");
-                    }
-                    else {
+                    } else {
                         size_t elem_count = arr_init->elements.size();
                         if (!mem_type.array_size.has_value()) {
                             if (elem_count == 0) {
                                 report_error(member.location, ErrorCode::EmptyArrayInitializer,
                                     "cannot infer array size from empty initializer");
-                            }
-                            else {
+                            } else {
                                 mem_type.array_size = elem_count;
                                 member.array_size = elem_count;
                             }
                         }
+
                         if (mem_type.array_size.has_value() && mem_type.array_size.value() != elem_count) {
                             report_error(member.location, ErrorCode::ArrayLengthMismatch,
                                 "array initializer size " + std::to_string(elem_count) +
                                 " does not match declared size " + std::to_string(mem_type.array_size.value()));
                         }
+
                         auto elem_type = mem_type.element_type;
                         for (auto& elem : arr_init->elements) {
                             if (auto* e = dynamic_cast<AST::ExpressionInitializer*>(elem.get())) {
@@ -428,6 +486,7 @@ namespace gallt {
         if (decl->type.is_const) {
             check_const_declaration(decl);
         }
+
         if (decl->type.kind == TypeKind::Array) {
             if (decl->array_size.has_value() && !decl->type.array_size.has_value()) {
                 decl->type.array_size = decl->array_size;
@@ -436,46 +495,54 @@ namespace gallt {
                 decl->array_size = decl->type.array_size;
             }
             if (!decl->array_size.has_value() && decl->array_size_expr != nullptr) {
+                if (expression_mentions_variadic_pack(decl->array_size_expr.get())) {
+                    report_error(decl->array_size_expr->location,
+                        ErrorCode::ParameterPackInConstantExpression,
+                        "a variadic parameter pack cannot be used in a compile-time constant expression");
+                }
                 auto value = evaluate_const_integer_expression(decl->array_size_expr.get());
                 if (value.has_value() && *value > 0) {
                     decl->type.array_size = static_cast<std::size_t>(*value);
                     decl->array_size = static_cast<std::size_t>(*value);
-                }
-                else {
+                } else {
                     report_error(decl->array_size_expr->location,
                         ErrorCode::ArraySizeNotConstant,
                         "array size in a declaration must be a constant integer expression");
                 }
             }
         }
+
         if (decl->type.kind == TypeKind::Array && !decl->array_size.has_value()) {
             if (auto* arr_init = dynamic_cast<AST::ArrayInitializer*>(decl->initializer.get())) {
                 if (!arr_init->elements.empty()) {
                     decl->type.array_size = arr_init->elements.size();
                     decl->array_size = arr_init->elements.size();
-                }
-                else {
+                } else {
                     report_error(decl->location, ErrorCode::EmptyArrayInitializer,
                         "cannot infer array size from an empty initializer");
                     return;
                 }
             }
         }
+
         if (!is_complete_type(decl->type) && decl->type.kind != TypeKind::Void) {
             report_error(decl->location, ErrorCode::ExpressionSyntaxError,
                 "incomplete type in variable declaration");
             return;
         }
+
         if (decl->type.kind == TypeKind::Void) {
             report_error(decl->location, ErrorCode::ExpressionSyntaxError,
                 "variable cannot have void type");
             return;
         }
+
         if (auto* existing = sym_table_.lookup_current(decl->name)) {
             report_error(decl->location, ErrorCode::RedefinedIdentifier,
                 "variable '" + decl->name + "' already declared in this scope");
             return;
         }
+
         if (const std::vector<Symbol>* set =
                 sym_table_.current_scope().overloads(decl->name)) {
             if (!set->empty()) {
@@ -485,6 +552,7 @@ namespace gallt {
                 return;
             }
         }
+
         if (decl->type.kind == TypeKind::Array) {
             if (!decl->array_size.has_value()) {
                 if (decl->initializer) {
@@ -497,30 +565,27 @@ namespace gallt {
                         }
                         decl->type.array_size = size;
                         decl->array_size = size;
-                    }
-                    else if (auto* expr_init = dynamic_cast<AST::ExpressionInitializer*>(decl->initializer.get())) {
+                    } else if (auto* expr_init = dynamic_cast<AST::ExpressionInitializer*>(decl->initializer.get())) {
                         report_error(decl->location, ErrorCode::ExpressionSyntaxError,
                             "array initializer must be a braced list");
                         return;
-                    }
-                    else {
+                    } else {
                         report_error(decl->location, ErrorCode::ExpressionSyntaxError,
                             "array size must be specified or inferred from initializer");
                         return;
                     }
-                }
-                else {
+                } else {
                     report_error(decl->location, ErrorCode::ArraySizeNotConstant,
                         "array size must be specified");
                     return;
                 }
-            }
-            else if (decl->array_size.value() == 0) {
+            } else if (decl->array_size.value() == 0) {
                 report_error(decl->location, ErrorCode::ExpressionSyntaxError,
                     "array size must be positive");
                 return;
             }
         }
+
         if (decl->initializer) {
             if (decl->type.kind == TypeKind::Struct) {
                 if (auto* arr_init =
@@ -544,11 +609,13 @@ namespace gallt {
                     }
                 }
             }
+
             if (auto* expr_init = dynamic_cast<AST::ExpressionInitializer*>(decl->initializer.get())) {
                 const AST::Type* saved_expected = expected_type_;
                 expected_type_ = &decl->type;
                 AST::Type init_type = check_expression(expr_init->expr.get());
                 expected_type_ = saved_expected;
+
                 if (decl->type.kind == TypeKind::Struct && init_type.kind == TypeKind::Struct &&
                     init_type.struct_name == decl->type.struct_name) {
                     if (is_move_expression(expr_init->expr.get())) {
@@ -556,18 +623,19 @@ namespace gallt {
                             diag_.report_error_template(decl->location,
                                 ErrorCode::NoMoveViolation, { decl->type.struct_name });
                         }
-                    }
-                    else if (!type_is_copyable(decl->type)) {
+                    } else if (!type_is_copyable(decl->type)) {
                         diag_.report_error_template(decl->location,
                             ErrorCode::NoCopyViolation, { decl->type.struct_name });
                     }
                 }
+
                 bool is_null = false;
                 if (auto* primary = dynamic_cast<AST::PrimaryExpression*>(expr_init->expr.get())) {
                     if (primary->kind == AST::PrimaryExpression::Kind::Null) {
                         is_null = true;
                     }
                 }
+
                 bool const_drop_reported = false;
                 if (decl->type.kind == TypeKind::Pointer &&
                     init_type.kind == TypeKind::Pointer &&
@@ -577,14 +645,21 @@ namespace gallt {
                     is_address_of_const_identifier(expr_init->expr.get())) {
                     const_drop_reported = true;
                 }
+
                 if (decl->type.kind == TypeKind::Function &&
                     init_type.kind == TypeKind::Function &&
                     !function_signatures_match(decl->type, init_type)) {
-                    report_error(decl->location, ErrorCode::FuncPtrTypeMismatch,
-                        "function pointer type mismatch: expected '" +
-                        decl->type.to_string() + "', got '" + init_type.to_string() + "'");
-                }
-                else if (decl->type.kind == TypeKind::Pointer &&
+                    if (decl->type.is_variadic || init_type.is_variadic) {
+                        diag_.report_error_template(decl->location,
+                            ErrorCode::VariadicFunctionPointerSignatureMismatch,
+                            { decl->type.to_string(), init_type.to_string() });
+                    } else {
+                        report_error(decl->location, ErrorCode::FuncPtrTypeMismatch,
+                            "function pointer type mismatch: expected '" +
+                            decl->type.to_string() + "', got '" +
+                            init_type.to_string() + "'");
+                    }
+                } else if (decl->type.kind == TypeKind::Pointer &&
                     init_type.kind == TypeKind::Pointer &&
                     decl->type.pointee_type && init_type.pointee_type &&
                     decl->type.pointee_type->kind != TypeKind::Void &&
@@ -598,42 +673,35 @@ namespace gallt {
                         "cannot initialize pointer '" + decl->name +
                         "' of type '" + decl->type.to_string() + "' with '" +
                         init_type.to_string() + "'");
-                }
-               else if ((!is_null || decl->type.kind != TypeKind::Pointer) &&
+                } else if ((!is_null || decl->type.kind != TypeKind::Pointer) &&
                    !const_drop_reported) {
-                   if (!can_implicit_convert(init_type, decl->type)) {
-                      if (is_null && decl->type.kind == TypeKind::File) {
-                      }
-                      else if (is_expression_parameter_temp(decl->initializer.get())) {
-                          diag_.report_error_template(decl->location,
+                    if (!can_implicit_convert(init_type, decl->type)) {
+                        if (is_null && decl->type.kind == TypeKind::File) {
+                        } else if (is_expression_parameter_temp(decl->initializer.get())) {
+                            diag_.report_error_template(decl->location,
                               ErrorCode::ExprParameterExpansionTypeError,
                               { decl->name, decl->type.to_string(),
                                 init_type.to_string() });
-                      }
-                      else if (decl->name.find("$expr") != std::string::npos) {
-                          diag_.report_error_template(decl->location,
+                        } else if (decl->name.find("$expr") != std::string::npos) {
+                            diag_.report_error_template(decl->location,
                               ErrorCode::ExprParameterExpansionTypeError,
                               { decl->name, decl->type.to_string(),
                                 init_type.to_string() });
-                      }
-                      else {
-                       report_error(decl->location, ErrorCode::AssignmentTypeMismatch,
+                        } else {
+                            report_error(decl->location, ErrorCode::AssignmentTypeMismatch,
                            "cannot initialize variable '" + decl->name +
                            "' with type '" + init_type.to_string() +
                            "' (expected '" + decl->type.to_string() + "')");
-                      }
-                   }
-               }
-            }
-            else if (auto* arr_init = dynamic_cast<AST::ArrayInitializer*>(decl->initializer.get())) {
+                        }
+                    }
+                }
+            } else if (auto* arr_init = dynamic_cast<AST::ArrayInitializer*>(decl->initializer.get())) {
                 if (decl->type.kind == TypeKind::Struct) {
                     check_struct_initializer(arr_init, decl->type, decl->location);
-                }
-                else if (decl->type.kind != TypeKind::Array) {
+                } else if (decl->type.kind != TypeKind::Array) {
                     report_error(decl->location, ErrorCode::AssignmentTypeMismatch,
                         "array initializer for non-array variable");
-                }
-                else {
+                } else {
                     check_array_initializer(arr_init, decl->type, decl->location);
                 }
             }
@@ -643,6 +711,7 @@ namespace gallt {
         if (decl->type.is_const) {
             sym.is_mutable = false;
         }
+
         if (!sym_table_.declare(sym)) {
             report_error(decl->location, ErrorCode::RedefinedIdentifier,
                 "variable '" + decl->name + "' already declared");
@@ -651,13 +720,18 @@ namespace gallt {
 
     void TypeChecker::check_struct_initializer(AST::ArrayInitializer* init,
         const AST::Type& struct_type, SourceLocation loc) {
-        if (init == nullptr) return;
+        if (init == nullptr) { return; }
         AST::StructDefinition* def = get_struct_definition(struct_type.struct_name);
         if (def == nullptr) {
             report_error(loc, ErrorCode::ExpressionSyntaxError,
                 "unknown struct type '" + struct_type.struct_name + "'");
             return;
         }
+
+        if (report_runtime_pack_expansion_in_initializer(init)) {
+            return;
+        }
+
         if (init->elements.size() > def->members.size()) {
             report_error(loc, ErrorCode::StructInitLengthMismatch,
                 "struct initializer has too many elements; expected at most " +
@@ -665,6 +739,7 @@ namespace gallt {
                 std::to_string(init->elements.size()));
             return;
         }
+
         auto check_member_expression = [&](AST::Expression* e, const AST::Type& target) {
             const AST::Type* saved = expected_type_;
             expected_type_ = &target;
@@ -678,24 +753,25 @@ namespace gallt {
             if (auto* nested = dynamic_cast<AST::ArrayInitializer*>(element)) {
                 if (member.type.kind == TypeKind::Struct) {
                     check_struct_initializer(nested, member.type, loc);
-                }
-                else if (member.type.kind == TypeKind::Array) {
+                } else if (member.type.kind == TypeKind::Array) {
                     check_array_initializer(nested, member.type, loc);
-                }
-                else {
+                } else {
                     report_error(element->location, ErrorCode::ExpressionSyntaxError,
                         "struct member requires an expression initializer");
                 }
                 continue;
             }
+
             auto* e = dynamic_cast<AST::ExpressionInitializer*>(element);
-            if (e == nullptr) continue;
+            if (e == nullptr) { continue; }
+
             if (member.type.kind == TypeKind::Array) {
                 report_error(e->location, ErrorCode::StructMemberTypeMismatch,
                     "array member '" + member.name + "' requires a braced initializer");
                 check_member_expression(e->expr.get(), member.type);
                 continue;
             }
+
             AST::Type init_type = check_member_expression(e->expr.get(), member.type);
             if (!can_implicit_convert(init_type, member.type)) {
                 report_error(e->location, ErrorCode::StructMemberTypeMismatch,
@@ -706,9 +782,14 @@ namespace gallt {
 
     void TypeChecker::check_array_initializer(AST::ArrayInitializer* init,
         const AST::Type& array_type, SourceLocation loc) {
-        if (init == nullptr || array_type.kind != TypeKind::Array) return;
+        if (init == nullptr || array_type.kind != TypeKind::Array) { return; }
         AST::Type element = array_type.element_type ? *array_type.element_type
             : AST::Type::make_void();
+
+        if (report_runtime_pack_expansion_in_initializer(init)) {
+            return;
+        }
+
         const std::size_t provided = init->elements.size();
         if (array_type.array_size.has_value()) {
             if (provided != array_type.array_size.value()) {
@@ -717,31 +798,31 @@ namespace gallt {
                     " does not match array size " +
                     std::to_string(array_type.array_size.value()));
             }
-        }
-        else if (provided == 0) {
+        } else if (provided == 0) {
             report_error(loc, ErrorCode::EmptyArrayInitializer,
                 "cannot infer array size from empty initializer");
         }
+
         for (auto& item : init->elements) {
             if (auto* nested = dynamic_cast<AST::ArrayInitializer*>(item.get())) {
                 if (element.kind == TypeKind::Struct) {
                     check_struct_initializer(nested, element, item->location);
-                }
-                else if (element.kind == TypeKind::Array) {
+                } else if (element.kind == TypeKind::Array) {
                     check_array_initializer(nested, element, item->location);
-                }
-                else {
+                } else {
                     report_error(item->location, ErrorCode::AssignmentTypeMismatch,
                         "nested braced initializer for a non-aggregate element");
                 }
                 continue;
             }
+
             auto* e = dynamic_cast<AST::ExpressionInitializer*>(item.get());
-            if (e == nullptr) continue;
+            if (e == nullptr) { continue; }
             const AST::Type* saved_expected = expected_type_;
             expected_type_ = &element;
             AST::Type value_type = check_expression(e->expr.get());
             expected_type_ = saved_expected;
+
             if (element.kind == TypeKind::Array) {
                 report_error(e->location, ErrorCode::AssignmentTypeMismatch,
                     "array element requires a braced initializer");

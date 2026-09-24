@@ -166,6 +166,21 @@ namespace gallt {
             { ErrorCode::ExportFunctionNameInvalid, "export function name '[name]' is not a legal identifier" },
             { ErrorCode::ExportFunctionCannotBeOverloaded, "export function '[name]' cannot be overloaded" },
             { ErrorCode::ExportFunctionDeclarationConflict, "export function '[name]' conflicts with an existing '[kind]' declaration" },
+            { ErrorCode::VariadicParameterNotLast, "a variadic parameter must be the last parameter in the parameter list" },
+            { ErrorCode::VariadicElementTypeIsVoid, "the element type of a variadic parameter cannot be void" },
+            { ErrorCode::VariadicParameterDefaultArgument, "a variadic parameter may not declare a default argument" },
+            { ErrorCode::ParameterPackUsedAsValue, "a parameter pack cannot be assigned, addressed, returned or used as an ordinary value" },
+            { ErrorCode::VariadicArgumentTypeMismatch, "variadic argument '[index]' type mismatch: expected '[type1]', got '[type2]'" },
+            { ErrorCode::PackExpansionTargetNotPack, "pack expansion target '[identifier]' is not a parameter pack in the current scope" },
+            { ErrorCode::PackExpansionNotAllowedHere, "a pack expansion may only appear in an argument list or an initializer list" },
+            { ErrorCode::PackSubscriptNotInteger, "parameter pack subscript must be of integer type, got '[type]'" },
+            { ErrorCode::ParameterPackPropertyNotApplicable, "parameter pack property '[property]' does not apply in this context" },
+            { ErrorCode::SpecialMemberVariadicNotAllowed, "special member function '[function]' may not be variadic" },
+            { ErrorCode::OperatorOverloadVariadicNotAllowed, "operator overload '[op]' may not be variadic" },
+            { ErrorCode::ExpressionParameterVariadicNotAllowed, "expression parameter '[name]' may not be variadic" },
+            { ErrorCode::ParameterPackInConstantExpression, "a variadic parameter pack cannot be used in a compile-time constant expression" },
+            { ErrorCode::VariadicFunctionPointerSignatureMismatch, "variadic function pointer signature mismatch: expected '[sig1]', got '[sig2]'" },
+            { ErrorCode::VariadicDefaultArgumentAmbiguous, "the combination of a variadic parameter and default arguments is ambiguous" },
         };
     }
 
@@ -175,6 +190,7 @@ namespace gallt {
                 return std::string(entry.text);
             }
         }
+
         return std::string();
     }
 
@@ -184,16 +200,19 @@ namespace gallt {
         out.reserve(tmpl.size() + 32);
         std::size_t index = 0;
         std::size_t i = 0;
+
         while (i < tmpl.size()) {
             if (tmpl[i] == '[') {
                 std::size_t close = tmpl.find(']', i);
                 bool placeholder_like = close != std::string_view::npos && close > i + 1;
+
                 for (std::size_t k = i + 1; placeholder_like && k < close; ++k) {
                     char c = tmpl[k];
                     if (!(std::isalnum(static_cast<unsigned char>(c)) || c == '_')) {
                         placeholder_like = false;
                     }
                 }
+
                 if (placeholder_like && index < values.size()) {
                     out.append(values[index]);
                     ++index;
@@ -201,29 +220,33 @@ namespace gallt {
                     continue;
                 }
             }
+
             out.push_back(tmpl[i]);
             ++i;
         }
+
         return out;
     }
 
-
     std::string Diagnostic::error_code_string(ErrorCode code) {
         std::string s = std::to_string(static_cast<std::uint16_t>(code));
+
         while (s.size() < 4u) {
             s.insert(s.begin(), '0');
         }
+
         return "ER " + s;
     }
 
     std::string Diagnostic::runtime_error_code_string(RuntimeErrorCode code) {
         std::string s = std::to_string(static_cast<std::uint16_t>(code));
+
         while (s.size() < 4u) {
             s.insert(s.begin(), '0');
         }
+
         return "RTER " + s;
     }
-
 
     std::string DiagnosticEngine::severity_prefix(DiagnosticSeverity sev) {
         switch (sev) {
@@ -231,6 +254,7 @@ namespace gallt {
         case DiagnosticSeverity::Warning: return "warning";
         case DiagnosticSeverity::Note:    return "note";
         }
+
         return "note";
     }
 
@@ -246,6 +270,7 @@ namespace gallt {
         d.code = code;
         d.message = format_message(code, msg);
         diagnostics_.push_back(std::move(d));
+
         if (sev == DiagnosticSeverity::Error) {
             ++error_count_;
         } else if (sev == DiagnosticSeverity::Warning) {
@@ -260,6 +285,7 @@ namespace gallt {
         d.code = ErrorCode::ExpressionSyntaxError;
         d.message = std::string(msg);
         diagnostics_.push_back(std::move(d));
+
         if (sev == DiagnosticSeverity::Error) {
             ++error_count_;
         } else if (sev == DiagnosticSeverity::Warning) {
@@ -307,7 +333,9 @@ namespace gallt {
             } else if (d.location.is_valid()) {
                 os << "<input>:" << d.location.line << ':' << d.location.column << ": ";
             }
+
             os << severity_prefix(d.severity) << ": ";
+
             if (d.severity != DiagnosticSeverity::Note) {
                 os << Diagnostic::error_code_string(d.code) << ": ";
             }
@@ -325,6 +353,7 @@ namespace gallt {
                 }
                 return 2;
             };
+
             auto min_rank = [&]() -> int {
                 switch (min_severity) {
                 case DiagnosticSeverity::Error: return 0;
@@ -333,6 +362,7 @@ namespace gallt {
                 }
                 return 0;
             };
+
             if (rank(d.severity) >= min_rank()) {
                 if (d.location.is_valid() && !d.location.filename.empty()) {
                     os << d.location.filename << ':'
@@ -341,7 +371,9 @@ namespace gallt {
                 } else if (d.location.is_valid()) {
                     os << "<input>:" << d.location.line << ':' << d.location.column << ": ";
                 }
+
                 os << severity_prefix(d.severity) << ": ";
+
                 if (d.severity != DiagnosticSeverity::Note) {
                     os << Diagnostic::error_code_string(d.code) << ": ";
                 }

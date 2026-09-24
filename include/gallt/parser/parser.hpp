@@ -156,7 +156,9 @@ namespace gallt {
             std::unique_ptr<AST::Expression>* out_size_expr = nullptr);
 
         std::pair<std::vector<AST::Type>, std::vector<std::string>> parse_parameter_list(
-            std::vector<std::unique_ptr<AST::Expression>>* defaults = nullptr);
+            std::vector<std::unique_ptr<AST::Expression>>* defaults = nullptr,
+            bool* out_variadic = nullptr,
+            bool* out_c_variadic = nullptr);
 
         std::unique_ptr<AST::Initializer> parse_initializer();
 

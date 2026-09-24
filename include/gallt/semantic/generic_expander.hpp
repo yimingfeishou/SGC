@@ -65,6 +65,11 @@ namespace gallt {
             std::unordered_map<std::string, ConstantValue> constants;
             std::unordered_map<std::string, AST::Type> constant_types;
             std::unordered_map<std::string, std::string> members;
+            std::unordered_map<std::string, std::vector<AST::Type>> type_packs;
+            std::unordered_map<std::string, std::vector<ConstantValue>> const_packs;
+            std::unordered_map<std::string, AST::Type> const_pack_element;
+            std::unordered_map<std::string, std::vector<std::string>>
+                fixed_pack_members;
             struct ExpressionBinding {
                 std::string name;
                 std::vector<AST::Type> parameter_types;
@@ -187,6 +192,18 @@ namespace gallt {
 
         bool resolve_constant_argument(const AST::GenericArgument& arg,
             const Substitution* sub, ConstantValue& out);
+        bool is_pack_name(const Substitution& sub, const std::string& name) const;
+        static bool pack_identifier_name(const AST::Expression* expr,
+            std::string& out);
+        static ConstantValue pack_element_zero(const AST::Type& type);
+        std::unique_ptr<AST::Expression> make_bool_literal(SourceLocation loc,
+            bool value);
+        std::unique_ptr<AST::Expression> rewrite_pack_expression(
+            const AST::PostfixExpression* expr, const Substitution& sub);
+        bool pack_type_projection(const AST::PostfixExpression* access,
+            const Substitution& sub, std::string& out);
+        void expand_pack_arguments(std::vector<AST::GenericArgument>& arguments,
+            const Substitution& sub, SourceLocation loc);
         bool evaluate_with_substitution(const AST::Expression* expr, const Substitution& sub,
             ConstantValue& out);
         bool resolve_type_layout(const std::string& type_name, std::size_t& size,

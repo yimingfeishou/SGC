@@ -25,40 +25,41 @@ namespace gallt {
 
         inline std::string arguments_text(const GenericRef& ref) {
             std::string out;
+
             for (std::size_t i = 0; i < ref.arguments.size(); ++i) {
-                if (i != 0) out += ", ";
+                if (i != 0) { out += ", "; }
                 out += ref.arguments[i].normalize();
             }
+
             return out;
         }
 
         inline std::string arguments_kind_signature(const GenericRef& ref) {
             std::string out;
+
             for (std::size_t i = 0; i < ref.arguments.size(); ++i) {
                 const GenericArgument& arg = ref.arguments[i];
                 out += "|";
+
                 if (arg.is_expr) {
                     out += "E:" + arg.text;
-                }
-                else if (arg.is_type) {
+                } else if (arg.is_type) {
                     out += "T:" + arg.type.to_string();
-                }
-                else if (arg.is_string_constant) {
+                } else if (arg.is_string_constant) {
                     out += "CS";
-                }
-                else if (arg.float_constant) {
+                } else if (arg.float_constant) {
                     out += "CF";
-                }
-                else {
+                } else {
                     out += "CI";
                 }
             }
+
             return out;
         }
 
         inline bool is_free_identifier(const std::string& name,
             const std::unordered_map<std::string, StructDefinition*>& structs) {
-            if (is_builtin_type_name(name)) return false;
+            if (is_builtin_type_name(name)) { return false; }
             return structs.find(name) == structs.end();
         }
 

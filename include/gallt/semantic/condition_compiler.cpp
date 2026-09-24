@@ -13,12 +13,14 @@ namespace {
                 return text.substr(0, text.size() - 2);
             }
         }
+
         if (!text.empty()) {
             char c = static_cast<char>(std::tolower(static_cast<unsigned char>(text.back())));
             if (c == 'l' || c == 'u') {
                 return text.substr(0, text.size() - 1);
             }
         }
+
         return text;
     }
 
@@ -27,24 +29,28 @@ namespace {
         if (text.empty()) {
             return std::nullopt;
         }
+
         std::string buffer(text);
         const char* begin = buffer.c_str();
         char* end = nullptr;
         int base = 10;
+
         if (buffer.size() > 2 && buffer[0] == '0' &&
             (buffer[1] == 'x' || buffer[1] == 'X')) {
             base = 16;
             begin += 2;
-        }
-        else if (buffer.size() > 2 && buffer[0] == '0' &&
+        } else if (buffer.size() > 2 && buffer[0] == '0' &&
             (buffer[1] == 'b' || buffer[1] == 'B')) {
             base = 2;
             begin += 2;
         }
+
         long long value = std::strtoll(begin, &end, base);
+
         if (end == begin || (end != nullptr && *end != '\0')) {
             return std::nullopt;
         }
+
         return value;
     }
 
@@ -52,13 +58,14 @@ namespace {
         if (lexeme.size() >= 2 && lexeme.front() == '"' && lexeme.back() == '"') {
             return std::string(lexeme.substr(1, lexeme.size() - 2));
         }
+
         return std::string(lexeme);
     }
 
     int hex_digit_value(char c) {
-        if (c >= '0' && c <= '9') return c - '0';
-        if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-        if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+        if (c >= '0' && c <= '9') { return c - '0'; }
+        if (c >= 'a' && c <= 'f') { return c - 'a' + 10; }
+        if (c >= 'A' && c <= 'F') { return c - 'A' + 10; }
         return -1;
     }
 
@@ -71,14 +78,16 @@ namespace {
             return std::nullopt;
         }
         std::string_view inner = lexeme.substr(1, lexeme.size() - 2);
-        if (inner.empty()) return std::nullopt;
+        if (inner.empty()) { return std::nullopt; }
         if (inner.front() != '\\') {
-            if (inner.size() != 1) return std::nullopt;
+            if (inner.size() != 1) { return std::nullopt; }
             return static_cast<long long>(
                 static_cast<unsigned char>(inner.front()));
         }
+
         std::string_view body = inner.substr(1);
-        if (body.empty()) return std::nullopt;
+        if (body.empty()) { return std::nullopt; }
+
         switch (body.front()) {
         case 'n': return 10;
         case 't': return 9;
@@ -92,29 +101,35 @@ namespace {
         case 'x': {
             long long value = 0;
             int digits = 0;
+
             for (std::size_t i = 1; i < body.size() && digits < 2; ++i) {
                 int d = hex_digit_value(body[i]);
-                if (d < 0) break;
+                if (d < 0) { break; }
                 value = value * 16 + d;
                 ++digits;
             }
-            if (digits == 0) return std::nullopt;
+
+            if (digits == 0) { return std::nullopt; }
             return value;
         }
         default:
             break;
         }
+
         if (is_octal_digit(body.front())) {
             long long value = 0;
             int digits = 0;
+
             for (std::size_t i = 0; i < body.size() && digits < 3; ++i) {
-                if (!is_octal_digit(body[i])) break;
+                if (!is_octal_digit(body[i])) { break; }
                 value = value * 8 + (body[i] - '0');
                 ++digits;
             }
-            if (digits == 0) return std::nullopt;
+
+            if (digits == 0) { return std::nullopt; }
             return value;
         }
+
         return std::nullopt;
     }
 
@@ -127,6 +142,7 @@ namespace {
         if (program == nullptr) {
             return true;
         }
+
         process_top_level_list(program->top_levels);
         process_statement_list(program->global_initializers);
         return !had_error_ && !diag_.has_errors();
@@ -136,33 +152,41 @@ namespace {
         std::vector<std::unique_ptr<AST::TopLevel>>& nodes) {
         std::vector<std::unique_ptr<AST::TopLevel>> kept;
         kept.reserve(nodes.size());
+
         for (std::unique_ptr<AST::TopLevel>& node : nodes) {
             if (node == nullptr) {
                 continue;
             }
+
             if (auto* cond = dynamic_cast<AST::CondDefinition*>(node.get())) {
                 handle_condition_definition(cond);
                 continue;
             }
+
             if (auto* uncond = dynamic_cast<AST::UncondDefinition*>(node.get())) {
                 handle_condition_removal(uncond);
                 continue;
             }
+
             if (dynamic_cast<AST::ConditionalBlock*>(node.get()) != nullptr) {
                 AST::Statement* as_statement = dynamic_cast<AST::Statement*>(node.get());
+
                 if (as_statement == nullptr) {
                     continue;
                 }
+
                 node.release();
                 std::unique_ptr<AST::Statement> statement(as_statement);
                 process_top_level_statement(statement, kept);
                 continue;
             }
+
             if (auto* top_level_block = dynamic_cast<AST::TopLevelBlock*>(node.get())) {
                 std::vector<std::unique_ptr<AST::TopLevel>> items =
                     std::move(top_level_block->items);
                 node.reset();
                 process_top_level_list(items);
+
                 for (std::unique_ptr<AST::TopLevel>& item : items) {
                     if (item != nullptr) {
                         kept.push_back(std::move(item));
@@ -170,9 +194,11 @@ namespace {
                 }
                 continue;
             }
+
             process_top_level_node(node.get());
             kept.push_back(std::move(node));
         }
+
         nodes = std::move(kept);
     }
 
@@ -182,45 +208,57 @@ namespace {
         if (stmt == nullptr) {
             return;
         }
+
         if (auto* cond = dynamic_cast<AST::CondDefinition*>(stmt.get())) {
             handle_condition_definition(cond);
             stmt.reset();
             return;
         }
+
         if (auto* uncond = dynamic_cast<AST::UncondDefinition*>(stmt.get())) {
             handle_condition_removal(uncond);
             stmt.reset();
             return;
         }
+
         if (auto* conditional = dynamic_cast<AST::ConditionalBlock*>(stmt.get())) {
             Evaluation result;
+
             if (!evaluate_condition(conditional->condition.get(), result)) {
                 stmt.reset();
                 return;
             }
+
             std::unique_ptr<AST::Statement>& chosen =
                 result.value != 0 ? conditional->then_block : conditional->else_block;
+
             if (chosen == nullptr) {
                 stmt.reset();
                 return;
             }
+
             stmt = std::move(chosen);
             process_top_level_statement(stmt, kept);
             return;
         }
+
         if (auto* block = dynamic_cast<AST::Block*>(stmt.get())) {
             std::vector<std::unique_ptr<AST::Statement>> inner = std::move(block->statements);
             stmt.reset();
+
             for (std::unique_ptr<AST::Statement>& child : inner) {
                 process_top_level_statement(child, kept);
             }
+
             return;
         }
+
         if (auto* top_level_block = dynamic_cast<AST::TopLevelBlock*>(stmt.get())) {
             std::vector<std::unique_ptr<AST::TopLevel>> items =
                 std::move(top_level_block->items);
             stmt.reset();
             process_top_level_list(items);
+
             for (std::unique_ptr<AST::TopLevel>& item : items) {
                 if (item != nullptr) {
                     kept.push_back(std::move(item));
@@ -228,11 +266,14 @@ namespace {
             }
             return;
         }
+
         AST::TopLevel* top = dynamic_cast<AST::TopLevel*>(stmt.get());
+
         if (top == nullptr) {
             stmt.reset();
             return;
         }
+
         process_top_level_node(top);
         stmt.release();
         kept.emplace_back(top);
@@ -242,31 +283,28 @@ namespace {
         if (node == nullptr) {
             return;
         }
+
         if (auto* ns = dynamic_cast<AST::NamespaceDefinition*>(node)) {
             process_top_level_list(ns->members);
-        }
-        else if (auto* addition = dynamic_cast<AST::AdditionNamespaceStatement*>(node)) {
+        } else if (auto* addition = dynamic_cast<AST::AdditionNamespaceStatement*>(node)) {
             process_top_level_list(addition->members);
-        }
-        else if (auto* generic = dynamic_cast<AST::GenericDefinition*>(node)) {
+        } else if (auto* generic = dynamic_cast<AST::GenericDefinition*>(node)) {
             process_top_level_list(generic->members);
-        }
-        else if (auto* func = dynamic_cast<AST::FunctionDefinition*>(node)) {
+        } else if (auto* func = dynamic_cast<AST::FunctionDefinition*>(node)) {
             for (std::unique_ptr<AST::Expression>& def : func->param_defaults) {
                 transform_expression(def.get());
             }
+
             if (func->body != nullptr) {
                 process_statement(func->body);
             }
-        }
-        else if (auto* strct = dynamic_cast<AST::StructDefinition*>(node)) {
+        } else if (auto* strct = dynamic_cast<AST::StructDefinition*>(node)) {
             for (std::unique_ptr<AST::SpecialMemberFunction>& member : strct->special_members) {
                 if (member != nullptr && member->body != nullptr) {
                     process_statement(member->body);
                 }
             }
-        }
-        else if (auto* decl = dynamic_cast<AST::VariableDeclaration*>(node)) {
+        } else if (auto* decl = dynamic_cast<AST::VariableDeclaration*>(node)) {
             transform_initializer(decl->initializer.get());
             transform_expression(decl->array_size_expr.get());
         }
@@ -276,97 +314,115 @@ namespace {
         if (stmt == nullptr) {
             return;
         }
+
         if (auto* cond = dynamic_cast<AST::CondDefinition*>(stmt.get())) {
             handle_condition_definition(cond);
             stmt.reset();
             return;
         }
+
         if (auto* uncond = dynamic_cast<AST::UncondDefinition*>(stmt.get())) {
             handle_condition_removal(uncond);
             stmt.reset();
             return;
         }
+
         if (auto* block = dynamic_cast<AST::ConditionalBlock*>(stmt.get())) {
             Evaluation result;
+
             if (evaluate_condition(block->condition.get(), result)) {
                 if (result.value != 0) {
                     if (block->then_block != nullptr) {
                         process_statement(block->then_block);
                         stmt = std::move(block->then_block);
-                    }
-                    else {
+                    } else {
                         stmt.reset();
                     }
-                }
-                else if (block->else_block != nullptr) {
+                } else if (block->else_block != nullptr) {
                     process_statement(block->else_block);
                     stmt = std::move(block->else_block);
-                }
-                else {
+                } else {
                     stmt.reset();
                 }
             }
+
             return;
         }
+
         if (auto* block = dynamic_cast<AST::Block*>(stmt.get())) {
             process_block(block);
             return;
         }
+
         if (auto* if_stmt = dynamic_cast<AST::IfStatement*>(stmt.get())) {
             resolve_condition_references(if_stmt->condition.get());
+
             if (if_stmt->then_block != nullptr) {
                 process_statement(if_stmt->then_block);
             }
+
             if (if_stmt->else_block != nullptr) {
                 process_statement(if_stmt->else_block);
             }
             return;
         }
+
         if (auto* for_stmt = dynamic_cast<AST::ForStatement*>(stmt.get())) {
             if (for_stmt->init != nullptr) {
                 process_statement(for_stmt->init);
             }
+
             resolve_condition_references(for_stmt->condition.get());
             resolve_condition_references(for_stmt->step.get());
+
             if (for_stmt->body != nullptr) {
                 process_statement(for_stmt->body);
             }
             return;
         }
+
         if (auto* while_stmt = dynamic_cast<AST::WhileStatement*>(stmt.get())) {
             resolve_condition_references(while_stmt->condition.get());
+
             if (while_stmt->body != nullptr) {
                 process_statement(while_stmt->body);
             }
             return;
         }
+
         if (auto* decl = dynamic_cast<AST::VariableDeclaration*>(stmt.get())) {
             transform_initializer(decl->initializer.get());
             transform_expression(decl->array_size_expr.get());
             return;
         }
+
         if (auto* ret = dynamic_cast<AST::ReturnStatement*>(stmt.get())) {
             transform_expression(ret->value.get());
             return;
         }
+
         if (auto* expr_stmt = dynamic_cast<AST::ExpressionStatement*>(stmt.get())) {
             transform_expression(expr_stmt->expr.get());
             return;
         }
+
         if (auto* destruct = dynamic_cast<AST::DestructStatement*>(stmt.get())) {
             transform_expression(destruct->target.get());
             return;
         }
+
         if (auto* emit = dynamic_cast<AST::EmitStatement*>(stmt.get())) {
             for (std::unique_ptr<AST::Expression>& piece : emit->pieces) {
                 transform_expression(piece.get());
             }
             return;
         }
+
         if (auto* generic = dynamic_cast<AST::GenericDefinition*>(stmt.get())) {
             process_top_level_list(generic->members);
             return;
         }
+
         if (auto* strct = dynamic_cast<AST::StructDefinition*>(stmt.get())) {
             for (std::unique_ptr<AST::SpecialMemberFunction>& member : strct->special_members) {
                 if (member != nullptr && member->body != nullptr) {
@@ -384,25 +440,30 @@ namespace {
     void ConditionCompiler::process_statement_list(
         std::vector<std::unique_ptr<AST::Statement>>& stmts) {
         std::vector<std::unique_ptr<AST::Statement>> kept;
+
         for (std::unique_ptr<AST::Statement>& stmt : stmts) {
             process_statement(stmt);
+
             if (stmt != nullptr) {
                 kept.push_back(std::move(stmt));
             }
         }
+
         stmts = std::move(kept);
     }
 
     void ConditionCompiler::handle_condition_definition(AST::CondDefinition* node) {
         long long value = 0;
+
         if (node->value != nullptr) {
             const std::size_t errors_before = diag_.error_count();
             Evaluation evaluated;
+
             if (evaluate_condition(node->value.get(), evaluated)) {
                 value = evaluated.value;
-            }
-            else {
+            } else {
                 had_error_ = true;
+
                 if (diag_.error_count() == errors_before) {
                     report(node->location, ErrorCode::CompileTimeConditionNotBoolean,
                         std::string(
@@ -410,6 +471,7 @@ namespace {
                 }
             }
         }
+
         ConditionValue& entry = conditions_[node->name];
         entry.defined = true;
         entry.value = value;
@@ -423,6 +485,7 @@ namespace {
         if (expr == nullptr) {
             return false;
         }
+
         if (auto* prim = dynamic_cast<AST::PrimaryExpression*>(expr)) {
             switch (prim->kind) {
             case AST::PrimaryExpression::Kind::Literal:
@@ -441,10 +504,12 @@ namespace {
             default:
                 break;
             }
+
             report(expr->location, ErrorCode::ExpressionSyntaxError,
                 "unsupported construct in condition expression");
             return false;
         }
+
         if (auto* postfix = dynamic_cast<AST::PostfixExpression*>(expr)) {
             if (postfix->op == AST::PostfixExpression::Operator::FunctionCall) {
                 auto* callee = dynamic_cast<AST::PrimaryExpression*>(postfix->base.get());
@@ -456,8 +521,10 @@ namespace {
                                 "is_defined requires exactly one string argument");
                             return false;
                         }
+
                         auto* arg = dynamic_cast<AST::PrimaryExpression*>(
                             postfix->arguments[0].get());
+
                         if (arg == nullptr ||
                             arg->kind != AST::PrimaryExpression::Kind::Literal ||
                             arg->literal_token.type != TokenType::StringLiteral) {
@@ -465,23 +532,29 @@ namespace {
                                 "is_defined requires a string literal argument");
                             return false;
                         }
+
                         std::string name = unquote_literal(arg->literal_token.lexeme);
                         out.defined = true;
                         out.value = conditions_.count(name) != 0 ? 1 : 0;
                         return true;
                     }
+
                     return evaluateNamedCondition(callee->identifier, expr->location, out);
                 }
             }
+
             report(expr->location, ErrorCode::ExpressionSyntaxError,
                 "unsupported construct in condition expression");
             return false;
         }
+
         if (auto* unary = dynamic_cast<AST::UnaryExpression*>(expr)) {
             Evaluation inner;
+
             if (!evaluate_condition(unary->operand.get(), inner)) {
                 return false;
             }
+
             switch (unary->op) {
             case AST::UnaryExpression::Operator::LogicalNot:
                 out.defined = true;
@@ -497,6 +570,7 @@ namespace {
             default:
                 break;
             }
+
             report(expr->location, ErrorCode::ExpressionSyntaxError,
                 "unsupported unary operator in condition expression");
             return false;
@@ -504,6 +578,7 @@ namespace {
         if (auto* cmp = dynamic_cast<AST::ComparisonExpression*>(expr)) {
             Evaluation left;
             Evaluation right;
+
             if (!evaluate_condition(cmp->left.get(), left) ||
                 !evaluate_condition(cmp->right.get(), right)) {
                 return false;
@@ -511,6 +586,7 @@ namespace {
             sanitize_condition_references(cmp->left.get());
             sanitize_condition_references(cmp->right.get());
             bool result = false;
+
             switch (cmp->op) {
             case AST::ComparisonExpression::Operator::Equal:
                 result = left.value == right.value;
@@ -535,17 +611,22 @@ namespace {
             out.value = result ? 1 : 0;
             return true;
         }
+
         if (auto* land = dynamic_cast<AST::LogicalAndExpression*>(expr)) {
             Evaluation left;
+
             if (!evaluate_condition(land->left.get(), left)) {
                 return false;
             }
+
             sanitize_condition_references(land->left.get());
+
             if (left.value == 0) {
                 out.defined = true;
                 out.value = 0;
                 return true;
             }
+
             Evaluation right;
             if (!evaluate_condition(land->right.get(), right)) {
                 return false;
@@ -555,17 +636,22 @@ namespace {
             out.value = right.value != 0 ? 1 : 0;
             return true;
         }
+
         if (auto* lor = dynamic_cast<AST::LogicalOrExpression*>(expr)) {
             Evaluation left;
+
             if (!evaluate_condition(lor->left.get(), left)) {
                 return false;
             }
+
             sanitize_condition_references(lor->left.get());
+
             if (left.value != 0) {
                 out.defined = true;
                 out.value = 1;
                 return true;
             }
+
             Evaluation right;
             if (!evaluate_condition(lor->right.get(), right)) {
                 return false;
@@ -575,9 +661,11 @@ namespace {
             out.value = right.value != 0 ? 1 : 0;
             return true;
         }
+
         if (auto* add = dynamic_cast<AST::AdditiveExpression*>(expr)) {
             Evaluation left;
             Evaluation right;
+
             if (!evaluate_condition(add->left.get(), left) ||
                 !evaluate_condition(add->right.get(), right)) {
                 return false;
@@ -587,14 +675,17 @@ namespace {
                 ? left.value + right.value : left.value - right.value;
             return true;
         }
+
         if (auto* mul = dynamic_cast<AST::MultiplicativeExpression*>(expr)) {
             Evaluation left;
             Evaluation right;
+
             if (!evaluate_condition(mul->left.get(), left) ||
                 !evaluate_condition(mul->right.get(), right)) {
                 return false;
             }
             out.defined = true;
+
             switch (mul->op) {
             case AST::MultiplicativeExpression::Operator::Multiply:
                 out.value = left.value * right.value;
@@ -618,9 +709,11 @@ namespace {
             }
             return true;
         }
+
         if (auto* bit = dynamic_cast<AST::BitwiseExpression*>(expr)) {
             Evaluation left;
             Evaluation right;
+
             if (!evaluate_condition(bit->left.get(), left) ||
                 !evaluate_condition(bit->right.get(), right)) {
                 return false;
@@ -628,6 +721,7 @@ namespace {
             sanitize_condition_references(bit->left.get());
             sanitize_condition_references(bit->right.get());
             out.defined = true;
+
             switch (bit->op) {
             case AST::BitwiseExpression::Operator::And:
                 out.value = left.value & right.value;
@@ -641,31 +735,38 @@ namespace {
             }
             return true;
         }
+
         if (auto* shift = dynamic_cast<AST::ShiftExpression*>(expr)) {
             Evaluation left;
             Evaluation right;
+
             if (!evaluate_condition(shift->left.get(), left) ||
                 !evaluate_condition(shift->right.get(), right)) {
                 return false;
             }
             sanitize_condition_references(shift->left.get());
             sanitize_condition_references(shift->right.get());
+
             if (right.value < 0 || right.value >= 64) {
                 report(expr->location, ErrorCode::ExpressionSyntaxError,
                     "shift count out of range in condition expression");
                 return false;
             }
+
             out.defined = true;
             out.value = shift->op == AST::ShiftExpression::Operator::Left
                 ? (left.value << right.value)
                 : (left.value >> right.value);
             return true;
         }
+
         if (auto* cond = dynamic_cast<AST::ConditionalExpression*>(expr)) {
             Evaluation condition;
+
             if (!evaluate_condition(cond->condition.get(), condition)) {
                 return false;
             }
+
             sanitize_condition_references(cond->condition.get());
             return evaluate_condition(
                 condition.value != 0 ? cond->then_expr.get() : cond->else_expr.get(),
@@ -683,17 +784,20 @@ namespace {
             out.value = 1;
             return true;
         }
+
         if (name == "false") {
             out.defined = true;
             out.value = 0;
             return true;
         }
+
         auto it = conditions_.find(name);
         if (it == conditions_.end()) {
             report(loc, ErrorCode::UndefinedIdentifier,
                 "condition '" + name + "' is not defined");
             return false;
         }
+
         out.defined = true;
         out.value = it->second.value;
         return true;
@@ -745,12 +849,15 @@ namespace {
         if (expr == nullptr) {
             return;
         }
+
         if (auto* prim = dynamic_cast<AST::PrimaryExpression*>(expr)) {
             if (prim->kind == AST::PrimaryExpression::Kind::Identifier) {
                 auto it = conditions_.find(prim->identifier);
+
                 if (it != conditions_.end()) {
                     std::unique_ptr<AST::Expression> replacement =
                         make_integer_literal(expr->location, it->second.value);
+
                     if (auto* repl =
                         dynamic_cast<AST::PrimaryExpression*>(replacement.get())) {
                         prim->kind = AST::PrimaryExpression::Kind::Literal;
@@ -759,77 +866,96 @@ namespace {
                     return;
                 }
             }
+
             sanitize_condition_references(prim->paren_expr.get());
+
             for (std::unique_ptr<AST::Expression>& arg : prim->construct_args) {
                 sanitize_condition_references(arg.get());
             }
+
             return;
         }
+
         if (auto* postfix = dynamic_cast<AST::PostfixExpression*>(expr)) {
             sanitize_condition_references(postfix->base.get());
             sanitize_condition_references(postfix->subscript_expr.get());
+
             for (std::unique_ptr<AST::Expression>& arg : postfix->arguments) {
                 sanitize_condition_references(arg.get());
             }
+
             return;
         }
+
         if (auto* assign = dynamic_cast<AST::AssignmentExpression*>(expr)) {
             sanitize_condition_references(assign->left.get());
             sanitize_condition_references(assign->right.get());
             return;
         }
+
         if (auto* lor = dynamic_cast<AST::LogicalOrExpression*>(expr)) {
             sanitize_condition_references(lor->left.get());
             sanitize_condition_references(lor->right.get());
             return;
         }
+
         if (auto* land = dynamic_cast<AST::LogicalAndExpression*>(expr)) {
             sanitize_condition_references(land->left.get());
             sanitize_condition_references(land->right.get());
             return;
         }
+
         if (auto* cmp = dynamic_cast<AST::ComparisonExpression*>(expr)) {
             sanitize_condition_references(cmp->left.get());
             sanitize_condition_references(cmp->right.get());
             return;
         }
+
         if (auto* add = dynamic_cast<AST::AdditiveExpression*>(expr)) {
             sanitize_condition_references(add->left.get());
             sanitize_condition_references(add->right.get());
             return;
         }
+
         if (auto* mul = dynamic_cast<AST::MultiplicativeExpression*>(expr)) {
             sanitize_condition_references(mul->left.get());
             sanitize_condition_references(mul->right.get());
             return;
         }
+
         if (auto* power = dynamic_cast<AST::PowerExpression*>(expr)) {
             sanitize_condition_references(power->left.get());
             sanitize_condition_references(power->right.get());
             return;
         }
+
         if (auto* bit = dynamic_cast<AST::BitwiseExpression*>(expr)) {
             sanitize_condition_references(bit->left.get());
             sanitize_condition_references(bit->right.get());
             return;
         }
+
         if (auto* shift = dynamic_cast<AST::ShiftExpression*>(expr)) {
             sanitize_condition_references(shift->left.get());
             sanitize_condition_references(shift->right.get());
             return;
         }
+
         if (auto* cond = dynamic_cast<AST::ConditionalExpression*>(expr)) {
             sanitize_condition_references(cond->condition.get());
             sanitize_condition_references(cond->then_expr.get());
             sanitize_condition_references(cond->else_expr.get());
             return;
         }
+
         if (auto* unary = dynamic_cast<AST::UnaryExpression*>(expr)) {
             sanitize_condition_references(unary->operand.get());
             return;
         }
+
         if (auto* prop = dynamic_cast<AST::CompileTimePropertyExpression*>(expr)) {
             sanitize_condition_references(prop->receiver.get());
+
             for (std::unique_ptr<AST::Expression>& arg : prop->arguments) {
                 sanitize_condition_references(arg.get());
             }
@@ -846,9 +972,11 @@ namespace {
                 return;
             }
         }
+
         if (!is_condition_name(expr)) {
             return;
         }
+
         auto* prim = dynamic_cast<AST::PrimaryExpression*>(expr);
         report(expr->location, ErrorCode::ConditionUsedAsValue,
             std::string(prim->identifier));
@@ -861,11 +989,14 @@ namespace {
         if (auto* postfix = dynamic_cast<AST::PostfixExpression*>(expr)) {
             transform_expression(postfix->base.get());
             transform_expression(postfix->subscript_expr.get());
+
             for (std::unique_ptr<AST::Expression>& arg : postfix->arguments) {
                 transform_expression(arg.get());
             }
+
             if (postfix->op == AST::PostfixExpression::Operator::FunctionCall) {
                 auto* callee = dynamic_cast<AST::PrimaryExpression*>(postfix->base.get());
+
                 if (callee != nullptr &&
                     callee->kind == AST::PrimaryExpression::Kind::Identifier &&
                     callee->identifier == "is_defined") {
@@ -874,8 +1005,10 @@ namespace {
                             "is_defined requires exactly one string argument");
                         return;
                     }
+
                     auto* arg = dynamic_cast<AST::PrimaryExpression*>(
                         postfix->arguments[0].get());
+
                     if (arg == nullptr ||
                         arg->kind != AST::PrimaryExpression::Kind::Literal ||
                         arg->literal_token.type != TokenType::StringLiteral) {
@@ -883,6 +1016,7 @@ namespace {
                             std::string("<non-literal>"));
                         return;
                     }
+
                     std::string name = unquote_literal(arg->literal_token.lexeme);
                     bool defined = conditions_.count(name) != 0;
                     callee->kind = AST::PrimaryExpression::Kind::Literal;
@@ -892,81 +1026,100 @@ namespace {
                     return;
                 }
             }
+
             resolve_condition_references(expr);
             return;
         }
+
         if (auto* assign = dynamic_cast<AST::AssignmentExpression*>(expr)) {
             transform_expression(assign->left.get());
             transform_expression(assign->right.get());
             resolve_condition_references(expr);
             return;
         }
+
         if (auto* prim = dynamic_cast<AST::PrimaryExpression*>(expr)) {
             if (prim->kind == AST::PrimaryExpression::Kind::Identifier) {
                 resolve_condition_references(expr);
                 return;
             }
+
             transform_expression(prim->paren_expr.get());
             transform_expression(prim->heap_size.get());
             transform_expression(prim->placement_target.get());
+
             for (std::unique_ptr<AST::Expression>& arg : prim->construct_args) {
                 transform_expression(arg.get());
             }
+
             return;
         }
+
         resolve_condition_references(expr);
+
         if (auto* lor = dynamic_cast<AST::LogicalOrExpression*>(expr)) {
             transform_expression(lor->left.get());
             transform_expression(lor->right.get());
             return;
         }
+
         if (auto* land = dynamic_cast<AST::LogicalAndExpression*>(expr)) {
             transform_expression(land->left.get());
             transform_expression(land->right.get());
             return;
         }
+
         if (auto* cmp = dynamic_cast<AST::ComparisonExpression*>(expr)) {
             transform_expression(cmp->left.get());
             transform_expression(cmp->right.get());
             return;
         }
+
         if (auto* add = dynamic_cast<AST::AdditiveExpression*>(expr)) {
             transform_expression(add->left.get());
             transform_expression(add->right.get());
             return;
         }
+
         if (auto* mul = dynamic_cast<AST::MultiplicativeExpression*>(expr)) {
             transform_expression(mul->left.get());
             transform_expression(mul->right.get());
             return;
         }
+
         if (auto* power = dynamic_cast<AST::PowerExpression*>(expr)) {
             transform_expression(power->left.get());
             transform_expression(power->right.get());
             return;
         }
+
         if (auto* bit = dynamic_cast<AST::BitwiseExpression*>(expr)) {
             transform_expression(bit->left.get());
             transform_expression(bit->right.get());
             return;
         }
+
         if (auto* shift = dynamic_cast<AST::ShiftExpression*>(expr)) {
             transform_expression(shift->left.get());
             transform_expression(shift->right.get());
             return;
         }
+
         if (auto* cond = dynamic_cast<AST::ConditionalExpression*>(expr)) {
             transform_expression(cond->condition.get());
             transform_expression(cond->then_expr.get());
             transform_expression(cond->else_expr.get());
             return;
         }
+
         if (auto* unary = dynamic_cast<AST::UnaryExpression*>(expr)) {
             transform_expression(unary->operand.get());
             return;
         }
+
         if (auto* prop = dynamic_cast<AST::CompileTimePropertyExpression*>(expr)) {
             transform_expression(prop->receiver.get());
+
             for (std::unique_ptr<AST::Expression>& arg : prop->arguments) {
                 transform_expression(arg.get());
             }
@@ -982,6 +1135,7 @@ namespace {
             transform_expression(expr_init->expr.get());
             return;
         }
+
         if (auto* array_init = dynamic_cast<AST::ArrayInitializer*>(init)) {
             for (std::unique_ptr<AST::Initializer>& element : array_init->elements) {
                 transform_initializer(element.get());

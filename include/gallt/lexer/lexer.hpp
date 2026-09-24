@@ -9,7 +9,6 @@
 
 namespace gallt {
 
-
     class Lexer {
     public:
         Lexer(std::string_view source, std::string_view filename, DiagnosticEngine& diag);

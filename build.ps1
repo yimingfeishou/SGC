@@ -17,6 +17,7 @@ $Sources = @(
     'include\gallt\codegen\codegen_expression.cpp',
     'include\gallt\codegen\codegen_builtin.cpp',
     'include\gallt\codegen\codegen_lifetime.cpp',
+    'include\gallt\codegen\codegen_variadic.cpp',
     'include\gallt\common\diagnostics.cpp',
     'include\gallt\common\token.cpp',
     'include\gallt\driver\command_line.cpp',
@@ -35,6 +36,7 @@ $Sources = @(
     'include\gallt\semantic\generic_expander_pattern.cpp',
     'include\gallt\semantic\generic_expander_clone.cpp',
     'include\gallt\semantic\generic_expander_property.cpp',
+    'include\gallt\semantic\generic_expander_pack.cpp',
     'include\gallt\semantic\condition_compiler.cpp',
     'include\gallt\semantic\constant_folding.cpp',
     'include\gallt\semantic\lifecycle.cpp',
@@ -45,7 +47,8 @@ $Sources = @(
     'include\gallt\semantic\type_checker_overload.cpp',
     'include\gallt\semantic\type_checker_declaration.cpp',
     'include\gallt\semantic\type_checker_control.cpp',
-    'include\gallt\semantic\type_checker_layout.cpp'
+    'include\gallt\semantic\type_checker_layout.cpp',
+    'include\gallt\semantic\type_checker_variadic.cpp'
 )
 
 function Find-VcVars {

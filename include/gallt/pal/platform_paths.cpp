@@ -49,20 +49,20 @@ namespace pal {
     }
 
     bool is_absolute_path(const std::string& path) {
-        if (path.empty()) return false;
+        if (path.empty()) { return false; }
         fs::path p(to_wide(path));
         return p.is_absolute();
     }
 
     bool is_relative_path(const std::string& path) {
-        if (path.empty()) return true;
+        if (path.empty()) { return true; }
         fs::path p(to_wide(path));
         return p.is_relative();
     }
 
     std::string join_path(const std::string& base, const std::string& relative) {
-        if (base.empty()) return relative;
-        if (relative.empty()) return base;
+        if (base.empty()) { return relative; }
+        if (relative.empty()) { return base; }
         fs::path joined(to_wide(base));
         joined /= fs::path(to_wide(relative));
         return to_utf8(joined.wstring());
@@ -85,9 +85,11 @@ namespace pal {
 
     std::string normalize_path(const std::string& path) {
         std::string result = path;
+
         for (char& c : result) {
-            if (c == '\\') c = '/';
+            if (c == '\\') { c = '/'; }
         }
+
         return result;
     }
 
@@ -95,25 +97,25 @@ namespace pal {
         std::error_code ec;
         fs::path p(to_wide(path));
         fs::path canonical = fs::weakly_canonical(p, ec);
-        if (ec) return path;
+        if (ec) { return path; }
         return to_utf8(canonical.wstring());
     }
 
     std::string current_working_directory() {
         std::error_code ec;
         fs::path cwd = fs::current_path(ec);
-        if (ec) return std::string();
+        if (ec) { return std::string(); }
         return to_utf8(cwd.wstring());
     }
 
     bool file_exists(const std::string& path) {
-        if (path.empty()) return false;
+        if (path.empty()) { return false; }
         std::error_code ec;
         return fs::exists(fs::path(to_wide(path)), ec) && !ec;
     }
 
     bool directory_exists(const std::string& path) {
-        if (path.empty()) return false;
+        if (path.empty()) { return false; }
         std::error_code ec;
         return fs::is_directory(fs::path(to_wide(path)), ec) && !ec;
     }
@@ -121,7 +123,7 @@ namespace pal {
     long long file_size(const std::string& path) {
         std::error_code ec;
         std::uintmax_t size = fs::file_size(fs::path(to_wide(path)), ec);
-        if (ec) return -1;
+        if (ec) { return -1; }
         return static_cast<long long>(size);
     }
 

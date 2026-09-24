@@ -127,8 +127,10 @@ namespace gallt {
         case TokenType::Newline: return "newline";
         case TokenType::EndOfFile: return "end of file";
         case TokenType::At: return "@";
+        case TokenType::Ellipsis: return "...";
         case TokenType::Unknown: return "unknown token";
         }
+
         return "token";
     }
 

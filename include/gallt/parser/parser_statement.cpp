@@ -28,15 +28,13 @@ namespace gallt {
             while (current_.type != TokenType::RightBrace &&
                 current_.type != TokenType::EndOfFile) {
                 skip_newlines();
-                if (current_.type == TokenType::RightBrace) break;
+                if (current_.type == TokenType::RightBrace) { break; }
                 std::unique_ptr<Node> item;
                 if (current_.type == TokenType::Keyword_Struct || at_struct_attribute()) {
                     item = parse_struct_definition();
-                }
-                else if (emit_item_starts_with_function_definition()) {
+                } else if (emit_item_starts_with_function_definition()) {
                     item = parse_function_definition();
-                }
-                else {
+                } else {
                     item = parse_statement();
                 }
                 if (item != nullptr) {
@@ -165,17 +163,14 @@ namespace gallt {
         if (current_.type == TokenType::LeftBrace) {
             if (top_level) {
                 then_block = parse_top_level_block();
-            }
-            else {
+            } else {
                 std::unique_ptr<AST::Block> block = parse_block();
                 then_block.reset(block.release());
             }
-        }
-        else {
+        } else {
             if (top_level) {
                 then_block = parse_conditional_branch_top_level();
-            }
-            else {
+            } else {
                 std::unique_ptr<AST::Statement> nested = parse_statement();
                 then_block = std::move(nested);
             }
@@ -191,20 +186,16 @@ namespace gallt {
                 std::unique_ptr<AST::ConditionalBlock> nested =
                     parse_conditional_block(top_level);
                 else_block.reset(nested.release());
-            }
-            else if (current_.type == TokenType::LeftBrace) {
+            } else if (current_.type == TokenType::LeftBrace) {
                 if (top_level) {
                     else_block = parse_top_level_block();
-                }
-                else {
+                } else {
                     std::unique_ptr<AST::Block> block = parse_block();
                     else_block.reset(block.release());
                 }
-            }
-            else if (top_level) {
+            } else if (top_level) {
                 else_block = parse_conditional_branch_top_level();
-            }
-            else {
+            } else {
                 std::unique_ptr<AST::Statement> nested = parse_statement();
                 else_block = std::move(nested);
             }
@@ -265,8 +256,7 @@ namespace gallt {
             auto item = parse_top_level();
             if (item != nullptr) {
                 block->items.push_back(std::move(item));
-            }
-            else if (!in_error_recovery_) {
+            } else if (!in_error_recovery_) {
                 report_error(ErrorCode::ExpressionSyntaxError,
                     "failed to parse declaration in block");
                 synchronize();
@@ -286,7 +276,7 @@ namespace gallt {
 
         std::size_t i = 0;
         TokenType tt = lookahead_type(i);
-        if (tt != TokenType::Identifier && !is_type_keyword(tt)) return false;
+        if (tt != TokenType::Identifier && !is_type_keyword(tt)) { return false; }
 
         if (lookahead_type(i + 1) == TokenType::Less) {
             int depth = 0;
@@ -305,8 +295,7 @@ namespace gallt {
                 }
             }
             i = j;
-        }
-        else {
+        } else {
             ++i;
             while (lookahead_type(i) == TokenType::ColonColon &&
                 lookahead_type(i + 1) == TokenType::Identifier) {
@@ -326,8 +315,11 @@ namespace gallt {
                         inner == TokenType::Semicolon) {
                         return false;
                     }
-                    if (inner == TokenType::LeftBracket) ++depth;
-                    else if (inner == TokenType::RightBracket) --depth;
+                    if (inner == TokenType::LeftBracket) {
+                        ++depth;
+                    } else if (inner == TokenType::RightBracket) {
+                        --depth;
+                    }
                     ++i;
                 }
                 continue;
@@ -335,7 +327,7 @@ namespace gallt {
             break;
         }
 
-        if (lookahead_type(i) != TokenType::Identifier) return false;
+        if (lookahead_type(i) != TokenType::Identifier) { return false; }
         return lookahead_type(i + 1) == TokenType::LeftParen;
     }
 

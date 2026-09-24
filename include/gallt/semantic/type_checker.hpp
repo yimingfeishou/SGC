@@ -80,6 +80,31 @@ namespace gallt {
         std::unordered_map<std::string, std::vector<AST::FunctionDefinition*>> operator_overloads_;
 
         void collect_operator_overloads();
+        struct VariadicPack {
+            std::string name;
+            AST::Type element;
+        };
+        std::vector<VariadicPack> variadic_packs_;
+        const VariadicPack* find_variadic_pack(const std::string& name) const;
+        static bool pack_base_identifier(const AST::Expression* expr,
+            std::string& out);
+        AST::Type check_pack_property(AST::PostfixExpression* expr,
+            const VariadicPack& pack);
+        AST::Type check_pack_subscript(AST::PostfixExpression* expr,
+            const VariadicPack& pack);
+        AST::Type check_pack_get(AST::PostfixExpression* call,
+            const VariadicPack& pack);
+        bool pack_expansion_target(const AST::Expression* expr,
+            const VariadicPack*& out, SourceLocation& loc) const;
+        bool expression_mentions_variadic_pack(const AST::Expression* expr) const;
+        static AST::Type function_type_of(const Symbol& symbol);
+        bool report_expansion_against_fixed_signature(AST::PostfixExpression* call,
+            const std::vector<AST::Type>& parameter_types);
+        bool report_runtime_pack_expansion_in_initializer(
+            const AST::ArrayInitializer* init);
+        void check_variadic_argument_list(AST::PostfixExpression* call,
+            const std::vector<AST::Type>& fixed_types, const AST::Type& element,
+            const AST::FunctionDefinition* node);
         bool validate_operator_definition(AST::FunctionDefinition* node);
         bool is_custom_type(const AST::Type& type) const;
         AST::FunctionDefinition* resolve_user_operator(const std::string& op,

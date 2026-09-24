@@ -29,6 +29,7 @@ namespace gallt {
         const std::string& ir() const { return ir_; }
 
         const std::vector<std::string>& link_libraries() const { return link_libraries_; }
+
         const std::vector<std::string>& exported_functions() const {
             return exported_functions_;
         }
@@ -218,6 +219,36 @@ namespace gallt {
         };
 
         ExprValue gen_expr(AST::Expression* expr);
+        struct VariadicPackLocal {
+            std::string name;
+            AST::Type element;
+            std::string data_slot;
+            std::string length_slot;
+        };
+        std::vector<VariadicPackLocal> variadic_locals_;
+        const VariadicPackLocal* find_variadic_local(const std::string& name) const;
+        static bool pack_identifier_base(const AST::Expression* expr,
+            std::string& out);
+        static std::string zero_initializer_text(const AST::Type& type);
+        std::string pack_data_value(const VariadicPackLocal& pack);
+        std::string pack_length_value(const VariadicPackLocal& pack);
+        std::string pack_element_address(const VariadicPackLocal& pack,
+            const std::string& index);
+        ExprValue pack_guarded_element(const VariadicPackLocal& pack,
+            const std::string& index);
+        ExprValue gen_pack_property(AST::PostfixExpression* expr,
+            const VariadicPackLocal& pack);
+        ExprValue gen_pack_subscript(AST::PostfixExpression* expr,
+            const VariadicPackLocal& pack);
+        bool gen_variadic_call_arguments(std::vector<AST::Expression*>& all_args,
+            const std::vector<AST::Type>& params, std::vector<std::string>& ir_args,
+            std::vector<std::string>& ir_arg_types, std::vector<std::string>& owned_args,
+            std::string& heap_storage);
+        void store_pack_element(const AST::Type& element, const std::string& slot,
+            AST::Expression* expr, std::vector<std::string>& owned_args);
+        bool emit_output_pack_expansion(AST::Expression* expr);
+        void emit_output_value(const AST::Type& type, const std::string& address,
+            const std::string& value);
         bool gen_operator_call(AST::Expression* expr, ExprValue& out);
         ExprValue emit_operator_invocation(AST::FunctionDefinition* callee,
             std::vector<AST::Expression*>& final_arguments, bool postfix_dummy,

@@ -30,6 +30,7 @@ namespace gallt {
 
         std::vector<AST::Type> param_types;
         std::vector<std::string> param_names;
+        bool is_variadic = false;
         AST::FunctionDefinition* function_node = nullptr;
         AST::ExternDeclaration* extern_node = nullptr;
 
@@ -57,10 +58,12 @@ namespace gallt {
         static Symbol make_function(std::string_view name, AST::Type ret_type,
             const std::vector<AST::Type>& params,
             const std::vector<std::string>& param_names,
-            SourceLocation loc, AST::FunctionDefinition* node = nullptr) {
+            SourceLocation loc, AST::FunctionDefinition* node = nullptr,
+            bool variadic = false) {
             Symbol sym(name, SymbolKind::Function, std::move(ret_type), loc);
             sym.param_types = params;
             sym.param_names = param_names;
+            sym.is_variadic = variadic;
             sym.function_node = node;
             return sym;
         }
@@ -128,7 +131,6 @@ namespace gallt {
         std::unordered_set<std::string> declared_names_;
     };
 
-
     inline bool Scope::declare(const Symbol& sym) {
         return symbols_.emplace(sym.name, sym).second;
     }
@@ -145,17 +147,21 @@ namespace gallt {
 
     inline bool Scope::declare_overload(const Symbol& sym) {
         auto& set = overloads_[sym.name];
+
         for (const Symbol& existing : set) {
-            if (existing.param_types.size() != sym.param_types.size()) continue;
+            if (existing.param_types.size() != sym.param_types.size()) { continue; }
+            if (existing.is_variadic != sym.is_variadic) { continue; }
             bool same = true;
+
             for (std::size_t i = 0; i < existing.param_types.size(); ++i) {
                 if (!(existing.param_types[i] == sym.param_types[i])) {
                     same = false;
                     break;
                 }
             }
-            if (same) return false;
+            if (same) { return false; }
         }
+
         set.push_back(sym);
         return true;
     }
@@ -181,28 +187,30 @@ namespace gallt {
     }
 
     inline bool SymbolTable::declare(const Symbol& sym) {
-        if (scopes_.empty()) enter_scope();
+        if (scopes_.empty()) { enter_scope(); }
         declared_names_.insert(sym.name);
         return scopes_.back()->declare(sym);
     }
 
     inline bool SymbolTable::declare_overload(const Symbol& sym) {
-        if (scopes_.empty()) enter_scope();
+        if (scopes_.empty()) { enter_scope(); }
         declared_names_.insert(sym.name);
         return scopes_.back()->declare_overload(sym);
     }
 
     inline Symbol* SymbolTable::lookup(std::string_view name) {
         for (auto it = scopes_.rbegin(); it != scopes_.rend(); ++it) {
-            if (Symbol* s = (*it)->lookup(name)) return s;
+            if (Symbol* s = (*it)->lookup(name)) { return s; }
         }
+
         return nullptr;
     }
 
     inline const Symbol* SymbolTable::lookup(std::string_view name) const {
         for (auto it = scopes_.rbegin(); it != scopes_.rend(); ++it) {
-            if (const Symbol* s = (*it)->lookup(name)) return s;
+            if (const Symbol* s = (*it)->lookup(name)) { return s; }
         }
+
         return nullptr;
     }
 
@@ -211,40 +219,46 @@ namespace gallt {
             if (std::vector<Symbol>* set = (*it)->overloads(name)) {
                 return set;
             }
+
             if ((*it)->lookup(name) != nullptr) {
                 return nullptr;
             }
         }
+
         return nullptr;
     }
 
     inline bool SymbolTable::is_shadowed_by_non_function(std::string_view name) const {
         for (auto it = scopes_.rbegin(); it != scopes_.rend(); ++it) {
-            if ((*it)->overloads(name) != nullptr) return false;
+            if ((*it)->overloads(name) != nullptr) { return false; }
             const Symbol* s = (*it)->lookup(name);
+
             if (s != nullptr) {
                 return s->kind != SymbolKind::Function;
             }
         }
+
         return false;
     }
 
     inline Symbol* SymbolTable::lookup_current(std::string_view name) {
-        if (scopes_.empty()) return nullptr;
+        if (scopes_.empty()) { return nullptr; }
         return scopes_.back()->lookup(name);
     }
 
     inline const Symbol* SymbolTable::lookup_current(std::string_view name) const {
-        if (scopes_.empty()) return nullptr;
+        if (scopes_.empty()) { return nullptr; }
         return scopes_.back()->lookup(name);
     }
 
     inline const AST::StructDefinition::Member* SymbolTable::lookup_struct_member(
         const AST::StructDefinition* struct_def, std::string_view member_name) {
-        if (struct_def == nullptr) return nullptr;
+        if (struct_def == nullptr) { return nullptr; }
+
         for (const auto& member : struct_def->members) {
-            if (member.name == member_name) return &member;
+            if (member.name == member_name) { return &member; }
         }
+
         return nullptr;
     }
 

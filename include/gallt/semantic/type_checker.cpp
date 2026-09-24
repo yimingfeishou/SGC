@@ -30,6 +30,7 @@ namespace gallt {
         if (program == nullptr) {
             return false;
         }
+
         program_ = program;
 
         enter_scope();
@@ -41,8 +42,7 @@ namespace gallt {
                 if (struct_defs_.find(struct_def->name) != struct_defs_.end()) {
                     report_error(struct_def->location, ErrorCode::RedefinedIdentifier,
                         "struct '" + struct_def->name + "' already defined");
-                }
-                else {
+                } else {
                     struct_defs_[struct_def->name] = struct_def;
                     Symbol sym = Symbol::make_struct(struct_def->name, struct_def->location, struct_def);
                     if (!sym_table_.declare(sym)) {
@@ -58,8 +58,7 @@ namespace gallt {
         for (auto& top : program->top_levels) {
             if (auto* func = dynamic_cast<AST::FunctionDefinition*>(top.get())) {
                 collect_local_structs(func->body.get());
-            }
-            else if (auto* strct = dynamic_cast<AST::StructDefinition*>(top.get())) {
+            } else if (auto* strct = dynamic_cast<AST::StructDefinition*>(top.get())) {
                 for (auto& member : strct->special_members) {
                     if (member != nullptr && member->body != nullptr) {
                         collect_local_structs(member->body.get());
@@ -88,23 +87,17 @@ namespace gallt {
     void TypeChecker::check_top_level(AST::TopLevel* node) {
         if (auto* guide = dynamic_cast<AST::GuideStatement*>(node)) {
             check_guide_statement(guide);
-        }
-        else if (auto* clib = dynamic_cast<AST::ClibStatement*>(node)) {
+        } else if (auto* clib = dynamic_cast<AST::ClibStatement*>(node)) {
             check_clib_statement(clib);
-        }
-        else if (auto* ext = dynamic_cast<AST::ExternDeclaration*>(node)) {
+        } else if (auto* ext = dynamic_cast<AST::ExternDeclaration*>(node)) {
             check_extern_declaration(ext);
-        }
-        else if (auto* func = dynamic_cast<AST::FunctionDefinition*>(node)) {
+        } else if (auto* func = dynamic_cast<AST::FunctionDefinition*>(node)) {
             check_function_definition(func);
-        }
-        else if (auto* var = dynamic_cast<AST::VariableDeclaration*>(node)) {
+        } else if (auto* var = dynamic_cast<AST::VariableDeclaration*>(node)) {
             check_variable_declaration(var);
-        }
-        else if (auto* st = dynamic_cast<AST::StructDefinition*>(node)) {
+        } else if (auto* st = dynamic_cast<AST::StructDefinition*>(node)) {
             check_struct_definition(st);
-        }
-        else {
+        } else {
             report_error(node->location, ErrorCode::ExpressionSyntaxError,
                 "unknown top-level node");
         }
@@ -127,49 +120,37 @@ namespace gallt {
     void TypeChecker::check_statement(AST::Statement* stmt) {
         if (auto* block = dynamic_cast<AST::Block*>(stmt)) {
             check_block(block);
-        }
-        else if (auto* var = dynamic_cast<AST::VariableDeclaration*>(stmt)) {
+        } else if (auto* var = dynamic_cast<AST::VariableDeclaration*>(stmt)) {
             check_variable_declaration(var);
-        }
-        else if (auto* if_ = dynamic_cast<AST::IfStatement*>(stmt)) {
+        } else if (auto* if_ = dynamic_cast<AST::IfStatement*>(stmt)) {
             check_if_statement(if_);
-        }
-        else if (auto* for_ = dynamic_cast<AST::ForStatement*>(stmt)) {
+        } else if (auto* for_ = dynamic_cast<AST::ForStatement*>(stmt)) {
             check_for_statement(for_);
-        }
-        else if (auto* while_ = dynamic_cast<AST::WhileStatement*>(stmt)) {
+        } else if (auto* while_ = dynamic_cast<AST::WhileStatement*>(stmt)) {
             check_while_statement(while_);
-        }
-        else if (auto* br = dynamic_cast<AST::BreakStatement*>(stmt)) {
+        } else if (auto* br = dynamic_cast<AST::BreakStatement*>(stmt)) {
             check_break_statement(br);
-        }
-        else if (auto* ret = dynamic_cast<AST::ReturnStatement*>(stmt)) {
+        } else if (auto* ret = dynamic_cast<AST::ReturnStatement*>(stmt)) {
             check_return_statement(ret);
-        }
-        else if (auto* expr = dynamic_cast<AST::ExpressionStatement*>(stmt)) {
+        } else if (auto* expr = dynamic_cast<AST::ExpressionStatement*>(stmt)) {
             check_expression_statement(expr);
-        }
-       else if (auto* empty = dynamic_cast<AST::EmptyStatement*>(stmt)) {
-       }
-        else if (auto* destruct_stmt = dynamic_cast<AST::DestructStatement*>(stmt)) {
+        } else if (auto* empty = dynamic_cast<AST::EmptyStatement*>(stmt)) {
+        } else if (auto* destruct_stmt = dynamic_cast<AST::DestructStatement*>(stmt)) {
             AST::Type target_type = check_expression(destruct_stmt->target.get());
             if (target_type.kind != TypeKind::Pointer) {
                 report_error(destruct_stmt->location, ErrorCode::FreeNonPointer,
                     "destruct requires a pointer, got '" + target_type.to_string() + "'");
-            }
-           else if (!is_null_literal_expr(destruct_stmt->target.get()) &&
+            } else if (!is_null_literal_expr(destruct_stmt->target.get()) &&
                (!target_type.pointee_type ||
                target_type.pointee_type->kind != TypeKind::Struct)) {
                 diag_.report_error_template(destruct_stmt->location,
                     ErrorCode::DestructNonConstructed, std::vector<std::string>{});
-           }
-        }
-        else if (auto* struct_def = dynamic_cast<AST::StructDefinition*>(stmt)) {
+            }
+        } else if (auto* struct_def = dynamic_cast<AST::StructDefinition*>(stmt)) {
             if (struct_defs_.find(struct_def->name) != struct_defs_.end()) {
                 report_error(struct_def->location, ErrorCode::RedefinedIdentifier,
                     "struct '" + struct_def->name + "' already defined in this scope");
-            }
-            else {
+            } else {
                 struct_defs_[struct_def->name] = struct_def;
                 Symbol sym = Symbol::make_struct(struct_def->name, struct_def->location, struct_def);
                 if (!sym_table_.declare(sym)) {
@@ -178,8 +159,7 @@ namespace gallt {
                 }
                 check_struct_definition(struct_def);
             }
-        }
-        else {
+        } else {
             report_error(stmt->location, ErrorCode::ExpressionSyntaxError,
                 "unknown statement type");
         }
@@ -187,29 +167,33 @@ namespace gallt {
 
     void TypeChecker::check_block(AST::Block* block) {
         enter_scope();
+
         for (auto& stmt : block->statements) {
             check_statement(stmt.get());
         }
+
         exit_scope();
     }
 
     AST::StructDefinition* TypeChecker::get_struct_definition(const std::string& name) const {
         auto it = struct_defs_.find(name);
-        if (it != struct_defs_.end()) return it->second;
+        if (it != struct_defs_.end()) { return it->second; }
         auto predeclared = predeclared_structs_.find(name);
         return (predeclared != predeclared_structs_.end()) ? predeclared->second : nullptr;
     }
 
     const AST::StructDefinition::Member* TypeChecker::get_struct_member(const AST::Type& struct_type,
         std::string_view member_name) const {
-        if (struct_type.kind != TypeKind::Struct) return nullptr;
+        if (struct_type.kind != TypeKind::Struct) { return nullptr; }
         auto* def = get_struct_definition(struct_type.struct_name);
-        if (!def) return nullptr;
+        if (!def) { return nullptr; }
+
         for (const auto& m : def->members) {
             if (m.name == member_name) {
                 return &m;
             }
         }
+
         return nullptr;
     }
 
@@ -241,23 +225,26 @@ namespace gallt {
                 "main function not found");
             return;
         }
+
         if (sym->kind != SymbolKind::Function) {
             report_error(sym->declaration_loc, ErrorCode::MainSignatureError,
                 "main must be a function");
             return;
         }
+
         if (sym->type.kind != TypeKind::Int) {
             report_error(sym->declaration_loc, ErrorCode::MainReturnTypeError,
                 "main function must return int, got '" + sym->type.to_string() + "'");
         }
+
         bool valid = false;
         if (sym->param_types.empty()) {
             valid = true;
-        }
-        else if (sym->param_types.size() == 2) {
+        } else if (sym->param_types.size() == 2) {
             if (sym->param_types[0].kind == TypeKind::Int) {
                 if (sym->param_types[1].kind == TypeKind::Pointer) {
                     auto ptr_to = sym->param_types[1].pointee_type;
+
                     if (ptr_to && ptr_to->kind == TypeKind::Pointer) {
                         auto ptr_to_char = ptr_to->pointee_type;
                         if (ptr_to_char && ptr_to_char->kind == TypeKind::Char) {
@@ -266,19 +253,19 @@ namespace gallt {
                     }
                 }
             }
+
             if (!valid) {
                 report_error(sym->declaration_loc, ErrorCode::MainSignatureError,
                     "main parameter list must be () or (int count, char* array[])");
             }
-        }
-        else {
+        } else {
             report_error(sym->declaration_loc, ErrorCode::MainSignatureError,
                 "main parameter list must be () or (int count, char* array[])");
         }
     }
 
     void TypeChecker::declare_builtin_functions() {
-        if (builtins_declared_) return;
+        if (builtins_declared_) { return; }
         builtins_declared_ = true;
 
         Symbol sym_input = Symbol::make_function("input", AST::Type::make_int(),
@@ -399,6 +386,7 @@ namespace gallt {
 
     void TypeChecker::exit_scope() {
         sym_table_.exit_scope();
+
         if (!const_values_.empty()) {
             const_values_.pop_back();
         }

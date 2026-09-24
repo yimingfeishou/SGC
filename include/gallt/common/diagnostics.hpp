@@ -172,6 +172,21 @@ namespace gallt {
         ExportFunctionNameInvalid = 152,
         ExportFunctionCannotBeOverloaded = 153,
         ExportFunctionDeclarationConflict = 154,
+        VariadicParameterNotLast = 155,
+        VariadicElementTypeIsVoid = 156,
+        VariadicParameterDefaultArgument = 157,
+        ParameterPackUsedAsValue = 158,
+        VariadicArgumentTypeMismatch = 159,
+        PackExpansionTargetNotPack = 160,
+        PackExpansionNotAllowedHere = 161,
+        PackSubscriptNotInteger = 162,
+        ParameterPackPropertyNotApplicable = 163,
+        SpecialMemberVariadicNotAllowed = 164,
+        OperatorOverloadVariadicNotAllowed = 165,
+        ExpressionParameterVariadicNotAllowed = 166,
+        ParameterPackInConstantExpression = 167,
+        VariadicFunctionPointerSignatureMismatch = 168,
+        VariadicDefaultArgumentAmbiguous = 169,
     };
 
     enum class RuntimeErrorCode : std::uint16_t {
@@ -206,7 +221,9 @@ namespace gallt {
         static void report_runtime_error(RuntimeErrorCode code, std::string_view message);
 
         bool has_errors() const noexcept { return error_count_ > 0; }
+
         std::size_t error_count() const noexcept { return error_count_; }
+
         std::size_t warning_count() const noexcept { return warning_count_; }
 
         void clear();

@@ -21,7 +21,6 @@ namespace gallt {
         class Initializer;
         class Program;
 
-
         class Node {
         public:
             SourceLocation location;
@@ -34,8 +33,6 @@ namespace gallt {
             Node(Node&&) = default;
             Node& operator=(Node&&) = default;
         };
-
-
 
         struct GenericArgument;
         struct GenericRef;
@@ -61,21 +58,35 @@ namespace gallt {
 
             std::shared_ptr<Type> return_type;
             std::vector<Type> parameter_types;
+            bool is_variadic = false;
+            std::shared_ptr<Type> variadic_element_type;
 
             Type() : kind(TypeKind::Void) {}
+
             explicit Type(TypeKind k) : kind(k) {}
 
             static Type make_int() { return Type(TypeKind::Int); }
+
             static Type make_lint() { return Type(TypeKind::Lint); }
+
             static Type make_uint() { return Type(TypeKind::Uint); }
+
             static Type make_luint() { return Type(TypeKind::Luint); }
+
             static Type make_float() { return Type(TypeKind::Float); }
+
             static Type make_double() { return Type(TypeKind::Double); }
+
             static Type make_char() { return Type(TypeKind::Char); }
+
             static Type make_uchar() { return Type(TypeKind::Uchar); }
+
             static Type make_bool() { return Type(TypeKind::Bool); }
+
             static Type make_string() { return Type(TypeKind::String); }
+
             static Type make_file() { return Type(TypeKind::File); }
+
             static Type make_void() { return Type(TypeKind::Void); }
 
             static Type make_array(std::shared_ptr<Type> elem, std::optional<size_t> size = std::nullopt) {
@@ -97,10 +108,14 @@ namespace gallt {
                 return t;
             }
 
-            static Type make_function(std::shared_ptr<Type> ret, const std::vector<Type>& params) {
+            static Type make_function(std::shared_ptr<Type> ret,
+                const std::vector<Type>& params, bool variadic = false,
+                std::shared_ptr<Type> element = nullptr) {
                 Type t(TypeKind::Function);
                 t.return_type = ret;
                 t.parameter_types = params;
+                t.is_variadic = variadic;
+                t.variadic_element_type = std::move(element);
                 return t;
             }
 
@@ -117,14 +132,17 @@ namespace gallt {
                     kind == TypeKind::Char || kind == TypeKind::Uchar ||
                     kind == TypeKind::Bool;
             }
+
             bool is_signed_integer() const {
                 return kind == TypeKind::Char || kind == TypeKind::Int ||
                     kind == TypeKind::Lint;
             }
+
             bool is_unsigned_integer() const {
                 return kind == TypeKind::Uchar || kind == TypeKind::Uint ||
                     kind == TypeKind::Luint || kind == TypeKind::Bool;
             }
+
             int promotion_rank() const {
                 switch (kind) {
                 case TypeKind::Char:
@@ -139,6 +157,7 @@ namespace gallt {
                 default: return 0;
                 }
             }
+
             int integer_bit_width() const {
                 switch (kind) {
                 case TypeKind::Char:
@@ -151,15 +170,19 @@ namespace gallt {
                 default: return -1;
                 }
             }
+
             bool is_floating() const {
                 return kind == TypeKind::Float || kind == TypeKind::Double;
             }
+
             bool is_arithmetic() const {
                 return is_integer() || is_floating();
             }
+
             bool is_scalar() const {
                 return is_arithmetic() || kind == TypeKind::Pointer || kind == TypeKind::Bool || kind == TypeKind::Char;
             }
+
             bool is_assignable() const {
                 return kind != TypeKind::Void && kind != TypeKind::Function;
             }
@@ -170,6 +193,8 @@ namespace gallt {
 
         struct GenericArgument {
             bool is_type = true;
+            bool is_pack_expansion = false;
+            std::string pack_name;
             Type type;
             long long int_value = 0;
             double float_value = 0.0;
@@ -209,27 +234,35 @@ namespace gallt {
         };
 
         inline std::string GenericArgument::normalize() const {
+            if (is_pack_expansion) {
+                return pack_name + "...";
+            }
+
             if (is_expr) {
                 std::string out = "expr " + expr_name + "(";
                 for (std::size_t i = 0; i < expr_param_types.size(); ++i) {
-                    if (i != 0) out += ",";
+                    if (i != 0) { out += ","; }
                     out += expr_param_types[i].to_string();
                 }
                 out += ")";
                 out += text;
                 return out;
             }
+
             if (is_type) {
                 return type.to_string();
             }
+
             if (is_string_constant) {
                 return "\"" + string_constant + "\"";
             }
+
             if (float_constant) {
                 char buf[64];
                 std::snprintf(buf, sizeof(buf), "%g", float_value);
                 return std::string(buf);
             }
+
             return std::to_string(int_value);
         }
 
@@ -237,23 +270,27 @@ namespace gallt {
             std::string out;
             if (!display_name.empty()) {
                 out = display_name;
-            }
-            else {
+            } else {
                 for (const std::string& part : namespace_path) {
                     out += part;
                     out += "::";
                 }
                 out += generic_name;
             }
+
             out += "<";
+
             for (std::size_t i = 0; i < arguments.size(); ++i) {
-                if (i != 0) out += ", ";
+                if (i != 0) { out += ", "; }
                 out += arguments[i].normalize();
             }
+
             out += ">";
+
             if (!member.empty()) {
                 out += (member_scope_access ? "::" : ".") + member;
             }
+
             return out;
         }
 
@@ -263,7 +300,9 @@ namespace gallt {
                 out += part;
                 out += "$";
             }
+
             out += generic_name;
+
             for (const GenericArgument& arg : arguments) {
                 out += "$";
                 std::string norm = arg.normalize();
@@ -284,8 +323,7 @@ namespace gallt {
                         if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
                             (c >= '0' && c <= '9') || c == '_') {
                             out += c;
-                        }
-                        else {
+                        } else {
                             char buffer[8];
                             std::snprintf(buffer, sizeof(buffer), "_%02X",
                                 static_cast<unsigned>(static_cast<unsigned char>(c)));
@@ -295,6 +333,7 @@ namespace gallt {
                     }
                 }
             }
+
             if (!member.empty()) {
                 out += "$" + member;
             }
@@ -306,6 +345,7 @@ namespace gallt {
             explicit Initializer(SourceLocation loc) : Node(loc) {}
             virtual ~Initializer() noexcept = default;
             virtual bool is_expression() const { return false; }
+
             virtual bool is_array() const { return false; }
         };
 
@@ -373,6 +413,7 @@ namespace gallt {
             std::string library;
             std::vector<Type> parameters;
             std::vector<std::string> param_names;
+            bool c_variadic = false;
 
             ExternDeclaration(SourceLocation loc, Type ret, std::string_view n,
                 std::string_view lib, std::vector<Type> params,
@@ -398,6 +439,7 @@ namespace gallt {
             Type conversion_target_type;
             bool operator_postfix_dummy = false;
             bool is_export = false;
+            bool is_variadic = false;
 
             FunctionDefinition(SourceLocation loc, Type ret, std::string_view n,
                 std::vector<Type> params, std::vector<std::string> pnames,
@@ -495,7 +537,7 @@ namespace gallt {
             std::string text;
 
             std::string to_string() const {
-                if (!text.empty()) return text;
+                if (!text.empty()) { return text; }
                 switch (kind) {
                 case Kind::Any: return "any";
                 case Kind::Struct: return "struct";
@@ -511,6 +553,7 @@ namespace gallt {
         struct GenericParameter {
             std::string name;
             bool is_type = true;
+            bool is_pack = false;
             Type constant_type;
             bool constant_type_is_parameter = false;
             std::string constant_type_parameter;
@@ -560,7 +603,6 @@ namespace gallt {
             }
             virtual ~InstantiationStatement() noexcept = default;
         };
-
 
         class NamespaceDefinition : public TopLevel, public Statement {
         public:
@@ -658,7 +700,6 @@ namespace gallt {
             }
             virtual ~Program() noexcept = default;
         };
-
 
         class EmptyStatement : public Statement {
         public:
@@ -1001,7 +1042,7 @@ namespace gallt {
         public:
             enum class Operator {
                 Subscript, FunctionCall, Cast,
-                Increment, Decrement, Dot, Arrow
+                Increment, Decrement, Dot, Arrow, PackExpand
             };
 
             std::unique_ptr<Expression> base;

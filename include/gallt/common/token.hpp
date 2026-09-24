@@ -89,6 +89,7 @@ namespace gallt {
         Newline,
         EndOfFile,
         At,
+        Ellipsis,
         Unknown,
     };
 

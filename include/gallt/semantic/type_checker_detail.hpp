@@ -21,13 +21,15 @@ namespace gallt {
         }
 
         inline bool is_legal_export_identifier(const std::string& name) {
-            if (name.empty()) return false;
+            if (name.empty()) { return false; }
             const unsigned char first = static_cast<unsigned char>(name.front());
-            if (!(std::isalpha(first) || first == '_')) return false;
+            if (!(std::isalpha(first) || first == '_')) { return false; }
+
             for (char c : name) {
                 const unsigned char value = static_cast<unsigned char>(c);
-                if (!(std::isalnum(value) || value == '_')) return false;
+                if (!(std::isalnum(value) || value == '_')) { return false; }
             }
+
             return true;
         }
 
@@ -149,9 +151,11 @@ namespace gallt {
                 "r", "w", "a", "r+", "w+", "a+",
                 "rb", "wb", "ab", "r+b", "w+b", "a+b",
             };
+
             for (const char* candidate : kModes) {
-                if (mode == candidate) return true;
+                if (mode == candidate) { return true; }
             }
+
             return false;
         }
 
@@ -159,40 +163,45 @@ namespace gallt {
             if (lexeme.size() < 2 || lexeme.front() != '"' || lexeme.back() != '"') {
                 return false;
             }
+
             std::string_view inner = lexeme.substr(1, lexeme.size() - 2);
             if (inner.find('\\') != std::string_view::npos) {
                 return false;
             }
+
             out.assign(inner);
             return true;
         }
 
         inline bool types_equal_modulo_const(const AST::Type& a, const AST::Type& b) {
-            if (a.kind != b.kind) return false;
+            if (a.kind != b.kind) { return false; }
+
             switch (a.kind) {
             case TypeKind::Array:
-                if (a.array_size.has_value() != b.array_size.has_value()) return false;
-                if (a.array_size.has_value() && *a.array_size != *b.array_size) return false;
-                if ((a.element_type == nullptr) != (b.element_type == nullptr)) return false;
+                if (a.array_size.has_value() != b.array_size.has_value()) { return false; }
+                if (a.array_size.has_value() && *a.array_size != *b.array_size) { return false; }
+                if ((a.element_type == nullptr) != (b.element_type == nullptr)) { return false; }
                 return a.element_type
                     ? types_equal_modulo_const(*a.element_type, *b.element_type)
                     : true;
             case TypeKind::Pointer:
-                if ((a.pointee_type == nullptr) != (b.pointee_type == nullptr)) return false;
+                if ((a.pointee_type == nullptr) != (b.pointee_type == nullptr)) { return false; }
                 return a.pointee_type
                     ? types_equal_modulo_const(*a.pointee_type, *b.pointee_type)
                     : true;
             case TypeKind::Struct:
                 return a.struct_name == b.struct_name;
             case TypeKind::Function:
-                if (a.parameter_types.size() != b.parameter_types.size()) return false;
+                if (a.parameter_types.size() != b.parameter_types.size()) { return false; }
+
                 for (std::size_t i = 0; i < a.parameter_types.size(); ++i) {
                     if (!types_equal_modulo_const(a.parameter_types[i],
                         b.parameter_types[i])) {
                         return false;
                     }
                 }
-                if ((a.return_type == nullptr) != (b.return_type == nullptr)) return false;
+
+                if ((a.return_type == nullptr) != (b.return_type == nullptr)) { return false; }
                 return a.return_type
                     ? types_equal_modulo_const(*a.return_type, *b.return_type)
                     : true;
@@ -202,8 +211,9 @@ namespace gallt {
         }
 
         inline bool const_qualification_ok(const AST::Type& from, const AST::Type& to) {
-            if (from.kind != to.kind) return false;
-            if (from.is_const && !to.is_const) return false;
+            if (from.kind != to.kind) { return false; }
+            if (from.is_const && !to.is_const) { return false; }
+
             switch (from.kind) {
             case TypeKind::Array:
                 if (from.element_type && to.element_type) {
@@ -219,19 +229,23 @@ namespace gallt {
                 if ((from.return_type == nullptr) != (to.return_type == nullptr)) {
                     return false;
                 }
+
                 if (from.return_type && !const_qualification_ok(*from.return_type,
                     *to.return_type)) {
                     return false;
                 }
+
                 if (from.parameter_types.size() != to.parameter_types.size()) {
                     return false;
                 }
+
                 for (std::size_t i = 0; i < from.parameter_types.size(); ++i) {
                     if (!const_qualification_ok(from.parameter_types[i],
                         to.parameter_types[i])) {
                         return false;
                     }
                 }
+
                 return true;
             default:
                 return true;
@@ -242,7 +256,7 @@ namespace gallt {
             std::unordered_set<std::string>& out) {
             switch (type.kind) {
             case TypeKind::Struct:
-                if (!type.struct_name.empty()) out.insert(type.struct_name);
+                if (!type.struct_name.empty()) { out.insert(type.struct_name); }
                 break;
             case TypeKind::Pointer:
                 if (type.pointee_type) {
@@ -262,6 +276,7 @@ namespace gallt {
         inline std::string sanitize_identifier(std::string_view text) {
             std::string out;
             out.reserve(text.size());
+
             for (char c : text) {
                 switch (c) {
                 case '<': out += 'L'; break;
@@ -275,6 +290,7 @@ namespace gallt {
                 default: out += c; break;
                 }
             }
+
             return out;
         }
 

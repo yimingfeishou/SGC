@@ -3,7 +3,7 @@
 #include "include/gallt/pal/platform.hpp"
 #include <iostream>
 
-const std::string VERSION = "0.4.2-0922 Preview";
+const std::string VERSION = "0.4.2-0924 Preview";
 
 int wmain(int argc, wchar_t* argv[]) {
     gallt::pal::enable_utf8_console();

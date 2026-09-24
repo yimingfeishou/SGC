@@ -7,36 +7,43 @@ namespace gallt {
 
         std::string_view Type::strip_integer_suffix(std::string_view lexeme) noexcept {
             std::size_t count = 0;
+
             while (count < 2 && count + 1 < lexeme.size()) {
                 const char c = lexeme[lexeme.size() - 1 - count];
                 if (c == 'l' || c == 'L' || c == 'u' || c == 'U') {
                     ++count;
-                }
-                else {
+                } else {
                     break;
                 }
             }
+
             if (count != 0) {
                 lexeme.remove_suffix(count);
             }
+
             return lexeme;
         }
 
         Type Type::integer_literal_type(std::string_view lexeme) noexcept {
             const std::string_view digits = strip_integer_suffix(lexeme);
             std::string_view suffix = lexeme.substr(digits.size());
+
             auto lower = [](char c) {
                 return static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
             };
+
             if (suffix.size() == 2 && lower(suffix[0]) == 'l' && lower(suffix[1]) == 'u') {
                 return make_luint();
             }
+
             if (suffix.size() == 1 && lower(suffix[0]) == 'l') {
                 return make_lint();
             }
+
             if (suffix.size() == 1 && lower(suffix[0]) == 'u') {
                 return make_uint();
             }
+
             return make_int();
         }
 
@@ -54,9 +61,11 @@ namespace gallt {
             if (kind != other.kind) {
                 return false;
             }
+
             if (is_const != other.is_const) {
                 return false;
             }
+
             switch (kind) {
             case TypeKind::Int:
             case TypeKind::Lint:
@@ -75,9 +84,11 @@ namespace gallt {
                 if (array_size.has_value() != other.array_size.has_value()) {
                     return false;
                 }
+
                 if (array_size.has_value() && *array_size != *other.array_size) {
                     return false;
                 }
+
                 return element_type && other.element_type
                     ? *element_type == *other.element_type
                     : element_type == other.element_type;
@@ -88,26 +99,47 @@ namespace gallt {
             case TypeKind::Struct:
                 return struct_name == other.struct_name;
             case TypeKind::Function:
+                if (is_variadic != other.is_variadic) {
+                    return false;
+                }
+
                 if (parameter_types.size() != other.parameter_types.size()) {
                     return false;
                 }
+
                 for (size_t i = 0; i < parameter_types.size(); ++i) {
                     if (!(parameter_types[i] == other.parameter_types[i])) {
                         return false;
                     }
                 }
+
+                if (is_variadic) {
+                    if (static_cast<bool>(variadic_element_type) !=
+                        static_cast<bool>(other.variadic_element_type)) {
+                        return false;
+                    }
+
+                    if (variadic_element_type && other.variadic_element_type &&
+                        !(*variadic_element_type == *other.variadic_element_type)) {
+                        return false;
+                    }
+                }
+
                 return return_type && other.return_type
                     ? *return_type == *other.return_type
                     : return_type == other.return_type;
             }
+
             return false;
         }
 
         std::string Type::to_string() const {
             std::ostringstream out;
+
             if (is_const) {
                 out << "const ";
             }
+
             switch (kind) {
             case TypeKind::Int:    out << "int"; break;
             case TypeKind::Lint:   out << "lint"; break;
@@ -127,10 +159,13 @@ namespace gallt {
                 } else {
                     out << "?";
                 }
+
                 out << '[';
+
                 if (array_size.has_value()) {
                     out << *array_size;
                 }
+
                 out << ']';
                 break;
             case TypeKind::Pointer:
@@ -139,6 +174,7 @@ namespace gallt {
                 } else {
                     out << "void";
                 }
+
                 out << '*';
                 break;
             case TypeKind::Struct:
@@ -154,16 +190,33 @@ namespace gallt {
                 } else {
                     out << "void";
                 }
+
                 out << '(';
+
                 for (size_t i = 0; i < parameter_types.size(); ++i) {
                     if (i != 0) {
                         out << ", ";
                     }
+
                     out << parameter_types[i].to_string();
                 }
+
+                if (is_variadic) {
+                    if (!parameter_types.empty()) {
+                        out << ", ";
+                    }
+
+                    if (variadic_element_type) {
+                        out << variadic_element_type->to_string();
+                    }
+
+                    out << "...";
+                }
+
                 out << ")*";
                 break;
             }
+
             return out.str();
         }
 

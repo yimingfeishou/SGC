@@ -25,13 +25,14 @@ namespace gallt {
         seen_generics_.insert(names.begin(), names.end());
     }
 
-
     void Parser::ensure_tokens(std::size_t n) const {
         while (tokens_.size() <= n && !lexer_exhausted_) {
             Token t = lexer_.next_token();
+
             if (t.type == TokenType::EndOfFile) {
                 lexer_exhausted_ = true;
             }
+
             tokens_.push_back(std::move(t));
         }
     }
@@ -39,9 +40,11 @@ namespace gallt {
     Token Parser::lookahead(std::size_t n) const {
         ensure_tokens(token_index_ + n);
         std::size_t idx = token_index_ + n;
+
         if (idx >= tokens_.size()) {
             idx = tokens_.empty() ? 0 : tokens_.size() - 1;
         }
+
         return tokens_[idx];
     }
 
@@ -52,21 +55,27 @@ namespace gallt {
     void Parser::reset_to(std::size_t m) {
         token_index_ = m;
         ensure_tokens(m);
+
         if (token_index_ < tokens_.size()) {
             current_ = tokens_[token_index_];
         }
+
         has_peek_ = false;
     }
 
     void Parser::advance() {
         ensure_tokens(token_index_ + 1);
+
         if (token_index_ + 1 < tokens_.size()) {
             ++token_index_;
         }
+
         current_ = tokens_[token_index_];
         has_peek_ = false;
+
         if (expression_depth_ > 0 && !complexity_limit_hit_) {
             ++expression_tokens_;
+
             if (expression_tokens_ > kMaxExpressionTokens) {
                 report_error(ErrorCode::ExpressionSyntaxError,
                     "expression is too complex (more than " +
@@ -86,6 +95,7 @@ namespace gallt {
             advance();
             return true;
         }
+
         return false;
     }
 
@@ -94,19 +104,22 @@ namespace gallt {
             advance();
             return true;
         }
+
         report_error(ErrorCode::ExpressionSyntaxError, err_msg);
         return false;
     }
 
     void Parser::report_error(ErrorCode code, const std::string& msg) {
-        if (complexity_limit_hit_) return;
+        if (complexity_limit_hit_) { return; }
+
         diag_.report_error(current_.location, code, msg);
         has_error_ = true;
         in_error_recovery_ = true;
     }
 
     void Parser::report_error_at(SourceLocation loc, ErrorCode code, const std::string& msg) {
-        if (complexity_limit_hit_) return;
+        if (complexity_limit_hit_) { return; }
+
         diag_.report_error(loc, code, msg);
         has_error_ = true;
         in_error_recovery_ = true;
@@ -119,7 +132,8 @@ namespace gallt {
 
     void Parser::report_error_template_at(SourceLocation loc, ErrorCode code,
         const std::vector<std::string>& values) {
-        if (complexity_limit_hit_) return;
+        if (complexity_limit_hit_) { return; }
+
         diag_.report_error_template(loc, code, values);
         has_error_ = true;
         in_error_recovery_ = true;
@@ -133,6 +147,7 @@ namespace gallt {
 
     void Parser::synchronize() {
         bool advanced = false;
+
         while (current_.type != TokenType::EndOfFile) {
             if (current_.type == TokenType::Semicolon ||
                 current_.type == TokenType::Newline ||
@@ -140,6 +155,7 @@ namespace gallt {
                 advance();
                 return;
             }
+
             if (current_.is_keyword()) {
                 in_error_recovery_ = false;
                 if (!advanced) {
@@ -147,9 +163,11 @@ namespace gallt {
                 }
                 return;
             }
+
             advance();
             advanced = true;
         }
+
         in_error_recovery_ = false;
     }
 
@@ -163,19 +181,21 @@ namespace gallt {
 
         while (current_.type != TokenType::EndOfFile) {
             skip_newlines();
+
             if (current_.type == TokenType::EndOfFile) {
                 break;
             }
+
             if (in_error_recovery_) {
                 synchronize();
                 continue;
             }
 
             auto tl = parse_top_level();
+
             if (tl != nullptr) {
                 top_levels.push_back(std::move(tl));
-            }
-            else {
+            } else {
                 if (!in_error_recovery_) {
                     report_error(ErrorCode::ExpressionSyntaxError, "failed to parse top-level declaration");
                 }
@@ -357,6 +377,7 @@ namespace gallt {
                 "expected function name after return type in extern declaration");
             return nullptr;
         }
+
         std::string func_name(current_.lexeme);
         advance();
 
@@ -369,13 +390,24 @@ namespace gallt {
                 "expected library name after 'from'");
             return nullptr;
         }
+
         std::string lib_name(current_.lexeme);
         advance();
 
         if (!expect(TokenType::LeftParen, "expected '(' for parameter list")) {
             return nullptr;
         }
-        auto [param_types, param_names] = parse_parameter_list();
+
+        bool c_variadic = false;
+        bool variadic = false;
+        auto [param_types, param_names] = parse_parameter_list(nullptr, &variadic,
+            &c_variadic);
+
+        if (variadic) {
+            report_error(ErrorCode::ExpressionSyntaxError,
+                "an extern declaration may only use an unnamed '...' for variadic parameters");
+        }
+
         if (!expect(TokenType::RightParen, "expected ')' after parameter list")) {
             return nullptr;
         }
@@ -385,6 +417,7 @@ namespace gallt {
             loc, std::move(ret_type), func_name, lib_name,
             std::move(param_types), std::move(param_names));
         decl->c_symbol_name = func_name;
+        decl->c_variadic = c_variadic;
         return decl;
     }
 
@@ -415,21 +448,26 @@ namespace gallt {
         report_error_template(ErrorCode::ExportNotAllowedInContext,
             { std::string(context) });
         advance();
+
         if (current_.type == TokenType::Keyword_Export) {
             advance();
         }
+
         return parse_top_level();
     }
 
     std::unique_ptr<TopLevel> Parser::parse_export_definition() {
         SourceLocation export_loc = current_location();
         advance();
+
         if (current_.type == TokenType::Keyword_Export) {
             report_error_template_at(export_loc, ErrorCode::ExportNotAllowedInContext,
                 { std::string("another export declaration") });
             advance();
         }
+
         const TokenType kind_token = current_.type;
+
         switch (kind_token) {
         case TokenType::Keyword_Struct:
         case TokenType::Keyword_Namespace:
@@ -447,11 +485,14 @@ namespace gallt {
         default:
             break;
         }
+
         if (is_type_start_keyword(kind_token) || kind_token == TokenType::Identifier) {
             return parse_function_definition(true, export_loc);
         }
+
         report_error_template_at(export_loc, ErrorCode::ExportRequiresFunctionDefinition,
             { std::string(export_kind_for_token(kind_token)) });
+
         while (current_.type != TokenType::Newline &&
             current_.type != TokenType::Semicolon &&
             current_.type != TokenType::EndOfFile) {
@@ -463,16 +504,19 @@ namespace gallt {
     std::vector<std::unique_ptr<TopLevel>> Parser::parse_namespace_members() {
         std::vector<std::unique_ptr<TopLevel>> members;
         skip_newlines();
+
         while (current_.type != TokenType::RightBrace &&
             current_.type != TokenType::EndOfFile) {
             skip_newlines();
-            if (current_.type == TokenType::RightBrace) break;
+            if (current_.type == TokenType::RightBrace) { break; }
+
             if (in_error_recovery_) {
                 synchronize();
                 continue;
             }
 
             std::unique_ptr<TopLevel> member;
+
             switch (current_.type) {
             case TokenType::Keyword_Export:
                 member = parse_export_member("a namespace definition");
@@ -521,12 +565,10 @@ namespace gallt {
             if (member == nullptr && !in_error_recovery_) {
                 if (at_struct_attribute()) {
                     member = parse_struct_definition();
-                }
-                else if (current_.type == TokenType::Identifier &&
+                } else if (current_.type == TokenType::Identifier &&
                     at_operator_definition()) {
                     member = parse_operator_definition();
-                }
-                else if (current_.type == TokenType::Identifier &&
+                } else if (current_.type == TokenType::Identifier &&
                     looks_like_generic_instantiation() && !at_declaration_start()) {
                     SourceLocation iloc = current_location();
                     GenericRef ref = parse_generic_reference(current_.lexeme);
@@ -538,14 +580,12 @@ namespace gallt {
                         expect_stmt_end("generic instantiation");
                         member = std::make_unique<InstantiationStatement>(iloc,
                             std::move(ref));
-                    }
-                    else {
+                    } else {
                         Type t = Type::make_struct(ref.to_string());
                         t.generic_ref = std::make_shared<GenericRef>(std::move(ref));
                         member = parse_variable_declaration_with_type(std::move(t));
                     }
-                }
-                else if (at_declaration_start() ||
+                } else if (at_declaration_start() ||
                     is_type_start_keyword(current_.type)) {
                     member = parse_function_definition();
                 }
@@ -561,8 +601,10 @@ namespace gallt {
                 auto discard = parse_statement();
                 (void)discard;
             }
+
             synchronize();
         }
+
         return members;
     }
 
@@ -570,17 +612,22 @@ namespace gallt {
         SourceLocation loc = current_location();
         expect(TokenType::Keyword_Namespace, "expected 'namespace'");
         std::string name;
+
         if (!check_identifier_name(name, "namespace name")) {
             return nullptr;
         }
+
         if (!expect(TokenType::LeftBrace, "expected '{' after namespace name")) {
             return nullptr;
         }
+
         auto def = std::make_unique<NamespaceDefinition>(loc, name);
         def->members = parse_namespace_members();
+
         if (!expect(TokenType::RightBrace, "expected '}' to close namespace definition")) {
             return nullptr;
         }
+
         expect_stmt_end("namespace definition");
         return def;
     }
@@ -591,18 +638,24 @@ namespace gallt {
         expect(TokenType::Keyword_Namespace, "expected 'namespace' after 'access'");
         std::vector<std::string> path;
         std::string first;
+
         if (!check_identifier_name(first, "namespace name after 'access namespace'")) {
             return nullptr;
         }
+
         path.push_back(first);
+
         while (current_.type == TokenType::ColonColon) {
             advance();
             std::string part;
+
             if (!check_identifier_name(part, "identifier after '::'")) {
                 return nullptr;
             }
+
             path.push_back(part);
         }
+
         expect_stmt_end("access namespace statement");
         return std::make_unique<AccessNamespaceStatement>(loc, std::move(path));
     }
@@ -612,17 +665,22 @@ namespace gallt {
         expect(TokenType::Keyword_Addition, "expected 'addition'");
         expect(TokenType::Keyword_Namespace, "expected 'namespace' after 'addition'");
         std::string name;
+
         if (!check_identifier_name(name, "namespace name after 'addition namespace'")) {
             return nullptr;
         }
+
         if (!expect(TokenType::LeftBrace, "expected '{' after namespace name")) {
             return nullptr;
         }
+
         auto def = std::make_unique<AdditionNamespaceStatement>(loc, name);
         def->members = parse_namespace_members();
+
         if (!expect(TokenType::RightBrace, "expected '}' to close addition namespace")) {
             return nullptr;
         }
+
         expect_stmt_end("addition namespace statement");
         return def;
     }
@@ -630,9 +688,10 @@ namespace gallt {
     std::unique_ptr<Statement> Parser::parse_statement() {
         complexity_limit_hit_ = false;
         skip_newlines();
+
         if (in_error_recovery_) {
             synchronize();
-            if (in_error_recovery_) return nullptr;
+            if (in_error_recovery_) { return nullptr; }
         }
 
         switch (current_.type) {
@@ -661,31 +720,34 @@ namespace gallt {
             if (tt == TokenType::At) {
                 return parse_condition_node(false);
             }
+
             if (tt == TokenType::Keyword_Export) {
                 report_error_template(ErrorCode::ExportNotAllowedInContext,
                     { std::string("a local scope") });
                 advance();
                 int nested_braces = 0;
+
                 while (current_.type != TokenType::EndOfFile) {
                     if (current_.type == TokenType::LeftBrace) {
                         ++nested_braces;
-                    }
-                    else if (current_.type == TokenType::RightBrace) {
-                        if (nested_braces == 0) break;
+                    } else if (current_.type == TokenType::RightBrace) {
+                        if (nested_braces == 0) { break; }
                         --nested_braces;
-                    }
-                    else if (nested_braces == 0 &&
+                    } else if (nested_braces == 0 &&
                         (current_.type == TokenType::Newline ||
                             current_.type == TokenType::Semicolon)) {
                         break;
                     }
                     advance();
                 }
+
                 return nullptr;
             }
+
             if (at_struct_attribute()) {
                 return parse_struct_definition();
             }
+
             if ((tt == TokenType::Identifier && at_operator_definition()) ||
                 (is_type_start_keyword(tt) && lookahead(1).lexeme == "operator" &&
                     lookahead_type(1) == TokenType::Identifier)) {
@@ -698,32 +760,39 @@ namespace gallt {
                 (void)skipped;
                 return nullptr;
             }
+
             if (tt == TokenType::Keyword_Emit) {
                 return parse_emit_statement(generic_ct_depth_ > 0);
             }
+
             if (tt == TokenType::Keyword_Access) {
                 return parse_access_namespace();
             }
+
             if (tt == TokenType::Keyword_Namespace || tt == TokenType::Keyword_Addition) {
                 report_error(ErrorCode::ExpressionSyntaxError,
                     "namespace definitions are only allowed at global or namespace scope");
                 advance();
                 return nullptr;
             }
+
             if (tt == TokenType::Identifier && current_.lexeme == "destruct" &&
                 lookahead_type(1) != TokenType::LeftParen) {
                 SourceLocation dloc = current_location();
                 advance();
                 auto target = parse_expression();
+
                 if (target == nullptr) {
                     report_error(ErrorCode::ExpressionSyntaxError,
                         "expected expression after 'destruct'");
                     return nullptr;
                 }
+
                 expect_stmt_end("destruct statement");
                 return std::make_unique<DestructStatement>(dloc, std::move(target));
             }
-           if (tt == TokenType::Identifier && looks_like_generic_instantiation() &&
+
+            if (tt == TokenType::Identifier && looks_like_generic_instantiation() &&
                !at_declaration_start()) {
                 std::size_t start = mark();
                 SourceLocation iloc = current_location();
@@ -732,18 +801,23 @@ namespace gallt {
                     current_.type == TokenType::Newline ||
                     current_.type == TokenType::EndOfFile ||
                     current_.type == TokenType::RightBrace);
+
                 if (ends_statement) {
                     expect_stmt_end("generic instantiation");
                     return std::make_unique<InstantiationStatement>(iloc, std::move(ref));
                 }
+
                 reset_to(start);
-           }
+            }
+
             if (is_type_start_keyword(tt) || at_declaration_start()) {
                 auto var_decl = parse_variable_declaration();
+
                 if (var_decl != nullptr) {
                     return var_decl;
                 }
             }
+
             return parse_expression_statement();
         }
         }
@@ -754,36 +828,44 @@ namespace gallt {
         if (at_struct_attribute()) {
             return parse_struct_definition();
         }
+
         if (tt == TokenType::Keyword_Generics) {
             report_error(ErrorCode::GenericStatementNotAllowed,
                 "generic definitions are only allowed at the top level");
             advance();
             return nullptr;
         }
+
         if (is_type_start_keyword(tt) || at_declaration_start()) {
             auto var_decl = parse_variable_declaration();
+
             if (var_decl != nullptr) {
                 return var_decl;
             }
         }
+
         if (tt == TokenType::Identifier && looks_like_generic_instantiation()) {
             SourceLocation iloc = current_location();
             GenericRef ref = parse_generic_reference(current_.lexeme);
+
             if (ref.member.empty() && current_.type != TokenType::Identifier) {
                 expect_stmt_end("generic instantiation");
                 return std::make_unique<InstantiationStatement>(iloc, std::move(ref));
             }
+
             Type t = Type::make_struct(ref.to_string());
             t.generic_ref = std::make_shared<GenericRef>(ref);
             return parse_variable_declaration_with_type(std::move(t));
         }
+
         auto expr = parse_expression();
+
         if (expr != nullptr) {
             return std::make_unique<ExpressionStatement>(current_location(), std::move(expr));
         }
+
         return nullptr;
     }
-
 
     std::unique_ptr<IfStatement> Parser::parse_if_statement() {
         SourceLocation loc = current_location();
@@ -793,15 +875,18 @@ namespace gallt {
             return nullptr;
         }
         auto cond = parse_expression();
+
         if (cond == nullptr) {
             report_error(ErrorCode::ExpressionSyntaxError, "expected condition expression");
             return nullptr;
         }
+
         if (!expect(TokenType::RightParen, "expected ')' after condition")) {
             return nullptr;
         }
 
         auto then_block = parse_block();
+
         if (then_block == nullptr) {
             report_error(ErrorCode::MissingBraces, "if statement must be followed by a block");
             return nullptr;
@@ -809,9 +894,11 @@ namespace gallt {
 
         std::unique_ptr<Statement> else_block = nullptr;
         skip_newlines();
+
         if (match(TokenType::Keyword_Else)) {
             skip_newlines();
             else_block = parse_block();
+
             if (else_block == nullptr) {
                 report_error(ErrorCode::MissingBraces, "else statement must be followed by a block");
                 return nullptr;
@@ -833,15 +920,16 @@ namespace gallt {
         std::unique_ptr<Statement> init_stmt = nullptr;
         if (current_.type != TokenType::Semicolon) {
             init_stmt = parse_declaration_or_statement();
+
             if (init_stmt == nullptr) {
                 report_error(ErrorCode::ExpressionSyntaxError, "invalid for initializer");
             }
         }
+
         if (init_stmt == nullptr) {
             if (!expect(TokenType::Semicolon, "expected ';' after for initializer")) {
             }
-        }
-        else {
+        } else {
             if (current_.type == TokenType::Semicolon) {
                 advance();
             }
@@ -850,25 +938,30 @@ namespace gallt {
         std::unique_ptr<Expression> cond_expr = nullptr;
         if (current_.type != TokenType::Semicolon) {
             cond_expr = parse_expression();
+
             if (cond_expr == nullptr) {
                 report_error(ErrorCode::ExpressionSyntaxError, "invalid for condition");
             }
         }
+
         if (!expect(TokenType::Semicolon, "expected ';' after for condition")) {
         }
 
         std::unique_ptr<Expression> step_expr = nullptr;
         if (current_.type != TokenType::RightParen) {
             step_expr = parse_expression();
+
             if (step_expr == nullptr) {
                 report_error(ErrorCode::ExpressionSyntaxError, "invalid for step expression");
             }
         }
+
         if (!expect(TokenType::RightParen, "expected ')' after for step")) {
             return nullptr;
         }
 
         auto body = parse_block();
+
         if (body == nullptr) {
             report_error(ErrorCode::MissingBraces, "for loop body must be a block");
             return nullptr;
@@ -889,15 +982,18 @@ namespace gallt {
             return nullptr;
         }
         auto cond = parse_expression();
+
         if (cond == nullptr) {
             report_error(ErrorCode::ExpressionSyntaxError, "expected condition expression");
             return nullptr;
         }
+
         if (!expect(TokenType::RightParen, "expected ')' after condition")) {
             return nullptr;
         }
 
         auto body = parse_block();
+
         if (body == nullptr) {
             report_error(ErrorCode::MissingBraces, "while loop body must be a block");
             return nullptr;
@@ -924,6 +1020,7 @@ namespace gallt {
         if (current_.type != TokenType::Semicolon && current_.type != TokenType::Newline &&
             current_.type != TokenType::EndOfFile) {
             value = parse_expression();
+
             if (value == nullptr) {
                 report_error(ErrorCode::ExpressionSyntaxError, "invalid return value expression");
             }
@@ -942,8 +1039,10 @@ namespace gallt {
         struct BlockGuard {
             int& depth;
             explicit BlockGuard(int& d) : depth(d) { ++depth; }
+
             ~BlockGuard() { --depth; }
         } guard(block_depth_);
+
         if (block_depth_ > kMaxBlockNesting) {
             report_error(ErrorCode::ExpressionSyntaxError,
                 "block nesting is too deep (more than " +
@@ -953,20 +1052,24 @@ namespace gallt {
         }
 
         std::vector<std::unique_ptr<Statement>> stmts;
+
         while (current_.type != TokenType::RightBrace && current_.type != TokenType::EndOfFile) {
             skip_newlines();
+
             if (current_.type == TokenType::RightBrace || current_.type == TokenType::EndOfFile) {
                 break;
             }
+
             if (in_error_recovery_) {
                 synchronize();
                 continue;
             }
+
             auto stmt = parse_statement();
+
             if (stmt != nullptr) {
                 stmts.push_back(std::move(stmt));
-            }
-            else {
+            } else {
                 if (!in_error_recovery_) {
                     report_error(ErrorCode::ExpressionSyntaxError, "failed to parse statement in block");
                 }
@@ -984,10 +1087,12 @@ namespace gallt {
     std::unique_ptr<ExpressionStatement> Parser::parse_expression_statement() {
         SourceLocation loc = current_location();
         auto expr = parse_expression();
+
         if (expr == nullptr) {
             report_error(ErrorCode::ExpressionSyntaxError, "expected expression");
             return nullptr;
         }
+
         expect_stmt_end("expression statement");
         return std::make_unique<ExpressionStatement>(loc, std::move(expr));
     }
@@ -1002,12 +1107,12 @@ namespace gallt {
         return parse_declaration_or_statement();
     }
 
-
     bool Parser::is_stmt_end() const {
         if (in_expr_argument_ &&
             (current_.type == TokenType::Greater || current_.type == TokenType::Comma)) {
             return true;
         }
+
         return current_.type == TokenType::Semicolon ||
             current_.type == TokenType::Newline ||
             current_.type == TokenType::EndOfFile;
@@ -1018,20 +1123,25 @@ namespace gallt {
             (current_.type == TokenType::Greater || current_.type == TokenType::Comma)) {
             return true;
         }
+
         if (current_.type == TokenType::Semicolon) {
             advance();
             return true;
         }
+
         if (current_.type == TokenType::Newline) {
             advance();
             return true;
         }
+
         if (current_.type == TokenType::EndOfFile) {
             return true;
         }
+
         if (current_.type == TokenType::RightBrace) {
             return true;
         }
+
         report_error(ErrorCode::ExpressionSyntaxError,
             context + " must end with ';' or newline");
         return false;
@@ -1041,30 +1151,35 @@ namespace gallt {
         if (current_.type != TokenType::IntegerLiteral) {
             return std::nullopt;
         }
+
         std::string_view lexeme = current_.lexeme;
         int base = 10;
+
         if (lexeme.size() > 2 && lexeme[0] == '0' && (lexeme[1] == 'x' || lexeme[1] == 'X')) {
             base = 16;
             lexeme = lexeme.substr(2);
-        }
-        else if (lexeme.size() > 1 && lexeme[0] == '0') {
+        } else if (lexeme.size() > 1 && lexeme[0] == '0') {
             base = 8;
             lexeme = lexeme.substr(1);
         }
+
         while (lexeme.size() > 1) {
             const char back = lexeme.back();
+
             if (back == 'l' || back == 'L' || back == 'u' || back == 'U') {
                 lexeme.remove_suffix(1);
-            }
-            else {
+            } else {
                 break;
             }
         }
+
         size_t value = 0;
         auto [ptr, ec] = std::from_chars(lexeme.data(), lexeme.data() + lexeme.size(), value, base);
+
         if (ec != std::errc()) {
             return std::nullopt;
         }
+
         return value;
     }
 
@@ -1075,6 +1190,7 @@ namespace gallt {
                 return try_parse_integer_literal();
             }
         }
+
         return std::nullopt;
     }
 
