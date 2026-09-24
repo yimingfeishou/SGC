@@ -1,4 +1,4 @@
-# SGC / Standard Gallt Compile
+# SGC / Standard Gallt Compiler
 
 ## 中文
 
