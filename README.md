@@ -6,7 +6,7 @@
 
 SGC 是一个全新语言 Gallt 编译器前端。后端复用 LLVM 的 clang/lld，在 Windows 11 x64 上直接生成 PE 可执行文件，该版本是实验性的。
 
-当前版本：`0.4.2-0924 Preview`。
+当前版本：`0.4.2-0925 Preview`。
 
 ### 目录结构
 
@@ -26,7 +26,7 @@ SGC 是一个全新语言 Gallt 编译器前端。后端复用 LLVM 的 clang/ll
 
 运行 `sgc` 时还需要 LLVM 的 `clang.exe` 与 `lld`。
 
-### 用法
+### 用法示例
 
 ```text
 sgc --compile --input "file.glt" --output "program.exe"
@@ -38,6 +38,8 @@ sgc --compile --input "file.glt" --output "program.exe" --release
 sgc --help
 sgc --version
 ```
+
+更多用法，请在 SGC 内输入 `--help` 以查看。
 
 ### 注意事项
 
@@ -74,7 +76,7 @@ The built `sgc` locates `clang.exe` through `SGC_LLVM_BIN` or `LLVM_BIN`. If nei
 
 Running `sgc` also requires LLVM's `clang.exe` and `lld`.
 
-### Usage
+### Usage examples
 
 ```text
 sgc --compile --input "file.glt" --output "program.exe"
@@ -86,6 +88,8 @@ sgc --compile --input "file.glt" --output "program.exe" --release
 sgc --help
 sgc --version
 ```
+
+For more usage instructions, please enter `--help` within SGC to view them.
 
 ### Notes
 
