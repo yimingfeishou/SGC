@@ -1915,8 +1915,12 @@ namespace gallt {
                     (arg.type.kind == TypeKind::Struct ||
                         arg.type.kind == TypeKind::String);
                 if (want.kind == TypeKind::String && extern_call) {
-                    std::string addr = !arg.address.empty() ? arg.address : arg.value;
-                    ir_args.push_back(string_cstr_pointer(addr));
+                    if (gallt_abi_) {
+                        ir_args.push_back(aggregate_argument_pointer(want, arg));
+                    } else {
+                        std::string addr = !arg.address.empty() ? arg.address : arg.value;
+                        ir_args.push_back(string_cstr_pointer(addr));
+                    }
                 } else if (aggregate_argument) {
                     ir_args.push_back(aggregate_argument_pointer(want, arg));
                 } else {
@@ -1955,7 +1959,8 @@ namespace gallt {
             }
 
             bool extern_call = !direct_name.empty() && function_is_extern(direct_name);
-            bool sret_call = returns_via_sret(return_type) && !extern_call;
+            bool sret_call = returns_via_sret(return_type) &&
+                (!extern_call || gallt_abi_);
             std::string sret_storage;
 
             if (sret_call) {

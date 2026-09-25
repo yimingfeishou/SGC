@@ -235,6 +235,8 @@ namespace gallt {
             std::string& out);
         bool eval_compile_time_condition(const AST::Expression* expr, const Substitution& sub,
             bool& out);
+        bool eval_integer_condition_value(const AST::Expression* expr,
+            const Substitution& sub, long long& out);
         bool eval_bool_property(const AST::Expression* receiver, const std::string& property,
             const std::vector<const AST::Expression*>& args, const Substitution& sub,
             bool& out);

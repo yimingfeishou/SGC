@@ -14,6 +14,20 @@ using namespace gallt::AST;
 namespace gallt {
     using namespace parser_detail;
 
+    bool Parser::at_const_if_statement() const {
+        return current_.type == TokenType::Keyword_Const &&
+            lookahead_type(1) == TokenType::Keyword_If;
+    }
+
+    bool Parser::at_const_else_clause() const {
+        return current_.type == TokenType::Keyword_Const &&
+            lookahead_type(1) == TokenType::Keyword_Else;
+    }
+
+    bool Parser::const_if_allowed() const {
+        return generic_block_depth_ > 0 && emit_content_depth_ == 0;
+    }
+
     std::unique_ptr<EmitStatement> Parser::parse_emit_statement(bool inside_generic) {
         SourceLocation loc = current_location();
         expect(TokenType::Keyword_Emit, "expected 'emit'");
@@ -25,6 +39,7 @@ namespace gallt {
             auto stmt = std::make_unique<EmitStatement>(loc);
             advance();
             skip_newlines();
+            ++emit_content_depth_;
             while (current_.type != TokenType::RightBrace &&
                 current_.type != TokenType::EndOfFile) {
                 skip_newlines();
@@ -47,6 +62,7 @@ namespace gallt {
                 }
                 synchronize();
             }
+            --emit_content_depth_;
             expect(TokenType::RightBrace, "expected '}' to close emit block");
             expect_stmt_end("emit block");
             return stmt;

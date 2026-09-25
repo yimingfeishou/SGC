@@ -26,11 +26,12 @@ namespace gallt {
         const std::unordered_map<const AST::Expression*,
             AST::FunctionDefinition*>& resolved_operators,
         DiagnosticEngine* diagnostics, int debug_symbols_level,
-        bool emit_entry_point)
+        bool emit_entry_point, bool no_runtime, bool gallt_abi)
         : program_(program), expression_types_(expression_types),
         resolved_functions_(resolved_functions), resolved_externs_(resolved_externs),
         resolved_operators_(resolved_operators), diagnostics_(diagnostics),
-        debug_level_(debug_symbols_level), emit_entry_point_(emit_entry_point) {
+        debug_level_(debug_symbols_level), emit_entry_point_(emit_entry_point),
+        no_runtime_(no_runtime), gallt_abi_(gallt_abi) {
     }
 
     std::string CodeGenerator::new_temp(const char* hint) {
@@ -728,15 +729,19 @@ namespace gallt {
             std::string ret = llvm_type(ext->return_type);
             if (ext->return_type.kind == TypeKind::Function) { ret = "ptr"; }
             std::string sig = ret + " @" + symbol + "(";
+            bool sret_declaration = gallt_abi_ && returns_via_sret(ext->return_type);
+            if (sret_declaration) { sig = "void @" + symbol + "(ptr"; }
+
             for (size_t i = 0; i < ext->parameters.size(); ++i) {
-                if (i != 0) { sig += ", "; }
+                if (i != 0 || sret_declaration) { sig += ", "; }
                 sig += parameter_ir_type(ext->parameters[i]);
             }
 
             if (ext->c_variadic) {
-                if (!ext->parameters.empty()) { sig += ", "; }
+                if (!ext->parameters.empty() || sret_declaration) { sig += ", "; }
                 sig += "...";
             }
+
             sig += ")";
             emit_line("declare " + sig);
         }
@@ -789,7 +794,8 @@ namespace gallt {
 
             runtime_const_globals_.push_back(var);
             std::string address = "@glt_g_" + var->name;
-            emit_line(address + " = global " + llvm_type(var->type) +
+            emit_line(address + " = " + module_local_prefix() + "global " +
+                llvm_type(var->type) +
                 " zeroinitializer");
 
             LocalInfo fallback;
@@ -801,8 +807,8 @@ namespace gallt {
         for (AST::VariableDeclaration* var : global_vars_) {
             std::string address = "@glt_g_" + var->name;
             std::string type_text = llvm_type(var->type);
-            std::string definition = address + " = global " + type_text +
-                " zeroinitializer";
+            std::string definition = address + " = " + module_local_prefix() +
+                "global " + type_text + " zeroinitializer";
 
             if (debug_level_ >= 2) {
                 const unsigned variable_id = next_debug_id();
@@ -841,7 +847,7 @@ namespace gallt {
         current_label_.clear();
         current_block_terminated_ = true;
 
-        emit_line("define void @glt_global_init() {");
+        emit_line("define " + module_local_prefix() + "void @glt_global_init() {");
         std::string entry = new_label("entry");
         start_block(entry);
         hoisted_allocas_.clear();
@@ -899,7 +905,8 @@ namespace gallt {
         current_label_.clear();
         current_block_terminated_ = true;
 
-        emit_line("define void @glt_global_deinit() {");
+        emit_line("define " + module_local_prefix() +
+            "void @glt_global_deinit() {");
         std::string deinit_entry = new_label("entry");
         start_block(deinit_entry);
         hoisted_allocas_.clear();
@@ -1096,10 +1103,12 @@ namespace gallt {
         if (func->return_type.kind == TypeKind::Function) { ret = "ptr"; }
         bool sret = returns_via_sret(func->return_type);
 
-        std::string header = "define " + ret + " " + name + "(";
+        const std::string linkage = (func->name != "main" &&
+            !is_exported_function(func->name)) ? module_local_prefix() : std::string();
+        std::string header = "define " + linkage + ret + " " + name + "(";
         if (sret) {
             ret = "void";
-            header = "define void " + name + "(ptr %__sret_ret";
+            header = "define " + linkage + "void " + name + "(ptr %__sret_ret";
         }
 
         const bool variadic = func->is_variadic && !func->parameters.empty() &&

@@ -15,6 +15,28 @@ using namespace gallt::AST;
 namespace gallt {
     using namespace generic_expander_detail;
 
+    namespace {
+
+        bool text_contains_compile_time_condition(const std::string& text) {
+            std::string name = "<emit>";
+            std::string_view source_view(text);
+            std::string_view name_view(name);
+            DiagnosticEngine scratch;
+            Lexer lexer(source_view, name_view, scratch);
+            bool previous_is_const = false;
+
+            for (;;) {
+                Token token = lexer.next_token();
+                if (token.type == TokenType::EndOfFile) { return false; }
+                if (previous_is_const && token.type == TokenType::Keyword_If) {
+                    return true;
+                }
+                previous_is_const = token.type == TokenType::Keyword_Const;
+            }
+        }
+
+    }
+
     bool GenericExpander::statement_is_allowed_in_expression_body(const AST::Statement* stmt,
         SourceLocation& bad_loc, ErrorCode& code, std::string& detail) {
         if (stmt == nullptr) {
@@ -780,6 +802,22 @@ namespace gallt {
         AST::Type type;
         bool is_type_param = (sub.types.find(parameter) != sub.types.end());
         bool is_constant_param = (sub.constant_types.find(parameter) != sub.constant_types.end());
+
+        if (is_pack_name(sub, parameter)) {
+            if (property != "empty") { return false; }
+            auto type_pack = sub.type_packs.find(parameter);
+            auto const_pack = sub.const_packs.find(parameter);
+            if (type_pack != sub.type_packs.end()) {
+                out = type_pack->second.empty();
+                return true;
+            }
+            if (const_pack != sub.const_packs.end()) {
+                out = const_pack->second.empty();
+                return true;
+            }
+            return false;
+        }
+
         if (!is_type_param && !is_constant_param) {
             return false;
         }
@@ -868,6 +906,49 @@ namespace gallt {
         return false;
     }
 
+    bool GenericExpander::eval_integer_condition_value(const Expression* expr,
+        const Substitution& sub, long long& out) {
+        if (expr == nullptr) { return false; }
+
+        if (auto* post = dynamic_cast<const PostfixExpression*>(expr)) {
+            std::string pack_name;
+
+            if (post->op == PostfixExpression::Operator::Dot &&
+                pack_identifier_name(post->base.get(), pack_name) &&
+                is_pack_name(sub, pack_name)) {
+                auto type_pack = sub.type_packs.find(pack_name);
+                auto const_pack = sub.const_packs.find(pack_name);
+                std::size_t length = 0;
+
+                if (type_pack != sub.type_packs.end()) {
+                    length = type_pack->second.size();
+                } else if (const_pack != sub.const_packs.end()) {
+                    length = const_pack->second.size();
+                } else {
+                    return false;
+                }
+
+                if (post->member_name == "length") {
+                    out = static_cast<long long>(length);
+                    return true;
+                }
+                if (post->member_name == "empty") {
+                    out = length == 0 ? 1LL : 0LL;
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        ConstantValue value;
+
+        if (!evaluate_with_substitution(expr, sub, value)) { return false; }
+        if (value.is_float || value.is_string) { return false; }
+        out = value.int_value;
+        return true;
+    }
+
     bool GenericExpander::eval_compile_time_condition(const Expression* expr,
         const Substitution& sub, bool& out) {
         if (expr == nullptr) { return false; }
@@ -940,6 +1021,33 @@ namespace gallt {
         };
 
         if (auto* e = dynamic_cast<const ComparisonExpression*>(expr)) {
+            long long left_number = 0;
+            long long right_number = 0;
+
+            if (eval_integer_condition_value(e->left.get(), sub, left_number) &&
+                eval_integer_condition_value(e->right.get(), sub, right_number)) {
+                switch (e->op) {
+                case ComparisonExpression::Operator::Greater:
+                    out = left_number > right_number;
+                    return true;
+                case ComparisonExpression::Operator::Less:
+                    out = left_number < right_number;
+                    return true;
+                case ComparisonExpression::Operator::Equal:
+                    out = left_number == right_number;
+                    return true;
+                case ComparisonExpression::Operator::NotEqual:
+                    out = left_number != right_number;
+                    return true;
+                case ComparisonExpression::Operator::GreaterEqual:
+                    out = left_number >= right_number;
+                    return true;
+                case ComparisonExpression::Operator::LessEqual:
+                    out = left_number <= right_number;
+                    return true;
+                }
+            }
+
             auto string_operand = [&](const Expression* side, std::string& value) -> bool {
                 auto* prim = dynamic_cast<const PrimaryExpression*>(side);
                 if (prim == nullptr) { return false; }
@@ -1229,6 +1337,13 @@ namespace gallt {
         std::vector<AST::TopLevel*>& member_ptrs,
         std::vector<std::unique_ptr<AST::TopLevel>>& owner) {
         if (text.empty()) { return true; }
+
+        if (text_contains_compile_time_condition(text)) {
+            report(loc, ErrorCode::CompileTimeConditionOutsideGenericBlock,
+                std::vector<std::string>());
+            return false;
+        }
+
         emit_source_pool_.push_back(text);
         std::string& buffer = emit_source_pool_.back();
         std::string name = "<emit>";

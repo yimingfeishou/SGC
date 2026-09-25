@@ -22,9 +22,9 @@ namespace gallt {
             return stmt;
         }
 
-        if (current_.type == TokenType::Keyword_If) {
+        if (at_const_if_statement()) {
             ++generic_ct_depth_;
-            auto stmt = parse_if_statement();
+            auto stmt = parse_if_statement(true);
             --generic_ct_depth_;
             return stmt;
         }
@@ -1311,13 +1311,15 @@ namespace gallt {
 
         skip_newlines();
 
+        ++generic_block_depth_;
+
         while (current_.type != TokenType::RightBrace && current_.type != TokenType::EndOfFile) {
             skip_newlines();
 
             if (current_.type == TokenType::RightBrace) { break; }
 
             if (current_.type == TokenType::Keyword_Emit ||
-               current_.type == TokenType::Keyword_If) {
+               at_const_if_statement()) {
                 auto item = parse_generic_compile_time_item();
 
                 if (item != nullptr) {
@@ -1343,6 +1345,8 @@ namespace gallt {
                 synchronize();
             }
         }
+
+        --generic_block_depth_;
 
         expect(TokenType::RightBrace, "expected '}' to close generic block");
         expect_stmt_end("generic definition");

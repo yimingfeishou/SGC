@@ -471,7 +471,7 @@ namespace {
         CodeGenerator generator(&combined, checker.expression_types(),
             checker.resolved_functions(), checker.resolved_externs(),
             checker.resolved_operators(), &diag, options.debug_symbols_level,
-            emit_entry_point);
+            emit_entry_point, options.no_runtime, options.gallt_abi);
         generator.generate();
 
         if (diag.has_errors()) {
@@ -487,9 +487,10 @@ namespace {
             pal::join_path(temp_dir, unique + ".c")));
         const std::string runtime_source = CodeGenerator::runtime_c_source();
         const std::string c_path_text = pal::to_utf8(c_path.wstring());
+        const bool attach_runtime = !options.no_runtime;
 
         if (!write_utf8_file(ir_path, generator.ir()) ||
-            !write_utf8_file(c_path, runtime_source)) {
+            (attach_runtime && !write_utf8_file(c_path, runtime_source))) {
             std::cerr << "sgc: cannot create temporary backend files ("
                 << pal::file_error_text(pal::last_file_error()) << ")\n";
             return pal::exit_failure_code();
@@ -510,7 +511,8 @@ namespace {
 
         std::string runtime_object;
 
-        if (!pal::environment_variable_defined("SGC_KEEP_TEMP")) {
+        if (attach_runtime &&
+            !pal::environment_variable_defined("SGC_KEEP_TEMP")) {
             runtime_object = acquire_runtime_object(clang_path, temp_dir,
                 c_path_text, runtime_source, optimization_flag,
                 options.debug_symbols_level, unique);
@@ -518,7 +520,9 @@ namespace {
 
         std::vector<std::string> runtime_arguments;
 
-        if (!runtime_object.empty()) {
+        if (!attach_runtime) {
+            runtime_arguments.clear();
+        } else if (!runtime_object.empty()) {
             runtime_arguments = { "-x", "none", runtime_object };
         } else {
             runtime_arguments = { "-x", "c", c_path_text };
@@ -631,12 +635,17 @@ namespace {
             }
             object_paths.push_back(fs::path(pal::to_wide(
                 pal::join_path(temp_dir, unique + "_gallt.obj"))));
-            object_paths.push_back(fs::path(pal::to_wide(
-                pal::join_path(temp_dir, unique + "_runtime.obj"))));
             const std::string gallt_object = pal::to_utf8(
                 object_paths[0].wstring());
-            const std::string runtime_object_file = pal::to_utf8(
-                object_paths[1].wstring());
+            fs::path runtime_object_path;
+            std::string runtime_object_file;
+
+            if (attach_runtime) {
+                runtime_object_path = fs::path(pal::to_wide(
+                    pal::join_path(temp_dir, unique + "_runtime.obj")));
+                runtime_object_file = pal::to_utf8(runtime_object_path.wstring());
+                object_paths.push_back(runtime_object_path);
+            }
 
             std::vector<std::string> compile_common = {
                 std::string("--target=") + pal::target_triple(),
@@ -668,7 +677,7 @@ namespace {
 
             std::string runtime_archive_member = runtime_object;
 
-            if (runtime_archive_member.empty()) {
+            if (attach_runtime && runtime_archive_member.empty()) {
                 std::vector<std::string> c_compile = compile_common;
                 c_compile.push_back("-x");
                 c_compile.push_back("c");
@@ -693,8 +702,12 @@ namespace {
                 "/nologo",
                 "/out:" + output_path,
                 gallt_object,
-                runtime_archive_member,
             };
+
+            if (attach_runtime) {
+                archive_args.push_back(runtime_archive_member);
+            }
+
             link_result = pal::run_process(librarian, archive_args, &tool_output);
         } else {
             if (!resolved_libraries.empty()) {

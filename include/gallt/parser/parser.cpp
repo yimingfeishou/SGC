@@ -265,6 +265,22 @@ namespace gallt {
         }
         default: {
             TokenType tt = current_.type;
+            if (tt == TokenType::Keyword_Const) {
+                if (at_const_else_clause()) {
+                    report_error(ErrorCode::ElseWithoutIf,
+                        "const else statement without matching const if");
+                    advance();
+                    advance();
+                    return nullptr;
+                }
+
+                if (at_const_if_statement()) {
+                    auto statement = parse_if_statement(true);
+                    (void)statement;
+                    return nullptr;
+                }
+            }
+
             if (at_struct_attribute()) {
                 return parse_struct_definition();
             }
@@ -744,6 +760,20 @@ namespace gallt {
                 return nullptr;
             }
 
+            if (tt == TokenType::Keyword_Const) {
+                if (at_const_else_clause()) {
+                    report_error(ErrorCode::ElseWithoutIf,
+                        "const else statement without matching const if");
+                    advance();
+                    advance();
+                    return nullptr;
+                }
+
+                if (at_const_if_statement()) {
+                    return parse_if_statement(true);
+                }
+            }
+
             if (at_struct_attribute()) {
                 return parse_struct_definition();
             }
@@ -867,8 +897,13 @@ namespace gallt {
         return nullptr;
     }
 
-    std::unique_ptr<IfStatement> Parser::parse_if_statement() {
+    std::unique_ptr<IfStatement> Parser::parse_if_statement(bool compile_time) {
         SourceLocation loc = current_location();
+
+        if (compile_time) {
+            expect(TokenType::Keyword_Const, "expected 'const'");
+        }
+
         expect(TokenType::Keyword_If, "expected 'if'");
 
         if (!expect(TokenType::LeftParen, "expected '(' after 'if'")) {
@@ -895,6 +930,14 @@ namespace gallt {
         std::unique_ptr<Statement> else_block = nullptr;
         skip_newlines();
 
+        bool const_else = false;
+
+        if (current_.type == TokenType::Keyword_Const &&
+            lookahead_type(1) == TokenType::Keyword_Else) {
+            const_else = true;
+            advance();
+        }
+
         if (match(TokenType::Keyword_Else)) {
             skip_newlines();
             else_block = parse_block();
@@ -903,10 +946,23 @@ namespace gallt {
                 report_error(ErrorCode::MissingBraces, "else statement must be followed by a block");
                 return nullptr;
             }
+
+            if (const_else && !compile_time) {
+                report_error_at(loc, ErrorCode::ElseWithoutIf,
+                    "const else statement without matching const if");
+            }
         }
 
-        return std::make_unique<IfStatement>(
+        auto statement = std::make_unique<IfStatement>(
             loc, std::move(cond), std::move(then_block), std::move(else_block));
+        statement->is_compile_time = compile_time;
+
+        if (compile_time && !const_if_allowed()) {
+            report_error_template_at(loc,
+                ErrorCode::CompileTimeConditionOutsideGenericBlock, {});
+        }
+
+        return statement;
     }
 
     std::unique_ptr<ForStatement> Parser::parse_for_statement() {

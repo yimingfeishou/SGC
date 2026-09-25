@@ -201,12 +201,12 @@ addition namespace sl {
 
         T zero_value() {
             T dummy
-            if (T.is_string == true) {
+            const if (T.is_string == true) {
                 dummy = ""
-            } else {
-                if (T.is_bool == true) {
+            } const else {
+                const if (T.is_bool == true) {
                     dummy = false
-                } else {
+                } const else {
                     dummy = 0
                 }
             }
@@ -693,23 +693,25 @@ addition namespace sl {
             }
         }
 
-        if (V.is_string == true) {
+        const if (V.is_string == true) {
             emit {
                 V zero_value() {
                     string empty_value = ""
                     return empty_value
                 }
             }
-        } else {
-            emit {
-                V zero_value() {
-                    V dummy
-                    if (V.is_bool == true) {
-                        dummy = false
-                    } else {
-                        dummy = 0
+        } const else {
+            const if (V.is_bool == true) {
+                emit {
+                    V zero_value() {
+                        return false
                     }
-                    return dummy
+                }
+            } const else {
+                emit {
+                    V zero_value() {
+                        return 0
+                    }
                 }
             }
         }

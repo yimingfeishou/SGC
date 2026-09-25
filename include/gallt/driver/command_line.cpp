@@ -106,6 +106,10 @@ namespace {
 
                 out.debug_symbols_level = static_cast<int>((*v)[0] - '0');
                 out.debug_symbols_explicit = true;
+            } else if (arg == L"--no-runtime" || arg == L"-NR") {
+                out.no_runtime = true;
+            } else if (arg == L"--gallt-abi" || arg == L"-GA") {
+                out.gallt_abi = true;
             } else if (!arg.empty() && arg[0] == L'-') {
                 out.mode = CommandMode::Invalid;
                 out.error_message = "unknown option: " + narrow_utf8(arg);
@@ -170,6 +174,10 @@ namespace {
             "  sgc --compile --input \"file.glt\" --output \"program.exe\" -DS <0-2>\n"
             "  sgc --compile --input \"file.glt\" --output \"program.exe\" --debug\n"
             "  sgc --compile --input \"file.glt\" --output \"program.exe\" --release\n"
+            "  sgc --compile --input \"file.glt\" --output \"library.lib\" --no-runtime\n"
+            "  sgc --compile --input \"file.glt\" --output \"library.lib\" -NR\n"
+            "  sgc --compile --input \"file.glt\" --output \"program.exe\" --gallt-abi\n"
+            "  sgc --compile --input \"file.glt\" --output \"program.exe\" -GA\n"
             "  sgc --help\n"
             "  sgc --version\n"
             "Options:\n"
@@ -189,6 +197,13 @@ namespace {
             "and line number tables\n"
             "  --debug                       enable debug mode\n"
             "  --release                     enable release mode\n"
+            "  --no-runtime, -NR             emit without the C runtime (importable\n"
+            "                                library output; only exported functions\n"
+            "                                stay externally visible)\n"
+            "  --gallt-abi, -GA              call extern declarations with the native\n"
+            "                                Gallt ABI (use when importing a library\n"
+            "                                produced by sgc; C libraries need the\n"
+            "                                default C ABI)\n"
             "Conflicts:\n"
             "  --optimization-level and --debug-symbols cannot be combined\n"
             "  --debug and --release cannot be combined\n"
@@ -198,9 +213,9 @@ namespace {
 
     std::string version_text() {
         return
-        "sgc Standard Gallt Compiler 0.4.2-0924 Preview (LLVM backend, x86-64 Windows)\n"
+        "sgc Standard Gallt Compiler 0.4.2-0925 Preview (LLVM backend, x86-64 Windows)\n"
         "Gallt Lang Standard Version 26.09 (Preview)\n"
-        "Build date: 2026-09-24\n"
+        "Build date: 2026-09-25\n"
             "The compiler is an early preview version, and support for certain syntax and edge cases may not be fully covered. We appreciate your understanding";
     }
 

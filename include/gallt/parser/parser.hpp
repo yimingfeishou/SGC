@@ -65,6 +65,8 @@ namespace gallt {
 
         bool in_error_recovery_ = false;
         int generic_ct_depth_ = 0;
+        int generic_block_depth_ = 0;
+        int emit_content_depth_ = 0;
         bool in_expr_argument_ = false;
 
         void advance();
@@ -106,6 +108,9 @@ namespace gallt {
         std::unique_ptr<AST::AdditionNamespaceStatement> parse_addition_namespace();
         std::vector<std::unique_ptr<AST::TopLevel>> parse_namespace_members();
         std::unique_ptr<AST::EmitStatement> parse_emit_statement(bool inside_generic);
+        bool at_const_if_statement() const;
+        bool at_const_else_clause() const;
+        bool const_if_allowed() const;
         std::unique_ptr<AST::TopLevel> parse_condition_statement();
         std::unique_ptr<AST::Statement> parse_condition_node(bool top_level);
         std::unique_ptr<AST::ConditionalBlock> parse_conditional_block(bool top_level);
@@ -136,7 +141,7 @@ namespace gallt {
         std::unique_ptr<AST::Statement> parse_statement();
         std::unique_ptr<AST::Statement> parse_declaration_or_statement();
         std::unique_ptr<AST::VariableDeclaration> parse_variable_declaration();
-        std::unique_ptr<AST::IfStatement> parse_if_statement();
+        std::unique_ptr<AST::IfStatement> parse_if_statement(bool compile_time = false);
         std::unique_ptr<AST::ForStatement> parse_for_statement();
         std::unique_ptr<AST::WhileStatement> parse_while_statement();
         std::unique_ptr<AST::BreakStatement> parse_break_statement();

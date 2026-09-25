@@ -187,6 +187,7 @@ namespace gallt {
         ParameterPackInConstantExpression = 167,
         VariadicFunctionPointerSignatureMismatch = 168,
         VariadicDefaultArgumentAmbiguous = 169,
+        CompileTimeConditionOutsideGenericBlock = 170,
     };
 
     enum class RuntimeErrorCode : std::uint16_t {

@@ -29,6 +29,8 @@ namespace gallt {
         int debug_symbols_level = 0;
         bool debug_mode = false;
         bool release_mode = false;
+        bool no_runtime = false;
+        bool gallt_abi = false;
         bool optimization_level_explicit = false;
         bool debug_symbols_explicit = false;
         bool debug_mode_explicit = false;

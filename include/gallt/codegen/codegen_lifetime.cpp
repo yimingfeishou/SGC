@@ -497,7 +497,8 @@ namespace gallt {
 
         const bool two_parameters = kind != LifecycleKind::Constructor &&
             kind != LifecycleKind::Destructor;
-        std::string header = "define void @glt_" + name + "(ptr %this";
+        std::string header = "define " + module_local_prefix() + "void @glt_" +
+            name + "(ptr %this";
         if (two_parameters) { header += ", ptr %source"; }
         header += ") {";
         emit_line(header);

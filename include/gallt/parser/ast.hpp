@@ -747,6 +747,7 @@ namespace gallt {
             std::unique_ptr<Expression> condition;
             std::unique_ptr<Statement> then_block;
             std::unique_ptr<Statement> else_block;
+            bool is_compile_time = false;
 
             IfStatement(SourceLocation loc,
                 std::unique_ptr<Expression> cond,

@@ -1095,6 +1095,12 @@ namespace gallt {
             }
 
             if (auto* ifs = dynamic_cast<const IfStatement*>(item.get())) {
+                if (!ifs->is_compile_time) {
+                    report(ifs->location, ErrorCode::GenericStatementNotAllowed,
+                        std::vector<std::string>());
+                    return false;
+                }
+
                 bool condition = false;
 
                 if (!eval_compile_time_condition(ifs->condition.get(), sub, condition)) {

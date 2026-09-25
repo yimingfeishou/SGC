@@ -707,14 +707,16 @@ namespace gallt {
         }
 
         if (auto* s = dynamic_cast<const IfStatement*>(stmt)) {
-            bool compile_time = false;
-            bool taken = false;
+            if (s->is_compile_time) {
+                bool taken = false;
 
-            if (eval_compile_time_condition(s->condition.get(), sub, taken)) {
-                compile_time = true;
-            }
+                if (!eval_compile_time_condition(s->condition.get(), sub, taken)) {
+                    report(s->location, ErrorCode::CompileTimeConditionNotBoolean,
+                        std::vector<std::string>{ expression_text(s->condition.get()) });
+                    return std::make_unique<Block>(s->location,
+                        std::vector<std::unique_ptr<Statement>>{});
+                }
 
-            if (compile_time) {
                 const Statement* branch = taken ? s->then_block.get() : s->else_block.get();
 
                 if (branch == nullptr) {

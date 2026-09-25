@@ -22,7 +22,9 @@ namespace gallt {
                 AST::FunctionDefinition*>& resolved_operators = {},
             DiagnosticEngine* diagnostics = nullptr,
             int debug_symbols_level = 0,
-            bool emit_entry_point = true);
+            bool emit_entry_point = true,
+            bool no_runtime = false,
+            bool gallt_abi = false);
 
         bool generate();
 
@@ -48,6 +50,8 @@ namespace gallt {
         DiagnosticEngine* diagnostics_ = nullptr;
         int debug_level_ = 0;
         bool emit_entry_point_ = true;
+        bool no_runtime_ = false;
+        bool gallt_abi_ = false;
         bool debug_location_valid_ = false;
         SourceLocation debug_location_;
         unsigned debug_next_id_ = 5;
@@ -175,6 +179,9 @@ namespace gallt {
         std::string function_llvm_name_for_source(std::string_view name) const;
         std::string source_function_symbol(const std::string& name) const;
         bool is_exported_function(const std::string& name) const;
+        std::string module_local_prefix() const {
+            return no_runtime_ ? std::string("internal ") : std::string();
+        }
         std::string function_reference(const std::string& name);
         std::string function_reference_for(const AST::PrimaryExpression* callee);
         std::string extern_ir_symbol(const AST::ExternDeclaration* ext) const;
