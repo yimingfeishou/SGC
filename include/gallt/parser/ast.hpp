@@ -39,7 +39,7 @@ namespace gallt {
 
         enum class TypeKind {
             Int, Lint, Uint, Luint, Float, Double, Char, Uchar, Bool, String, File, Void,
-            Array, Pointer, Struct, Function
+            Array, Pointer, Struct, Function, Error
         };
 
         struct Type {
@@ -88,6 +88,8 @@ namespace gallt {
             static Type make_file() { return Type(TypeKind::File); }
 
             static Type make_void() { return Type(TypeKind::Void); }
+
+            static Type make_error() { return Type(TypeKind::Error); }
 
             static Type make_array(std::shared_ptr<Type> elem, std::optional<size_t> size = std::nullopt) {
                 Type t(TypeKind::Array);
@@ -175,6 +177,8 @@ namespace gallt {
                 return kind == TypeKind::Float || kind == TypeKind::Double;
             }
 
+            bool is_error() const { return kind == TypeKind::Error; }
+
             bool is_arithmetic() const {
                 return is_integer() || is_floating();
             }
@@ -184,7 +188,8 @@ namespace gallt {
             }
 
             bool is_assignable() const {
-                return kind != TypeKind::Void && kind != TypeKind::Function;
+                return kind != TypeKind::Void && kind != TypeKind::Function &&
+                    kind != TypeKind::Error;
             }
             std::string to_string() const;
         };

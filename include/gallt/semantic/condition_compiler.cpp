@@ -1,4 +1,5 @@
 #include "condition_compiler.hpp"
+#include "diagnosed_registry.hpp"
 #include <cctype>
 #include <cstdlib>
 
@@ -1159,13 +1160,23 @@ namespace {
 
     void ConditionCompiler::report(SourceLocation loc, ErrorCode code,
         const std::vector<std::string>& values) {
-        diag_.report_error_template(loc, code, values);
+        if (!diagnosed_registry::reported_by_earlier_stage(diag_, loc,
+            SemanticStage::Conditions)) {
+            diag_.report_error_template(loc, code, values);
+        }
+
+        diagnosed_registry::record(diag_, loc, SemanticStage::Conditions);
         had_error_ = true;
     }
 
     void ConditionCompiler::report(SourceLocation loc, ErrorCode code,
         const std::string& message) {
-        diag_.report_error(loc, code, message);
+        if (!diagnosed_registry::reported_by_earlier_stage(diag_, loc,
+            SemanticStage::Conditions)) {
+            diag_.report_error(loc, code, message);
+        }
+
+        diagnosed_registry::record(diag_, loc, SemanticStage::Conditions);
         had_error_ = true;
     }
 

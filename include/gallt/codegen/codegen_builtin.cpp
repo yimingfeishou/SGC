@@ -695,6 +695,7 @@ namespace gallt {
 
         AST::Expression* arg = call->arguments[0].get();
         AST::Type target;
+        bool resolved = false;
 
         if (auto* prim = dynamic_cast<AST::PrimaryExpression*>(arg)) {
             if (prim->kind == AST::PrimaryExpression::Kind::Identifier) {
@@ -702,6 +703,7 @@ namespace gallt {
                 LocalInfo* local = lookup_local(id);
                 if (local != nullptr) {
                     target = local->type;
+                    resolved = true;
                 } else {
                     if (id == "int") {
                         target = Type::make_int();
@@ -729,15 +731,30 @@ namespace gallt {
                         target = Type::make_void();
                     } else {
                         auto sit = struct_by_name_.find(id);
-                        if (sit != struct_by_name_.end()) { target = Type::make_struct(id); }
+                        if (sit != struct_by_name_.end()) {
+                            target = Type::make_struct(id);
+                        }
+                    }
+
+                    if (target.kind != TypeKind::Void || id == "void") {
+                        resolved = true;
                     }
                 }
             }
         }
 
-        if (target.kind == TypeKind::Void) {
+        if (!resolved) {
             ExprValue v = gen_expr(arg);
             target = v.type;
+        }
+
+        if (target.kind == TypeKind::Void) {
+            if (diagnostics_ != nullptr) {
+                diagnostics_->report_error(arg->location, ErrorCode::InvalidTypeCast,
+                    "cannot determine the type of the size/align argument");
+            }
+            out.value = "0";
+            return out;
         }
 
         std::size_t n = is_size ? type_size(target) : type_align(target);

@@ -146,7 +146,6 @@ namespace gallt {
             }
 
             if (type.kind == TypeKind::Pointer) {
-                out = "ptr null";
                 return false;
             }
             return false;
@@ -426,6 +425,7 @@ namespace gallt {
         case TypeKind::Pointer:
         case TypeKind::Function: return 8;
         case TypeKind::Void: return 0;
+        case TypeKind::Error: return 0;
         case TypeKind::Array:
             return type.array_size.value_or(0) *
                 (type.element_type ? type_size(*type.element_type) : 0u);
@@ -464,6 +464,7 @@ namespace gallt {
         case TypeKind::Pointer:
         case TypeKind::Function: return 8;
         case TypeKind::Void: return 1;
+        case TypeKind::Error: return 1;
         case TypeKind::Array:
             return type.element_type ? type_align(*type.element_type) : 1u;
         case TypeKind::Struct: {

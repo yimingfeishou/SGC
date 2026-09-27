@@ -39,9 +39,10 @@ namespace gallt {
             {"access", TokenType::Keyword_Access},
             {"addition", TokenType::Keyword_Addition},
             {"emit", TokenType::Keyword_Emit},
-            {"export", TokenType::Keyword_Export},
-            {"const", TokenType::Keyword_Const},
-        };
+{"export", TokenType::Keyword_Export},
+{"const", TokenType::Keyword_Const},
+{"cast", TokenType::Keyword_Cast},
+};
 
         bool is_identifier_start(char c) noexcept {
             return std::isalpha(static_cast<unsigned char>(c)) || c == '_';
@@ -87,6 +88,13 @@ namespace gallt {
             return suffix.size() == 1 &&
                 (suffix[0] == 'f' || suffix[0] == 'F');
         }
+
+        constexpr std::size_t kTabStopWidth = 8;
+
+        std::size_t column_after_tab(std::size_t column) noexcept {
+            const std::size_t offset = (column - 1) % kTabStopWidth;
+            return column + (kTabStopWidth - offset);
+        }
     }
 
     Lexer::Lexer(std::string_view source, std::string_view filename, DiagnosticEngine& diag)
@@ -110,7 +118,7 @@ namespace gallt {
             return result;
         }
 
-        if (has_error_) {
+        if (fatal_error_) {
             return Token{ TokenType::EndOfFile, current_location(), "" };
         }
 
@@ -119,7 +127,7 @@ namespace gallt {
 
     Token Lexer::peek_token() {
         if (!peeked_token_.has_value()) {
-            if (has_error_) {
+            if (fatal_error_) {
                 peeked_token_ = Token{ TokenType::EndOfFile, current_location(), "" };
             } else {
                 peeked_token_ = scan_token();
@@ -156,6 +164,7 @@ namespace gallt {
             if (!line_ending_ok) { msg += "line endings must be LF (found CRLF or standalone CR); "; }
             report_error(ErrorCode::InvalidInputFile, msg);
             has_error_ = true;
+            fatal_error_ = true;
         }
     }
 
@@ -188,12 +197,21 @@ namespace gallt {
             }
 
             int expected_bytes = 0;
+            unsigned int codepoint = 0;
+            unsigned int minimum = 0;
+
             if ((c & 0xE0) == 0xC0) {
                 expected_bytes = 2;
+                codepoint = c & 0x1Fu;
+                minimum = 0x80u;
             } else if ((c & 0xF0) == 0xE0) {
                 expected_bytes = 3;
+                codepoint = c & 0x0Fu;
+                minimum = 0x800u;
             } else if ((c & 0xF8) == 0xF0) {
                 expected_bytes = 4;
+                codepoint = c & 0x07u;
+                minimum = 0x10000u;
             } else {
                 return false;
             }
@@ -207,7 +225,14 @@ namespace gallt {
                 if ((cont & 0xC0) != 0x80) {
                     return false;
                 }
+
+                codepoint = (codepoint << 6) | (cont & 0x3Fu);
             }
+
+            if (codepoint < minimum) { return false; }
+            if (codepoint > 0x10FFFFu) { return false; }
+            if (codepoint >= 0xD800u && codepoint <= 0xDFFFu) { return false; }
+
             pos += expected_bytes;
         }
 
@@ -219,7 +244,6 @@ namespace gallt {
             char c = peek();
             if (c == ' ' || c == '\t') {
                 advance();
-                column_++;
             } else {
                 break;
             }
@@ -238,8 +262,6 @@ namespace gallt {
         if (c == '\n') {
             SourceLocation loc = current_location();
             advance();
-            line_++;
-            column_ = 1;
             return Token{ TokenType::Newline, loc, "\n" };
         }
 
@@ -249,8 +271,6 @@ namespace gallt {
             if (!is_at_end() && peek() == '\n') {
                 advance();
             }
-            line_++;
-            column_ = 1;
             return Token{ TokenType::Newline, loc, "\r\n" };
         }
 
@@ -308,7 +328,6 @@ namespace gallt {
         SourceLocation start_loc = current_location();
         std::size_t start_pos = position_;
         bool is_float = false;
-        bool has_exponent = false;
 
         auto finish_number = [&](bool as_float) {
             std::size_t suffix_start = position_;
@@ -341,7 +360,10 @@ namespace gallt {
             advance();
 
             if (!is_hex_digit(peek())) {
-                return Token{ TokenType::IntegerLiteral, start_loc, source_.substr(start_pos, 1) };
+                report_error(ErrorCode::ExpressionSyntaxError,
+                    "hexadecimal literal requires at least one hexadecimal digit");
+                return Token{ TokenType::IntegerLiteral, start_loc,
+                    source_.substr(start_pos, position_ - start_pos) };
             }
 
             while (!is_at_end() && is_hex_digit(peek())) {
@@ -359,6 +381,29 @@ namespace gallt {
             }
 
             return finish_number(false);
+        }
+
+        if (peek() == '0' && is_digit(peek_next())) {
+            std::size_t lookahead = position_;
+
+            while (lookahead < source_.size() && is_digit(source_[lookahead])) {
+                ++lookahead;
+            }
+
+            const char after_digits = lookahead < source_.size() ? source_[lookahead] : '\0';
+
+            if (after_digits != '.' && after_digits != 'e' && after_digits != 'E') {
+                advance();
+
+                while (!is_at_end() && is_digit(peek())) {
+                    advance();
+                }
+
+                report_error(ErrorCode::ExpressionSyntaxError,
+                    "invalid digit in octal literal: only digits 0-7 are allowed "
+                    "after a leading zero");
+                return finish_number(false);
+            }
         }
 
         while (!is_at_end() && is_digit(peek())) {
@@ -379,27 +424,23 @@ namespace gallt {
         }
 
         if (!is_at_end() && (peek() == 'e' || peek() == 'E')) {
-            char next = peek_next();
+            is_float = true;
+            advance();
 
-            if (is_digit(next) || next == '+' || next == '-') {
-                is_float = true;
-                has_exponent = true;
+            if (!is_at_end() && (peek() == '+' || peek() == '-')) {
                 advance();
+            }
 
-                if (!is_at_end() && (peek() == '+' || peek() == '-')) {
+            if (!is_at_end() && is_digit(peek())) {
+                while (!is_at_end() && is_digit(peek())) {
                     advance();
                 }
-
-                if (!is_at_end() && is_digit(peek())) {
-                    while (!is_at_end() && is_digit(peek())) {
-                        advance();
-                    }
-                } else {
-                }
+            } else {
+                report_error(ErrorCode::ExpressionSyntaxError,
+                    "exponent requires at least one decimal digit after 'e' or 'E'");
             }
         }
 
-        (void)has_exponent;
         return finish_number(is_float);
     }
 
@@ -417,7 +458,7 @@ namespace gallt {
 
         char ch = 0;
         if (peek() == '\\') {
-            ch = parse_escape_sequence(position_, start_loc, true);
+            ch = parse_escape_sequence();
         } else {
             ch = advance();
         }
@@ -457,7 +498,7 @@ namespace gallt {
             }
 
             if (c == '\\') {
-                parse_escape_sequence(position_, start_loc, false);
+                parse_escape_sequence();
             } else {
                 advance();
             }
@@ -498,12 +539,6 @@ namespace gallt {
                     break;
                 }
 
-                if (peek() == '\n') {
-                    line_++;
-                    column_ = 1;
-                } else {
-                    column_++;
-                }
                 advance();
             }
 
@@ -678,25 +713,25 @@ namespace gallt {
             msg.push_back(c);
             msg.push_back('\'');
             report_error(ErrorCode::ExpressionSyntaxError, msg);
-            return Token{ TokenType::Unknown, start_loc, std::string_view(&c, 1) };
+            return Token{ TokenType::Unknown, start_loc,
+                source_.substr(position_ - 1, 1) };
         }
         }
     }
 
-    char Lexer::parse_escape_sequence(std::size_t& pos, SourceLocation loc, bool is_char) {
-
-        if (pos >= source_.size() || source_[pos] != '\\') {
+    char Lexer::parse_escape_sequence() {
+        if (is_at_end() || peek() != '\\') {
             return '\\';
         }
 
-        pos++;
-        if (pos >= source_.size()) {
+        advance();
+
+        if (is_at_end()) {
             report_error(ErrorCode::InvalidCharLiteral, "unexpected end after escape sequence");
             return '\\';
         }
 
-        char c = source_[pos];
-        pos++;
+        char c = advance();
 
         switch (c) {
         case 'n':  return '\n';
@@ -710,7 +745,7 @@ namespace gallt {
         case '\'': return '\'';
 
         case 'x': {
-            if (pos >= source_.size()) {
+            if (is_at_end()) {
                 report_error(ErrorCode::InvalidCharLiteral, "incomplete hex escape sequence");
                 return 'x';
             }
@@ -718,9 +753,8 @@ namespace gallt {
             char hex_digits[3] = { 0, 0, 0 };
             int count = 0;
 
-            while (count < 2 && pos < source_.size() && is_hex_digit(source_[pos])) {
-                hex_digits[count] = source_[pos];
-                pos++;
+            while (count < 2 && !is_at_end() && is_hex_digit(peek())) {
+                hex_digits[count] = advance();
                 count++;
             }
 
@@ -746,9 +780,8 @@ namespace gallt {
                 char oct_digits[4] = { c, 0, 0, 0 };
                 int count = 1;
 
-                while (count < 3 && pos < source_.size() && is_octal_digit(source_[pos])) {
-                    oct_digits[count] = source_[pos];
-                    pos++;
+                while (count < 3 && !is_at_end() && is_octal_digit(peek())) {
+                    oct_digits[count] = advance();
                     count++;
                 }
 
@@ -785,7 +818,16 @@ namespace gallt {
 
         char c = source_[position_];
         position_++;
-        column_++;
+
+        if (c == '\n') {
+            line_++;
+            column_ = 1;
+        } else if (c == '\t') {
+            column_ = column_after_tab(column_);
+        } else {
+            column_++;
+        }
+
         return c;
     }
 
@@ -820,8 +862,7 @@ namespace gallt {
 
     void Lexer::skip() {
         if (!is_at_end()) {
-            position_++;
-            column_++;
+            advance();
         }
     }
 

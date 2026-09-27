@@ -40,6 +40,35 @@ namespace gallt {
         std::string namespace_prefix_;
         bool had_error_ = false;
         SourceLocation type_location_hint_;
+        std::unordered_set<const AST::Node*> poisoned_;
+
+        bool poisoned_node(const AST::Node* node) const {
+            return node != nullptr && poisoned_.count(node) != 0;
+        }
+
+        void poison_node(const AST::Node* node) {
+            if (node != nullptr) { poisoned_.insert(node); }
+        }
+
+        class PoisonGuard {
+        public:
+            PoisonGuard(NamespaceLowering& pass, const AST::Node* node);
+            ~PoisonGuard();
+
+            PoisonGuard(const PoisonGuard&) = delete;
+            PoisonGuard& operator=(const PoisonGuard&) = delete;
+
+        private:
+            NamespaceLowering& pass_;
+            const AST::Node* node_;
+            std::size_t errors_;
+        };
+
+        void rewrite_top_level_impl(AST::TopLevel* node);
+        void rewrite_statement_impl(AST::Statement* stmt);
+        void rewrite_expression_impl(std::unique_ptr<AST::Expression>& expr);
+        void rewrite_shared_expression_impl(std::shared_ptr<AST::Expression>& expr);
+        void rewrite_initializer_impl(AST::Initializer* init);
 
         void collect_members(const std::vector<std::unique_ptr<AST::TopLevel>>& nodes,
             const std::string& prefix, bool addition, SourceLocation loc);

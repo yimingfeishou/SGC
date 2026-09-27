@@ -714,7 +714,8 @@ namespace gallt {
                 std::optional<size_t> size;
                 std::unique_ptr<Expression> size_expr;
 
-                if (current_.type == TokenType::IntegerLiteral) {
+                if (current_.type == TokenType::IntegerLiteral &&
+                    lookahead_type(1) == TokenType::RightBracket) {
                     size = try_parse_integer_literal();
                     if (!size.has_value()) {
                         report_error_at(loc, ErrorCode::ArraySizeNotConstant,
@@ -1197,6 +1198,73 @@ namespace gallt {
             }
             break;
         }
+        return saw_pointer && lookahead_type(index) == TokenType::LeftParen;
+    }
+
+    bool Parser::looks_like_qualified_pointer_type_cast() const {
+        if (current_.type != TokenType::Identifier) { return false; }
+
+        std::size_t index = 1;
+        std::string last_name(current_.lexeme);
+        bool qualified = false;
+
+        while (lookahead_type(index) == TokenType::ColonColon &&
+            lookahead_type(index + 1) == TokenType::Identifier) {
+            last_name = std::string(lookahead(index + 1).lexeme);
+            index += 2;
+            qualified = true;
+        }
+
+        if (lookahead_type(index) == TokenType::Less) {
+            int depth = 0;
+
+            while (true) {
+                const TokenType type = lookahead_type(index);
+                if (type == TokenType::EndOfFile) { return false; }
+                if (type == TokenType::Less) {
+                    ++depth;
+                } else if (type == TokenType::Greater) {
+                    --depth;
+                    if (depth == 0) {
+                        ++index;
+                        break;
+                    }
+                }
+                ++index;
+            }
+
+            qualified = true;
+
+            if (lookahead_type(index) == TokenType::Dot ||
+                lookahead_type(index) == TokenType::ColonColon) {
+                if (lookahead_type(index + 1) != TokenType::Identifier) { return false; }
+                last_name = std::string(lookahead(index + 1).lexeme);
+                index += 2;
+            }
+        }
+
+        if (!qualified) { return false; }
+        if (declared_type_names_.find(last_name) == declared_type_names_.end() ||
+            declared_value_names_.find(last_name) != declared_value_names_.end()) {
+            return false;
+        }
+
+        bool saw_pointer = false;
+
+        while (true) {
+            const TokenType type = lookahead_type(index);
+            if (type == TokenType::Star || type == TokenType::Power) {
+                saw_pointer = true;
+                ++index;
+                continue;
+            }
+            if (type == TokenType::Keyword_Const) {
+                ++index;
+                continue;
+            }
+            break;
+        }
+
         return saw_pointer && lookahead_type(index) == TokenType::LeftParen;
     }
 

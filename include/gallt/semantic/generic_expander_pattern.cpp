@@ -1,5 +1,6 @@
 #include "generic_expander.hpp"
 #include "generic_expander_detail.hpp"
+#include "expression_parameter_names.hpp"
 #include "constant_folding.hpp"
 #include "../lexer/lexer.hpp"
 #include "../parser/parser.hpp"
@@ -80,7 +81,9 @@ namespace gallt {
             collect_declared_names(stmt.get(), locals);
         }
 
-        const std::string suffix = "$expr" + std::to_string(++expr_temp_counter_);
+        const std::string suffix =
+            std::string(expression_parameter_names::kLocalRenameSuffix) +
+            std::to_string(++expr_temp_counter_);
 
         for (const std::string& local : locals) {
             body_sub.renames[local] = local + suffix;
@@ -89,7 +92,8 @@ namespace gallt {
         const bool void_result = binding.return_type.kind == TypeKind::Void;
         std::string temp_name;
         if (!void_result) {
-            temp_name = "__glt_expr" + std::to_string(expr_temp_counter_);
+            temp_name = std::string(expression_parameter_names::kTemporaryPrefix) +
+                std::to_string(expr_temp_counter_);
         }
 
         std::vector<std::unique_ptr<Statement>> emitted;
@@ -240,7 +244,6 @@ namespace gallt {
                     auto instance_key = ensure_instantiation(ref, true);
 
                     if (!instance_key.has_value()) {
-                        type.generic_ref.reset();
                         break;
                     }
 
@@ -250,7 +253,6 @@ namespace gallt {
                         ref.member = members->second.front();
                     } else {
                         report(type.generic_ref->location, ErrorCode::GenericMemberNotInInstantiation, std::vector<std::string>{ ref.generic_name, ref.generic_name });
-                        type.generic_ref.reset();
                         break;
                     }
                 }
@@ -258,8 +260,8 @@ namespace gallt {
                 auto mangled = ensure_instantiation(ref, false);
                 if (mangled.has_value()) {
                     type.struct_name = *mangled;
+                    type.generic_ref.reset();
                 }
-                type.generic_ref.reset();
                 break;
             }
 
@@ -390,6 +392,14 @@ namespace gallt {
             return resolve_type_layout(bound->second.struct_name, size, align, sub) ||
                 resolve_type_layout(bound->second.to_string(), size, align, sub);
         }
+
+        auto declared_constant = sub.constant_types.find(type_name);
+        if (declared_constant != sub.constant_types.end()) {
+            if (resolve_type_layout(declared_constant->second.to_string(), size, align, sub)) {
+                return true;
+            }
+        }
+
         auto it = struct_defs_.find(type_name);
         if (it == struct_defs_.end() || it->second == nullptr) { return false; }
 
@@ -584,7 +594,7 @@ namespace gallt {
             if (a.float_constant != b.float_constant) { return PatternOrder::Incomparable; }
             bool same = a.float_constant ? (a.float_value == b.float_value)
                                          : (a.int_value == b.int_value);
-            return same ? PatternOrder::Equal : PatternOrder::Equal;
+            return same ? PatternOrder::Equal : PatternOrder::Incomparable;
         }
 
         if (a.is_constant || b.is_constant) { return PatternOrder::Incomparable; }
@@ -597,7 +607,9 @@ namespace gallt {
         if (a->patterns.size() != b->patterns.size()) { return false; }
 
         for (std::size_t i = 0; i < a->patterns.size(); ++i) {
-            if (compare_pattern(a->patterns[i], b->patterns[i]) == PatternOrder::Worse) {
+            const PatternOrder order = compare_pattern(a->patterns[i], b->patterns[i]);
+
+            if (order == PatternOrder::Worse || order == PatternOrder::Incomparable) {
                 return false;
             }
         }

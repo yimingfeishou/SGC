@@ -129,6 +129,32 @@ namespace gallt {
 
         bool had_error_ = false;
 
+        std::unordered_set<const AST::Node*> poisoned_;
+
+        bool poisoned_node(const AST::Node* node) const {
+            return node != nullptr && poisoned_.count(node) != 0;
+        }
+
+        void poison_node(const AST::Node* node) {
+            if (node != nullptr) { poisoned_.insert(node); }
+        }
+
+        class PoisonGuard {
+        public:
+            PoisonGuard(GenericExpander& pass, const AST::Node* node);
+            ~PoisonGuard();
+
+            PoisonGuard(const PoisonGuard&) = delete;
+            PoisonGuard& operator=(const PoisonGuard&) = delete;
+
+        private:
+            GenericExpander& pass_;
+            const AST::Node* node_;
+            std::size_t errors_;
+        };
+
+        void expand_expression_impl(std::unique_ptr<AST::Expression>& expr);
+
         void collect_generics();
         void collect_declarations();
         void expand_top_level(AST::TopLevel* node);

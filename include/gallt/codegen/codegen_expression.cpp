@@ -861,6 +861,25 @@ namespace gallt {
             }
         }
         std::string tmp = new_temp("cast");
+        if (to.kind == TypeKind::Bool) {
+            std::string truth = new_temp("tobool");
+
+            if (from.kind == TypeKind::Float || from.kind == TypeKind::Double) {
+                emit_line(truth + " = fcmp une " +
+                    std::string(from.kind == TypeKind::Float ? "float" : "double") + " " +
+                    value + ", 0.0");
+            } else if (from.kind == TypeKind::Pointer || from.kind == TypeKind::Function) {
+                emit_line(truth + " = icmp ne ptr " + value + ", null");
+            } else {
+                const int bits = from.integer_bit_width();
+                if (bits <= 0) { return value; }
+                emit_line(truth + " = icmp ne " + std::string(int_ir(bits)) + " " +
+                    value + ", 0");
+            }
+
+            emit_line(tmp + " = zext i1 " + truth + " to i8");
+            return tmp;
+        }
         if (to.kind == TypeKind::Float) {
             if (from.kind == TypeKind::Double) {
                 emit_line(tmp + " = fptrunc double " + value + " to float");
@@ -912,7 +931,7 @@ namespace gallt {
     std::string CodeGenerator::truth_condition(const std::string& value, const AST::Type& type) {
         if (type.kind == TypeKind::Bool) {
             std::string tmp = new_temp("cond");
-            emit_line(tmp + " = trunc i8 " + value + " to i1");
+            emit_line(tmp + " = icmp ne i8 " + value + ", 0");
             return tmp;
         }
         if (type.integer_bit_width() > 0) {
@@ -1144,23 +1163,52 @@ namespace gallt {
 
                     for (auto& arg : expr->construct_args) { ctor_args.push_back(arg.get()); }
                     collect_constructor_defaults(ctor_name, ctor_args);
-                    std::string call_text = "call void " + callee + "(ptr " + storage;
-                    for (AST::Expression* arg : ctor_args) {
-                        ExprValue value = gen_expr(arg);
-                        std::string type_text = llvm_type(value.type);
 
-                        if (value.type.kind == TypeKind::String) {
-                            std::string addr = !value.address.empty() ? value.address : value.value;
-                            std::string agg = new_temp("ctorstr");
-                            emit_line(agg + " = load %struct.gallt.string, ptr " + addr);
-                            value.value = agg;
-                            type_text = "%struct.gallt.string";
+                    // The lowered constructor takes aggregate parameters (struct and
+                    // string) by pointer, exactly like an ordinary call, so the
+                    // construction site must use the same convention instead of
+                    // passing those arguments by value.
+                    AST::FunctionDefinition* ctor_def = nullptr;
+
+                    if (auto found = function_by_name_.find(ctor_name);
+                        found != function_by_name_.end()) {
+                        ctor_def = found->second;
+                    }
+
+                    std::string call_text = "call void " + callee + "(ptr " + storage;
+                    std::vector<std::string> owned_ctor_args;
+
+                    for (std::size_t i = 0; i < ctor_args.size(); ++i) {
+                        ExprValue value = gen_expr(ctor_args[i]);
+                        AST::Type want = value.type;
+                        // Lowered special members receive the object pointer first.
+                        const std::size_t parameter_index = i + 1;
+
+                        if (ctor_def != nullptr &&
+                            parameter_index < ctor_def->parameters.size()) {
+                            want = ctor_def->parameters[parameter_index];
                         }
-                        call_text += ", " + type_text + " " + value.value;
-                        destroy_owned_string(value);
+
+                        if (aggregate_parameter_uses_pointer(want) &&
+                            (value.type.kind == TypeKind::Struct ||
+                                value.type.kind == TypeKind::String)) {
+                            call_text += ", ptr " + aggregate_argument_pointer(want, value);
+                        } else {
+                            call_text += ", " + llvm_type(value.type) + " " + value.value;
+                        }
+
+                        if (!value.owned_string.empty()) {
+                            owned_ctor_args.push_back(value.owned_string);
+                        }
                     }
                     call_text += ")";
                     emit_line(call_text);
+
+                    // Argument temporaries outlive the call: the constructor reads
+                    // them while it copies its parameters into the object.
+                    for (const std::string& owned : owned_ctor_args) {
+                        emit_line("call void @gallt_string_destroy(ptr " + owned + ")");
+                    }
                 }
                 return out;
             }
@@ -1787,7 +1835,6 @@ namespace gallt {
             AST::Type func_type;
             std::vector<AST::Type> params;
             std::string callee;
-            bool pointer_call = false;
             bool variadic_callee = false;
             bool c_variadic_callee = false;
 
@@ -1857,7 +1904,6 @@ namespace gallt {
                         if (variadic_callee) {
                             params.push_back(*func_type.variadic_element_type);
                         }
-                        pointer_call = true;
                         callee = base.value;
                     }
                 }
@@ -1875,7 +1921,6 @@ namespace gallt {
                 if (variadic_callee) {
                     params.push_back(*func_type.variadic_element_type);
                 }
-                pointer_call = true;
                 callee = base.value;
             }
 
@@ -1953,10 +1998,6 @@ namespace gallt {
 
             std::string ret_ir = llvm_type(return_type);
             if (return_type.kind == TypeKind::Function) { ret_ir = "ptr"; }
-
-            if (pointer_call && !callee.empty()) {
-                emit_line("call void @gallt_check_fptr(ptr " + callee + ")");
-            }
 
             bool extern_call = !direct_name.empty() && function_is_extern(direct_name);
             bool sret_call = returns_via_sret(return_type) &&

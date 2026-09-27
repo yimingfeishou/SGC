@@ -787,6 +787,8 @@ namespace gallt {
             return true;
         case TypeKind::Struct:
             return resolve_type_layout(type.struct_name, size, align, sub);
+        case TypeKind::Error:
+            return false;
         }
         return false;
     }
@@ -1373,6 +1375,18 @@ namespace gallt {
     }
 
     void GenericExpander::expand_expression(std::unique_ptr<Expression>& expr_holder) {
+        if (expr_holder == nullptr) { return; }
+        if (poisoned_node(expr_holder.get())) { return; }
+        const std::size_t errors_before = diag_.error_count();
+        Expression* original = expr_holder.get();
+        expand_expression_impl(expr_holder);
+
+        if (expr_holder.get() == original && diag_.error_count() != errors_before) {
+            poison_node(original);
+        }
+    }
+
+    void GenericExpander::expand_expression_impl(std::unique_ptr<Expression>& expr_holder) {
         Expression* expr = expr_holder.get();
         if (expr == nullptr) { return; }
         if (auto* e = dynamic_cast<AssignmentExpression*>(expr)) {

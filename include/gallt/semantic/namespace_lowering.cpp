@@ -1,4 +1,5 @@
 #include "namespace_lowering.hpp"
+#include "diagnosed_registry.hpp"
 #include <algorithm>
 #include <cstddef>
 #include <utility>
@@ -99,15 +100,35 @@ namespace gallt {
 
     NamespaceLowering::NamespaceLowering(DiagnosticEngine& diag) : diag_(diag) {}
 
+    NamespaceLowering::PoisonGuard::PoisonGuard(NamespaceLowering& pass,
+        const AST::Node* node)
+        : pass_(pass), node_(node), errors_(pass.diag_.error_count()) {}
+
+    NamespaceLowering::PoisonGuard::~PoisonGuard() {
+        if (node_ != nullptr && pass_.diag_.error_count() != errors_) {
+            pass_.poison_node(node_);
+        }
+    }
+
     void NamespaceLowering::report(SourceLocation loc, ErrorCode code,
         const std::vector<std::string>& values) {
-        diag_.report_error_template(loc, code, values);
+        if (!diagnosed_registry::reported_by_earlier_stage(diag_, loc,
+            SemanticStage::Namespaces)) {
+            diag_.report_error_template(loc, code, values);
+        }
+
+        diagnosed_registry::record(diag_, loc, SemanticStage::Namespaces);
         had_error_ = true;
     }
 
     void NamespaceLowering::report(SourceLocation loc, ErrorCode code,
         const std::string& message) {
-        diag_.report_error(loc, code, message);
+        if (!diagnosed_registry::reported_by_earlier_stage(diag_, loc,
+            SemanticStage::Namespaces)) {
+            diag_.report_error(loc, code, message);
+        }
+
+        diagnosed_registry::record(diag_, loc, SemanticStage::Namespaces);
         had_error_ = true;
     }
 
@@ -442,7 +463,19 @@ namespace gallt {
         loc = primary->location;
 
         if (primary->kind == PrimaryExpression::Kind::NamespaceQualified) {
-            return resolve_qualified(primary->qualified_path, primary->location, false);
+            const std::size_t errors_before = diag_.error_count();
+            auto resolved = resolve_qualified(primary->qualified_path,
+                primary->location, false);
+
+            if (!resolved.has_value()) {
+                if (diag_.error_count() == errors_before) {
+                    report(primary->location, ErrorCode::NamespaceUndefined,
+                        join_parts(primary->qualified_path));
+                }
+
+                poison_node(primary);
+            }
+            return resolved;
         }
 
         if (primary->kind == PrimaryExpression::Kind::Identifier) {
@@ -454,28 +487,53 @@ namespace gallt {
 
     void NamespaceLowering::rewrite_expression(std::unique_ptr<Expression>& holder) {
         if (holder == nullptr) { return; }
+        if (poisoned_node(holder.get())) { return; }
+        const std::size_t errors_before = diag_.error_count();
+        Expression* original = holder.get();
+        rewrite_expression_impl(holder);
+
+        if (holder.get() == original && diag_.error_count() != errors_before) {
+            poison_node(original);
+        }
+    }
+
+    void NamespaceLowering::rewrite_expression_impl(std::unique_ptr<Expression>& holder) {
         SourceLocation loc;
         if (auto replacement = expression_replacement(holder.get(), loc)) {
             holder = std::make_unique<PrimaryExpression>(loc, *replacement);
             return;
         }
 
+        if (poisoned_node(holder.get())) { return; }
         rewrite_expression_nested(holder.get());
     }
 
     void NamespaceLowering::rewrite_shared_expression(std::shared_ptr<Expression>& holder) {
         if (holder == nullptr) { return; }
+        if (poisoned_node(holder.get())) { return; }
+        const std::size_t errors_before = diag_.error_count();
+        Expression* original = holder.get();
+        rewrite_shared_expression_impl(holder);
+
+        if (holder.get() == original && diag_.error_count() != errors_before) {
+            poison_node(original);
+        }
+    }
+
+    void NamespaceLowering::rewrite_shared_expression_impl(std::shared_ptr<Expression>& holder) {
         SourceLocation loc;
         if (auto replacement = expression_replacement(holder.get(), loc)) {
             holder = std::make_shared<PrimaryExpression>(loc, *replacement);
             return;
         }
 
+        if (poisoned_node(holder.get())) { return; }
         rewrite_expression_nested(holder.get());
     }
 
     void NamespaceLowering::rewrite_expression_nested(Expression* expr) {
         if (expr == nullptr) { return; }
+        if (poisoned_node(expr)) { return; }
         type_location_hint_ = expr->location;
         if (auto* e = dynamic_cast<PrimaryExpression*>(expr)) {
             switch (e->kind) {
@@ -588,6 +646,9 @@ namespace gallt {
 
     void NamespaceLowering::rewrite_initializer(Initializer* init) {
         if (init == nullptr) { return; }
+        if (poisoned_node(init)) { return; }
+        PoisonGuard guard(*this, init);
+
         if (auto* e = dynamic_cast<ExpressionInitializer*>(init)) {
             rewrite_expression(e->expr);
         } else if (auto* a = dynamic_cast<ArrayInitializer*>(init)) {
@@ -597,6 +658,8 @@ namespace gallt {
 
     void NamespaceLowering::rewrite_statement(Statement* stmt) {
         if (stmt == nullptr) { return; }
+        if (poisoned_node(stmt)) { return; }
+        PoisonGuard guard(*this, stmt);
         type_location_hint_ = stmt->location;
 
         if (auto* block = dynamic_cast<Block*>(stmt)) {
@@ -755,6 +818,8 @@ namespace gallt {
 
     void NamespaceLowering::rewrite_top_level(TopLevel* node) {
         if (node == nullptr) { return; }
+        if (poisoned_node(node)) { return; }
+        PoisonGuard guard(*this, node);
         type_location_hint_ = node->location;
 
         if (auto* sd = dynamic_cast<StructDefinition*>(node)) {
@@ -824,6 +889,8 @@ namespace gallt {
     void NamespaceLowering::handle_access_namespace(AccessNamespaceStatement* node) {
         const std::vector<std::string>& path = node->path;
         if (path.empty()) { return; }
+        if (poisoned_node(node)) { return; }
+        PoisonGuard guard(*this, node);
         if (scopes_.empty()) { push_scope(); }
 
         auto try_namespace = [&](const std::string& name) -> const NamespaceInfo* {
@@ -966,6 +1033,7 @@ namespace gallt {
         if (program == nullptr) { return false; }
         program_ = program;
         had_error_ = false;
+        poisoned_.clear();
         namespaces_.clear();
         scopes_.clear();
         namespace_prefix_.clear();

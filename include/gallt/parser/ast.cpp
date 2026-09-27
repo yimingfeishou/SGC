@@ -79,6 +79,7 @@ namespace gallt {
             case TypeKind::String:
             case TypeKind::File:
             case TypeKind::Void:
+            case TypeKind::Error:
                 return true;
             case TypeKind::Array:
                 if (array_size.has_value() != other.array_size.has_value()) {
@@ -153,6 +154,7 @@ namespace gallt {
             case TypeKind::String: out << "string"; break;
             case TypeKind::File:   out << "file"; break;
             case TypeKind::Void:   out << "void"; break;
+            case TypeKind::Error:  out << "error"; break;
             case TypeKind::Array:
                 if (element_type) {
                     out << element_type->to_string();

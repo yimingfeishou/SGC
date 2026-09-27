@@ -119,6 +119,7 @@ namespace gallt {
         case TypeKind::String: return "%struct.gallt.string";
         case TypeKind::File: return "ptr";
         case TypeKind::Void: return "void";
+        case TypeKind::Error: return "void";
         case TypeKind::Pointer:
         case TypeKind::Function:
             return "ptr";
@@ -612,7 +613,6 @@ namespace gallt {
         emit_line("declare ptr @gallt_string_cstr(ptr)");
         emit_line("declare ptr @gallt_alloc_bytes(i64)");
         emit_line("declare void @gallt_free_ptr(ptr)");
-        emit_line("declare void @gallt_check_fptr(ptr)");
         emit_line("declare ptr @gallt_file_open(ptr, ptr)");
         emit_line("declare i8 @gallt_file_close(ptr)");
         emit_line("declare i8 @gallt_file_flush(ptr)");
@@ -973,8 +973,6 @@ namespace gallt {
         if (main_func->parameters.size() >= 2) {
             std::string second_type = llvm_type(main_func->parameters[1]);
             args = "i32 %argc, " + second_type + " %argv";
-        } else if (main_func->parameters.size() == 1) {
-            args = "i32 %argc";
         }
 
         std::string ret_type = llvm_type(main_func->return_type);

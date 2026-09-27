@@ -237,7 +237,20 @@ namespace gallt {
                     : "_param" + std::to_string(i));
             }
         } else if (member->kind != SpecialMemberFunction::Kind::Destructor) {
-            params.push_back(Type::make_pointer(
+            // The lowered function normally takes the object pointer form. When the
+            // declared parameter list does not have that form the declaration was
+            // already diagnosed (ER 0086), so the lowered signature keeps the
+            // declared type instead: the body must keep the typing the author
+            // wrote rather than inherit the normalized form and emit a derived
+            // diagnostic for the same root cause.
+            const Type& declared = member->parameter_type;
+            const bool declared_is_object_pointer = declared.kind == TypeKind::Pointer &&
+                declared.pointee_type && declared.pointee_type->kind == TypeKind::Struct &&
+                declared.pointee_type->struct_name == def->name;
+            const bool keep_declared = !declared_is_object_pointer &&
+                declared.kind != TypeKind::Void && declared.kind != TypeKind::Error;
+
+            params.push_back(keep_declared ? declared : Type::make_pointer(
                 std::make_shared<Type>(Type::make_struct(def->name))));
             param_names.push_back(member->parameter_name.empty()
                 ? std::string("__other") : member->parameter_name);
@@ -681,6 +694,9 @@ namespace gallt {
 
     void LifecycleLowering::rewrite_expression(AST::Expression* expr) {
         if (expr == nullptr) { return; }
+        if (poisoned_node(expr)) { return; }
+        PoisonGuard guard(*this, expr);
+
         if (auto* prim = dynamic_cast<PrimaryExpression*>(expr)) {
             if (prim->kind == PrimaryExpression::Kind::Construct ||
                 prim->kind == PrimaryExpression::Kind::PlacementConstruct) {
@@ -919,6 +935,8 @@ namespace gallt {
 
     void LifecycleLowering::rewrite_statement(Statement* stmt) {
         if (stmt == nullptr) { return; }
+        if (poisoned_node(stmt)) { return; }
+        PoisonGuard guard(*this, stmt);
 
         if (auto* block = dynamic_cast<Block*>(stmt)) {
             std::vector<std::unique_ptr<Statement>> rewritten;
@@ -1084,12 +1102,14 @@ namespace gallt {
                     const std::string& name = prim->identifier;
                     if (null_pointers_.count(name) != 0) {
                     } else if (non_construct_pointers_.count(name) != 0) {
-                        report(ds->location, ErrorCode::DestructNonConstructed, std::string());
+                        report_template(ds->location,
+                            ErrorCode::DestructNonConstructed, {});
                     } else if (constructed_pointers_.count(name) != 0) {
                         auto group = alias_group_.find(name);
                         if (group != alias_group_.end()) {
                             if (destructed_groups_.count(group->second) != 0) {
-                                report(ds->location, ErrorCode::DestructTwice, std::string());
+                                report_template(ds->location,
+                                    ErrorCode::DestructTwice, {});
                             } else {
                                 destructed_groups_.insert(group->second);
                             }
@@ -1097,10 +1117,12 @@ namespace gallt {
                     }
                 } else if (prim->kind == PrimaryExpression::Kind::Null) {
                 } else {
-                    report(ds->location, ErrorCode::DestructNonConstructed, std::string());
+                    report_template(ds->location,
+                        ErrorCode::DestructNonConstructed, {});
                 }
             } else {
-                report(ds->location, ErrorCode::DestructNonConstructed, std::string());
+                report_template(ds->location,
+                    ErrorCode::DestructNonConstructed, {});
             }
             return;
         }
@@ -1116,6 +1138,10 @@ namespace gallt {
     }
 
     void LifecycleLowering::rewrite_top_level(TopLevel* node) {
+        if (node == nullptr) { return; }
+        if (poisoned_node(node)) { return; }
+        PoisonGuard guard(*this, node);
+
         if (auto* def = dynamic_cast<StructDefinition*>(node)) {
             for (auto& member : def->members) {
                 if (auto* ei = dynamic_cast<ExpressionInitializer*>(member.initializer.get())) {

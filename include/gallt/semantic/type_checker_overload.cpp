@@ -1,4 +1,5 @@
 #include "../semantic/type_checker.hpp"
+#include "../semantic/diagnosed_registry.hpp"
 #include "type_checker_detail.hpp"
 #include "../parser/ast.hpp"
 #include "../semantic/constant_folding.hpp"
@@ -118,6 +119,11 @@ namespace gallt {
             }
 
             node->operator_postfix_dummy = node->parameters.size() == 2;
+
+            if (node->operator_postfix_dummy &&
+                node->parameters[1].kind != TypeKind::Int) {
+                node->parameters[1] = AST::Type::make_int();
+            }
         }
 
         if (op == "[]") {
@@ -183,7 +189,6 @@ namespace gallt {
                 if (same) {
                     report_error(func->location, ErrorCode::OperatorOverloadRedefined,
                         func->overloaded_operator);
-                    same = false;
                     break;
                 }
             }
@@ -451,6 +456,12 @@ namespace gallt {
             }
         }
 
+        for (const AST::Type& type : probe) {
+            if (type.is_error()) {
+                return false;
+            }
+        }
+
         bool any_custom = false;
         for (const AST::Type& type : probe) {
             if (is_custom_type(type)) {
@@ -494,16 +505,53 @@ namespace gallt {
             binary_probe.push_back(AST::Type::make_int());
             AST::FunctionDefinition* post_fix = resolve_user_operator(symbol, binary_probe,
                 expr->location);
+
+            if (post_fix == nullptr) {
+                const std::vector<AST::Type>& placeholders =
+                    has_addressable ? addressable_probe : probe;
+                auto found = operator_overloads_.find("operator" + symbol);
+
+                if (found != operator_overloads_.end()) {
+                    AST::FunctionDefinition* best = nullptr;
+                    int best_rank = -1;
+                    bool ambiguous = false;
+
+                    for (AST::FunctionDefinition* candidate : found->second) {
+                        if (candidate->parameters.size() != 2) { continue; }
+
+                        const int rank = conversion_rank(placeholders[0],
+                            candidate->parameters[0]);
+
+                        if (rank < 0) { continue; }
+
+                        if (best == nullptr || rank < best_rank) {
+                            best = candidate;
+                            best_rank = rank;
+                            ambiguous = false;
+                        } else if (rank == best_rank && candidate != best) {
+                            ambiguous = true;
+                        }
+                    }
+
+                    if (ambiguous) {
+                        report_error(expr->location,
+                            ErrorCode::OperatorOverloadAmbiguous, symbol);
+                    } else {
+                        post_fix = best;
+                    }
+                }
+            }
+
             if (post_fix != nullptr && post_fix->parameters.size() == 2) {
                 operands.push_back(nullptr);
                 operand_needs_address.push_back(false);
                 chosen = post_fix;
             }
         }
-        if (chosen == nullptr) {
+        if (chosen == nullptr && !postfix_increment) {
             chosen = resolve_user_operator(symbol, probe, expr->location);
         }
-        if (chosen == nullptr && has_addressable) {
+        if (chosen == nullptr && !postfix_increment && has_addressable) {
             chosen = resolve_user_operator(symbol, addressable_probe, expr->location);
         }
         if (chosen == nullptr) {
@@ -559,6 +607,7 @@ namespace gallt {
                 return "A" + (t.array_size.has_value() ? std::to_string(*t.array_size) : "u") +
                     (t.element_type ? encode(*t.element_type) : std::string("v"));
             case TypeKind::Struct: return "S" + sanitize_identifier(t.struct_name);
+            case TypeKind::Error: return "E";
             case TypeKind::Function: {
                 std::string out = "R" + (t.return_type ? encode(*t.return_type) : std::string("v"));
                 for (const AST::Type& p : t.parameter_types) { out += "_" + encode(p); }
@@ -1031,7 +1080,7 @@ namespace gallt {
             }
 
             if (variadic_candidate && default_argument_candidate) {
-                diag_.report_error_template(call->location,
+                report_error_template(call->location,
                     ErrorCode::VariadicDefaultArgumentAmbiguous,
                     std::vector<std::string>{});
                 return nullptr;

@@ -1,5 +1,7 @@
 #include "../semantic/type_checker.hpp"
+#include "../semantic/diagnosed_registry.hpp"
 #include "type_checker_detail.hpp"
+#include "expression_parameter_names.hpp"
 #include "../parser/ast.hpp"
 #include "../semantic/constant_folding.hpp"
 #include <algorithm>
@@ -85,7 +87,7 @@ namespace gallt {
             return false;
         }
         if (!is_legal_export_identifier(node->name)) {
-            diag_.report_error_template(node->location,
+            report_error_template(node->location,
                 ErrorCode::ExportFunctionNameInvalid, { node->name });
             return false;
         }
@@ -115,7 +117,7 @@ namespace gallt {
         }
 
         if (overloaded) {
-            diag_.report_error_template(node->location,
+            report_error_template(node->location,
                 ErrorCode::ExportFunctionCannotBeOverloaded, { node->name });
             return false;
         }
@@ -146,7 +148,7 @@ namespace gallt {
         }
 
         if (!conflict_kind.empty()) {
-            diag_.report_error_template(node->location,
+            report_error_template(node->location,
                 ErrorCode::ExportFunctionDeclarationConflict,
                 { node->name, conflict_kind });
             return false;
@@ -318,7 +320,8 @@ namespace gallt {
             if (node->param_defaults[i] == nullptr) { continue; }
             AST::Type default_type = check_expression(node->param_defaults[i].get());
 
-            if (!can_implicit_convert(default_type, node->parameters[i])) {
+            if (!default_type.is_error() &&
+                !can_implicit_convert(default_type, node->parameters[i])) {
                 report_error(node->param_defaults[i]->location,
                     ErrorCode::FunctionArgTypeMismatch,
                     "default argument " + std::to_string(i + 1) + " of function '" +
@@ -439,7 +442,7 @@ namespace gallt {
             if (member.initializer) {
                 if (auto* expr_init = dynamic_cast<AST::ExpressionInitializer*>(member.initializer.get())) {
                     AST::Type init_type = check_expression(expr_init->expr.get());
-                    if (!can_implicit_convert(init_type, mem_type)) {
+                    if (!init_type.is_error() && !can_implicit_convert(init_type, mem_type)) {
                         report_error(member.location, ErrorCode::StructMemberTypeMismatch,
                             "initializer type '" + init_type.to_string() +
                             "' cannot be converted to member type '" + mem_type.to_string() + "'");
@@ -470,7 +473,8 @@ namespace gallt {
                         for (auto& elem : arr_init->elements) {
                             if (auto* e = dynamic_cast<AST::ExpressionInitializer*>(elem.get())) {
                                 AST::Type etype = check_expression(e->expr.get());
-                                if (!can_implicit_convert(etype, *elem_type)) {
+                                if (!etype.is_error() &&
+                                    !can_implicit_convert(etype, *elem_type)) {
                                     report_error(member.location, ErrorCode::StructMemberTypeMismatch,
                                         "array element type mismatch");
                                 }
@@ -483,6 +487,15 @@ namespace gallt {
     }
 
     void TypeChecker::check_variable_declaration(AST::VariableDeclaration* decl) {
+        if (type_has_unresolved_generic(decl->type)) {
+            check_initializer_expressions(decl->initializer.get());
+            Symbol sym = Symbol::make_variable(decl->name, decl->type, decl->location,
+                decl->initializer != nullptr);
+            if (decl->type.is_const) { sym.is_mutable = false; }
+            sym_table_.declare(sym);
+            return;
+        }
+
         if (decl->type.is_const) {
             check_const_declaration(decl);
         }
@@ -620,11 +633,11 @@ namespace gallt {
                     init_type.struct_name == decl->type.struct_name) {
                     if (is_move_expression(expr_init->expr.get())) {
                         if (!type_is_movable(decl->type)) {
-                            diag_.report_error_template(decl->location,
+                            report_error_template(decl->location,
                                 ErrorCode::NoMoveViolation, { decl->type.struct_name });
                         }
                     } else if (!type_is_copyable(decl->type)) {
-                        diag_.report_error_template(decl->location,
+                        report_error_template(decl->location,
                             ErrorCode::NoCopyViolation, { decl->type.struct_name });
                     }
                 }
@@ -650,7 +663,7 @@ namespace gallt {
                     init_type.kind == TypeKind::Function &&
                     !function_signatures_match(decl->type, init_type)) {
                     if (decl->type.is_variadic || init_type.is_variadic) {
-                        diag_.report_error_template(decl->location,
+                        report_error_template(decl->location,
                             ErrorCode::VariadicFunctionPointerSignatureMismatch,
                             { decl->type.to_string(), init_type.to_string() });
                     } else {
@@ -673,17 +686,18 @@ namespace gallt {
                         "cannot initialize pointer '" + decl->name +
                         "' of type '" + decl->type.to_string() + "' with '" +
                         init_type.to_string() + "'");
-                } else if ((!is_null || decl->type.kind != TypeKind::Pointer) &&
+                } else if (!init_type.is_error() &&
+                   (!is_null || decl->type.kind != TypeKind::Pointer) &&
                    !const_drop_reported) {
                     if (!can_implicit_convert(init_type, decl->type)) {
                         if (is_null && decl->type.kind == TypeKind::File) {
                         } else if (is_expression_parameter_temp(decl->initializer.get())) {
-                            diag_.report_error_template(decl->location,
+                            report_error_template(decl->location,
                               ErrorCode::ExprParameterExpansionTypeError,
                               { decl->name, decl->type.to_string(),
                                 init_type.to_string() });
-                        } else if (decl->name.find("$expr") != std::string::npos) {
-                            diag_.report_error_template(decl->location,
+                        } else if (expression_parameter_names::is_generated_name(decl->name)) {
+                            report_error_template(decl->location,
                               ErrorCode::ExprParameterExpansionTypeError,
                               { decl->name, decl->type.to_string(),
                                 init_type.to_string() });
@@ -723,6 +737,10 @@ namespace gallt {
         if (init == nullptr) { return; }
         AST::StructDefinition* def = get_struct_definition(struct_type.struct_name);
         if (def == nullptr) {
+            if (type_has_unresolved_generic(struct_type)) {
+                check_initializer_expressions(init);
+                return;
+            }
             report_error(loc, ErrorCode::ExpressionSyntaxError,
                 "unknown struct type '" + struct_type.struct_name + "'");
             return;
@@ -773,7 +791,7 @@ namespace gallt {
             }
 
             AST::Type init_type = check_member_expression(e->expr.get(), member.type);
-            if (!can_implicit_convert(init_type, member.type)) {
+            if (!init_type.is_error() && !can_implicit_convert(init_type, member.type)) {
                 report_error(e->location, ErrorCode::StructMemberTypeMismatch,
                     "initializer for member '" + member.name + "' does not match its type");
             }
@@ -783,6 +801,10 @@ namespace gallt {
     void TypeChecker::check_array_initializer(AST::ArrayInitializer* init,
         const AST::Type& array_type, SourceLocation loc) {
         if (init == nullptr || array_type.kind != TypeKind::Array) { return; }
+        if (type_has_unresolved_generic(array_type)) {
+            check_initializer_expressions(init);
+            return;
+        }
         AST::Type element = array_type.element_type ? *array_type.element_type
             : AST::Type::make_void();
 
@@ -828,9 +850,24 @@ namespace gallt {
                     "array element requires a braced initializer");
                 continue;
             }
-            if (!can_implicit_convert(value_type, element)) {
+            if (!value_type.is_error() && !can_implicit_convert(value_type, element)) {
                 report_error(e->location, ErrorCode::AssignmentTypeMismatch,
                     "array element type mismatch");
+            }
+        }
+    }
+
+    void TypeChecker::check_initializer_expressions(AST::Initializer* init) {
+        if (init == nullptr) { return; }
+
+        if (auto* expr_init = dynamic_cast<AST::ExpressionInitializer*>(init)) {
+            check_expression(expr_init->expr.get());
+            return;
+        }
+
+        if (auto* arr_init = dynamic_cast<AST::ArrayInitializer*>(init)) {
+            for (auto& element : arr_init->elements) {
+                check_initializer_expressions(element.get());
             }
         }
     }

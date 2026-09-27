@@ -1,4 +1,5 @@
 #include "type_checker.hpp"
+#include "diagnosed_registry.hpp"
 #include "type_checker_detail.hpp"
 #include <string>
 #include <vector>
@@ -75,10 +76,10 @@ namespace gallt {
             return pack.element;
         }
 
-        diag_.report_error_template(expr->location,
+        report_error_template(expr->location,
             ErrorCode::ParameterPackPropertyNotApplicable,
             { property });
-        return AST::Type::make_void();
+        return AST::Type::make_error();
     }
 
     AST::Type TypeChecker::check_pack_subscript(AST::PostfixExpression* expr,
@@ -86,10 +87,15 @@ namespace gallt {
         if (expr->subscript_expr != nullptr) {
             AST::Type index_type = check_expression(expr->subscript_expr.get());
 
+            if (index_type.is_error()) {
+                return AST::Type::make_error();
+            }
+
             if (!is_integer_type(index_type)) {
-                diag_.report_error_template(expr->subscript_expr->location,
+                report_error_template(expr->subscript_expr->location,
                     ErrorCode::PackSubscriptNotInteger,
                     { index_type.to_string() });
+                return AST::Type::make_error();
             }
         }
 
@@ -106,15 +112,20 @@ namespace gallt {
                 check_expression(arg.get());
             }
 
-            return pack.element;
+            return AST::Type::make_error();
         }
 
         AST::Type index_type = check_expression(call->arguments[0].get());
 
+        if (index_type.is_error()) {
+            return AST::Type::make_error();
+        }
+
         if (!is_integer_type(index_type)) {
-            diag_.report_error_template(call->arguments[0]->location,
+            report_error_template(call->arguments[0]->location,
                 ErrorCode::PackSubscriptNotInteger,
                 { index_type.to_string() });
+            return AST::Type::make_error();
         }
 
         return pack.element;
@@ -139,13 +150,13 @@ namespace gallt {
                 if (!pack_expansion_target(post, source, loc)) {
                     std::string name;
                     pack_base_identifier(post->base.get(), name);
-                    diag_.report_error_template(post->location,
+                    report_error_template(post->location,
                         ErrorCode::PackExpansionTargetNotPack, { name });
                     continue;
                 }
 
                 if (!(source->element == element)) {
-                    diag_.report_error_template(post->location,
+                    report_error_template(post->location,
                         ErrorCode::VariadicArgumentTypeMismatch,
                         { std::to_string(i + 1), element.to_string(),
                           source->element.to_string() });
@@ -157,7 +168,7 @@ namespace gallt {
             AST::Type arg_type = check_expression(call->arguments[i].get());
 
             if (!can_implicit_convert(arg_type, element)) {
-                diag_.report_error_template(call->arguments[i]->location,
+                report_error_template(call->arguments[i]->location,
                     ErrorCode::VariadicArgumentTypeMismatch,
                     { std::to_string(i + 1), element.to_string(),
                       arg_type.to_string() });
@@ -261,7 +272,7 @@ namespace gallt {
 
             if (source != nullptr && i < parameter_types.size() &&
                 !can_implicit_convert(source->element, parameter_types[i])) {
-                diag_.report_error_template(post->location,
+                report_error_template(post->location,
                     ErrorCode::FunctionArgTypeMismatch,
                     { std::to_string(i + 1), parameter_types[i].to_string(),
                       source->element.to_string() });
@@ -305,7 +316,7 @@ namespace gallt {
             pack_base_identifier(post->base.get(), name);
 
             if (find_variadic_pack(name) == nullptr) {
-                diag_.report_error_template(post->location,
+                report_error_template(post->location,
                     ErrorCode::PackExpansionTargetNotPack, { name });
                 reported = true;
                 continue;

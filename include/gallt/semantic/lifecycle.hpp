@@ -52,6 +52,29 @@ namespace gallt {
         std::vector<std::string> current_function_parameters_;
         std::unordered_map<std::string, int> function_forwards_parameter_;
         int next_alias_group_ = 0;
+        std::unordered_set<const AST::Node*> poisoned_;
+
+        bool poisoned_node(const AST::Node* node) const {
+            return node != nullptr && poisoned_.count(node) != 0;
+        }
+
+        void poison_node(const AST::Node* node) {
+            if (node != nullptr) { poisoned_.insert(node); }
+        }
+
+        class PoisonGuard {
+        public:
+            PoisonGuard(LifecycleLowering& pass, const AST::Node* node);
+            ~PoisonGuard();
+
+            PoisonGuard(const PoisonGuard&) = delete;
+            PoisonGuard& operator=(const PoisonGuard&) = delete;
+
+        private:
+            LifecycleLowering& pass_;
+            const AST::Node* node_;
+            std::size_t errors_;
+        };
 
         bool resolve_pointer_origin(const AST::Expression* expr, int& group);
 

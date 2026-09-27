@@ -8,6 +8,8 @@
 #include <ostream>
 #include <optional>
 #include <cstdint>
+#include <map>
+#include <tuple>
 
 namespace gallt {
 
@@ -190,11 +192,6 @@ namespace gallt {
         CompileTimeConditionOutsideGenericBlock = 170,
     };
 
-    enum class RuntimeErrorCode : std::uint16_t {
-        HeapAllocFailure = 1,
-        NullFuncPtrCall = 2,
-    };
-
     struct Diagnostic {
         DiagnosticSeverity severity;
         SourceLocation location;
@@ -202,7 +199,6 @@ namespace gallt {
         std::string message;
 
         static std::string error_code_string(ErrorCode code);
-        static std::string runtime_error_code_string(RuntimeErrorCode code);
 
         static std::string error_template(ErrorCode code);
         static std::string substitute_placeholders(std::string_view tmpl,
@@ -211,15 +207,22 @@ namespace gallt {
 
     class DiagnosticEngine {
     public:
+        static constexpr std::size_t kDefaultErrorDisplayLimit = 100;
+
         DiagnosticEngine() = default;
+
+        // Compiler-internal bookkeeping (not part of the Gallt language surface):
+        // the earliest compiler stage that already diagnosed a source location.
+        // A later stage consults it so that a construct diagnosed upstream is not
+        // diagnosed again; see semantic/diagnosed_registry.hpp.
+        std::map<std::tuple<std::string_view, std::size_t, std::size_t>, int>
+            diagnosed_stages;
 
         void report_error(SourceLocation loc, ErrorCode code, std::string_view message);
         void report_error_template(SourceLocation loc, ErrorCode code,
             const std::vector<std::string>& values);
         void report_warning(SourceLocation loc, ErrorCode code, std::string_view message);
         void report_note(SourceLocation loc, std::string_view message);
-
-        static void report_runtime_error(RuntimeErrorCode code, std::string_view message);
 
         bool has_errors() const noexcept { return error_count_ > 0; }
 
@@ -233,6 +236,9 @@ namespace gallt {
 
         void print_all(std::ostream& os, DiagnosticSeverity min_severity) const;
 
+        void print_all(std::ostream& os, DiagnosticSeverity min_severity,
+            std::size_t error_display_limit, bool prompt_when_truncated) const;
+
     private:
         std::vector<Diagnostic> diagnostics_;
         std::size_t error_count_ = 0;
@@ -243,6 +249,8 @@ namespace gallt {
 
         static std::string format_message(ErrorCode code, std::string_view user_msg);
         static std::string severity_prefix(DiagnosticSeverity sev);
+        static std::string fallback_message(DiagnosticSeverity sev, ErrorCode code);
+        static void print_diagnostic(std::ostream& os, const Diagnostic& diagnostic);
     };
 
 }

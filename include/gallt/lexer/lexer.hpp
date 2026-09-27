@@ -39,6 +39,7 @@ namespace gallt {
         std::size_t column_ = 1;
 
         bool has_error_ = false;
+        bool fatal_error_ = false;
 
         std::optional<Token> peeked_token_;
 
@@ -63,7 +64,7 @@ namespace gallt {
         void report_error(ErrorCode code, std::string_view message);
         void report_error_at(SourceLocation loc, ErrorCode code, std::string_view message);
 
-        char parse_escape_sequence(std::size_t& pos, SourceLocation loc, bool is_char);
+        char parse_escape_sequence();
 
         bool validate_line_endings();
         bool validate_utf8();

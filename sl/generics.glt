@@ -717,7 +717,7 @@ addition namespace sl {
         }
 
         luint hash_value(K key) {
-            luint mixed = luint(key)
+            luint mixed = cast<luint>(key)
             mixed = mixed * 1099511628211lu
             mixed = mixed % 4294967291lu
             return mixed
@@ -727,7 +727,7 @@ addition namespace sl {
             if (table == null || table->capacity <= 0) {
                 return 0
             }
-            return int(hash_value(key) % luint(table->capacity))
+            return cast<int>(hash_value(key) % cast<luint>(table->capacity))
         }
 
         int locate(hash_table* table, K key) {
@@ -855,7 +855,7 @@ addition namespace sl {
                         int moved = 0
                         for (int i = 0; i < table->capacity; i++) {
                             if (table->states[i] == 1) {
-                                int target = int(hash_value(table->keys[i]) % luint(new_capacity))
+                                int target = cast<int>(hash_value(table->keys[i]) % cast<luint>(new_capacity))
                                 int guard = 0
                                 while (new_states[target] != 0 && guard < new_capacity) {
                                     target = target + 1
@@ -1084,6 +1084,13 @@ addition namespace sl {
             intro_sort_impl(data, 0, size - 1, depth_limit, compare)
             return true
         }
+    }
+
+    generics array_length_generic<T, string array_name> {
+        emit "luint array_length() {\n"
+        emit "    " + T.typename + " first = " + array_name + "[0]\n"
+        emit "    return size(" + array_name + ") / size(first)\n"
+        emit "}\n"
     }
 
 } // namespace sl

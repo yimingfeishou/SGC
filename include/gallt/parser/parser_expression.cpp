@@ -712,33 +712,7 @@ namespace gallt {
                 advance();
                 return std::make_unique<PrimaryExpression>(loc, type_name);
             }
-            const bool function_suffix = cast_type_has_function_pointer_suffix();
-            Type cast_type = parse_type(false, false);
-            if (function_suffix) {
-                auto suffix = parse_function_pointer_suffix(cast_type);
-                if (suffix.has_value()) {
-                    cast_type = std::move(suffix.value());
-                }
-            }
-            if (current_.type != TokenType::LeftParen) {
-                report_error_at(loc, ErrorCode::ExpressionSyntaxError,
-                    "expected '(' after type name in cast");
-                return nullptr;
-            }
-            advance();
-            auto operand = parse_expression();
-            if (operand == nullptr) {
-                report_error_at(loc, ErrorCode::ExpressionSyntaxError,
-                    "expected expression in cast");
-                return nullptr;
-            }
-            if (!expect(TokenType::RightParen, "expected ')' after cast expression")) {
-                return nullptr;
-            }
-            return std::make_unique<PostfixExpression>(
-                loc, std::move(operand), PostfixExpression::Operator::Cast,
-                nullptr, std::vector<std::unique_ptr<Expression>>{},
-                std::move(cast_type));
+            return reject_legacy_type_conversion(loc);
         }
 
         case TokenType::Keyword_Void: {
@@ -748,33 +722,7 @@ namespace gallt {
                 advance();
                 return std::make_unique<PrimaryExpression>(loc, type_name);
             }
-            const bool function_suffix = cast_type_has_function_pointer_suffix();
-            Type cast_type = parse_type(true, false);
-            if (function_suffix) {
-                auto suffix = parse_function_pointer_suffix(cast_type);
-                if (suffix.has_value()) {
-                    cast_type = std::move(suffix.value());
-                }
-            }
-            if (current_.type != TokenType::LeftParen) {
-                report_error_at(loc, ErrorCode::ExpressionSyntaxError,
-                    "expected '(' after type name in cast");
-                return nullptr;
-            }
-            advance();
-            auto operand = parse_expression();
-            if (operand == nullptr) {
-                report_error_at(loc, ErrorCode::ExpressionSyntaxError,
-                    "expected expression in cast");
-                return nullptr;
-            }
-            if (!expect(TokenType::RightParen, "expected ')' after cast expression")) {
-                return nullptr;
-            }
-            return std::make_unique<PostfixExpression>(
-                loc, std::move(operand), PostfixExpression::Operator::Cast,
-                nullptr, std::vector<std::unique_ptr<Expression>>{},
-                std::move(cast_type));
+            return reject_legacy_type_conversion(loc);
         }
 
         case TokenType::Keyword_File: {
@@ -784,20 +732,22 @@ namespace gallt {
                 advance();
                 return std::make_unique<PrimaryExpression>(loc, type_name);
             }
-            Type cast_type = parse_type(false, false);
-            if (current_.type != TokenType::LeftParen) {
-                report_error_at(loc, ErrorCode::ExpressionSyntaxError,
-                    "expected '(' after type name in cast");
-                return nullptr;
-            }
+            return reject_legacy_type_conversion(loc);
+        }
+
+        case TokenType::Keyword_Cast: {
             advance();
+            Type cast_type;
+
+            if (!parse_cast_target_type(cast_type, true)) { return nullptr; }
+
             auto operand = parse_expression();
             if (operand == nullptr) {
                 report_error_at(loc, ErrorCode::ExpressionSyntaxError,
-                    "expected expression in cast");
+                    "expected expression in cast<...>");
                 return nullptr;
             }
-            if (!expect(TokenType::RightParen, "expected ')' after cast expression")) {
+            if (!expect(TokenType::RightParen, "expected ')' after cast operand")) {
                 return nullptr;
             }
             return std::make_unique<PostfixExpression>(
@@ -808,6 +758,13 @@ namespace gallt {
 
         case TokenType::Identifier: {
             std::string id(current_.lexeme);
+            const bool plain_type_name = declared_type_names_.find(id) !=
+                declared_type_names_.end() &&
+                declared_value_names_.find(id) == declared_value_names_.end();
+            if ((plain_type_name && looks_like_pointer_type_cast()) ||
+                looks_like_qualified_pointer_type_cast()) {
+                return reject_legacy_type_conversion(loc);
+            }
             if (looks_like_generic_instantiation()) {
                 GenericRef ref = parse_generic_reference(id);
                 return std::make_unique<PrimaryExpression>(loc, std::move(ref));
@@ -827,30 +784,6 @@ namespace gallt {
                     advance();
                 }
                 return std::make_unique<PrimaryExpression>(loc, std::move(path));
-            }
-            if (declared_type_names_.find(id) != declared_type_names_.end() &&
-                declared_value_names_.find(id) == declared_value_names_.end() &&
-                looks_like_pointer_type_cast()) {
-                Type cast_type = parse_type(false, false);
-                if (current_.type != TokenType::LeftParen) {
-                    report_error_at(loc, ErrorCode::ExpressionSyntaxError,
-                        "expected '(' after type name in cast");
-                    return nullptr;
-                }
-                advance();
-                auto operand = parse_expression();
-                if (operand == nullptr) {
-                    report_error_at(loc, ErrorCode::ExpressionSyntaxError,
-                        "expected expression in cast");
-                    return nullptr;
-                }
-                if (!expect(TokenType::RightParen, "expected ')' after cast expression")) {
-                    return nullptr;
-                }
-                return std::make_unique<PostfixExpression>(
-                    loc, std::move(operand), PostfixExpression::Operator::Cast,
-                    nullptr, std::vector<std::unique_ptr<Expression>>{},
-                    std::move(cast_type));
             }
             if (lookahead_type(1) == TokenType::LeftParen &&
                 (id == "copy" || id == "move" || id == "deep_copy" || id == "shallow_copy")) {
@@ -910,7 +843,7 @@ namespace gallt {
                     return nullptr;
                 }
                 std::unique_ptr<Expression> placement = nullptr;
-            if (current_.type == TokenType::Identifier && current_.lexeme == "at") {
+                if (current_.type == TokenType::Identifier && current_.lexeme == "at") {
                     advance();
                     placement = parse_expression();
 
@@ -974,6 +907,74 @@ namespace gallt {
             return nullptr;
         }
         }
+    }
+
+    std::unique_ptr<Expression> Parser::reject_legacy_type_conversion(
+        SourceLocation loc) {
+        // '[type](value)' and '[type]*(value)' are no longer part of the language;
+        // the documented form is cast<[type]>(value). The tokens are still consumed
+        // so that the remainder of the file keeps parsing, and the operand is
+        // returned without a conversion node because the conversion is invalid.
+        report_error_at(loc, ErrorCode::ExpressionSyntaxError,
+            "type conversion must be written as cast<[type]>(value)");
+
+        const bool function_pointer_suffix = cast_type_has_function_pointer_suffix();
+        Type target = parse_type(true, false);
+
+        if (function_pointer_suffix) {
+            auto suffix = parse_function_pointer_suffix(target);
+            if (suffix.has_value()) { target = std::move(suffix.value()); }
+        }
+
+        if (current_.type != TokenType::LeftParen) { return nullptr; }
+
+        advance();
+        auto operand = parse_expression();
+        if (operand == nullptr) { return nullptr; }
+        if (!expect(TokenType::RightParen, "expected ')' after expression")) {
+            return nullptr;
+        }
+
+        // The construct was consumed and the operand parsed, so the enclosing
+        // statement can complete normally instead of being resynchronized.
+        in_error_recovery_ = false;
+        return operand;
+    }
+
+    bool Parser::parse_cast_target_type(Type& out, bool allow_void) {
+        if (current_.type != TokenType::Less) {
+            report_error(ErrorCode::ExpressionSyntaxError,
+                "expected '<' after 'cast'");
+            return false;
+        }
+
+        advance();
+
+        if (current_.type == TokenType::Greater ||
+            current_.type == TokenType::RightParen ||
+            current_.type == TokenType::EndOfFile) {
+            report_error(ErrorCode::ExpressionSyntaxError,
+                "expected a target type in cast<...>");
+            return false;
+        }
+
+        Type target = parse_type(allow_void, false);
+
+        if (current_.type == TokenType::LeftParen) {
+            auto suffix = parse_function_pointer_suffix(target);
+            if (suffix.has_value()) { target = std::move(suffix.value()); }
+        }
+
+        if (!expect(TokenType::Greater, "expected '>' after cast target type")) {
+            return false;
+        }
+
+        if (!expect(TokenType::LeftParen, "expected '(' after cast target type")) {
+            return false;
+        }
+
+        out = std::move(target);
+        return true;
     }
 
     std::vector<std::unique_ptr<Expression>> Parser::parse_argument_list() {

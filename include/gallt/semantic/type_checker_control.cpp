@@ -1,4 +1,5 @@
 #include "../semantic/type_checker.hpp"
+#include "../semantic/diagnosed_registry.hpp"
 #include "type_checker_detail.hpp"
 #include "../parser/ast.hpp"
 #include "../semantic/constant_folding.hpp"
@@ -18,7 +19,7 @@ namespace gallt {
         if (if_stmt->condition) {
             AST::Type cond_type = check_expression(if_stmt->condition.get());
 
-            if (!is_bool_type(cond_type)) {
+            if (!cond_type.is_error() && !is_bool_type(cond_type)) {
                 report_error(if_stmt->condition->location, ErrorCode::ConditionNotBoolean,
                     "if condition must be boolean type, got '" + cond_type.to_string() + "'");
             }
@@ -43,7 +44,7 @@ namespace gallt {
         if (for_stmt->condition) {
             AST::Type cond_type = check_expression(for_stmt->condition.get());
 
-            if (!is_bool_type(cond_type)) {
+            if (!cond_type.is_error() && !is_bool_type(cond_type)) {
                 report_error(for_stmt->condition->location, ErrorCode::ConditionNotBoolean,
                     "for condition must be boolean type, got '" + cond_type.to_string() + "'");
             }
@@ -67,7 +68,7 @@ namespace gallt {
         if (while_stmt->condition) {
             AST::Type cond_type = check_expression(while_stmt->condition.get());
 
-            if (!is_bool_type(cond_type)) {
+            if (!cond_type.is_error() && !is_bool_type(cond_type)) {
                 report_error(while_stmt->condition->location, ErrorCode::ConditionNotBoolean,
                     "while condition must be boolean type, got '" + cond_type.to_string() + "'");
             }
@@ -104,15 +105,19 @@ namespace gallt {
             AST::Type actual = check_expression(return_stmt->value.get());
             expected_type_ = saved_expected;
 
+            if (actual.is_error()) {
+                return;
+            }
+
             if (expected.kind == TypeKind::Struct && actual.kind == TypeKind::Struct &&
                 actual.struct_name == expected.struct_name) {
                 if (is_move_expression(return_stmt->value.get())) {
                     if (!type_is_movable(expected)) {
-                        diag_.report_error_template(return_stmt->location,
+                        report_error_template(return_stmt->location,
                             ErrorCode::NoMoveViolation, { expected.struct_name });
                     }
                 } else if (!type_is_copyable(expected)) {
-                    diag_.report_error_template(return_stmt->location,
+                    report_error_template(return_stmt->location,
                         ErrorCode::NoCopyViolation, { expected.struct_name });
                 }
             }

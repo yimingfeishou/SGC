@@ -260,6 +260,31 @@ namespace gallt {
                             if (auto* prim_arg = dynamic_cast<const PrimaryExpression*>(arg)) {
                                 if (prim_arg->kind == PrimaryExpression::Kind::Identifier) {
                                     type_name = prim_arg->identifier;
+                                } else if (prim_arg->kind ==
+                                    PrimaryExpression::Kind::Literal) {
+                                    const Token& literal = prim_arg->literal_token;
+
+                                    switch (literal.type) {
+                                    case TokenType::IntegerLiteral:
+                                        type_name = Type::integer_literal_type(
+                                            literal.lexeme).to_string();
+                                        break;
+                                    case TokenType::FloatLiteral:
+                                        type_name = Type::float_literal_type(
+                                            literal.lexeme).to_string();
+                                        break;
+                                    case TokenType::CharLiteral:
+                                        type_name = Type::make_char().to_string();
+                                        break;
+                                    case TokenType::BoolLiteral:
+                                        type_name = Type::make_bool().to_string();
+                                        break;
+                                    case TokenType::StringLiteral:
+                                        type_name = Type::make_string().to_string();
+                                        break;
+                                    default:
+                                        break;
+                                    }
                                 }
                             }
 

@@ -202,6 +202,7 @@ namespace gallt {
             case TokenType::Keyword_File:
             case TokenType::Keyword_Void:
             case TokenType::Keyword_Const:
+            case TokenType::Keyword_Cast:
             case TokenType::IntegerLiteral:
             case TokenType::FloatLiteral:
             case TokenType::CharLiteral:
@@ -254,7 +255,6 @@ namespace gallt {
             }
             if (t == TokenType::Identifier && lookahead(i).lexeme == "expr" &&
                 (lookahead_type(i + 1) == TokenType::Identifier ||
-                    lookahead_type(i + 1) == TokenType::LeftBrace ||
                     lookahead_type(i + 1) == TokenType::LeftParen)) {
                 saw_expr_argument = true;
             }
@@ -353,9 +353,17 @@ namespace gallt {
                     advance();
                     std::unique_ptr<Expression> arg;
                     TokenType arg_start = current_.type;
-                    bool type_name_argument = (is_builtin_type_keyword(arg_start) ||
-                        (arg_start == TokenType::Identifier &&
-                            lookahead_type(1) == TokenType::RightParen));
+                    bool type_name_argument = is_builtin_type_keyword(arg_start);
+
+                    if (!type_name_argument && arg_start == TokenType::Identifier &&
+                        lookahead_type(1) == TokenType::RightParen) {
+                        const std::string text(current_.lexeme);
+                        const bool known_type =
+                            declared_type_names_.find(text) != declared_type_names_.end();
+                        const bool known_value =
+                            declared_value_names_.find(text) != declared_value_names_.end();
+                        type_name_argument = known_type && !known_value;
+                    }
 
                     if (type_name_argument) {
                         std::string type_text(current_.lexeme);
@@ -381,6 +389,24 @@ namespace gallt {
                 advance();
                 return std::make_unique<PrimaryExpression>(loc, id);
             }
+            case TokenType::Keyword_Cast: {
+                advance();
+                Type cast_type;
+
+                if (!parse_cast_target_type(cast_type, false)) { return nullptr; }
+
+                auto operand = parse_compile_time_expression();
+                if (operand == nullptr) { return nullptr; }
+                if (!expect(TokenType::RightParen,
+                    "expected ')' after compile-time cast")) {
+                    return nullptr;
+                }
+
+                return std::make_unique<PostfixExpression>(loc, std::move(operand),
+                    PostfixExpression::Operator::Cast,
+                    nullptr, std::vector<std::unique_ptr<Expression>>{},
+                    std::move(cast_type));
+            }
             case TokenType::Keyword_Int:
             case TokenType::Keyword_Lint:
             case TokenType::Keyword_Uint:
@@ -391,26 +417,7 @@ namespace gallt {
             case TokenType::Keyword_Uchar:
             case TokenType::Keyword_Bool:
             case TokenType::Keyword_String: {
-                Type cast_type = parse_type_specifier(false);
-
-                if (current_.type != TokenType::LeftParen) {
-                    report_error(ErrorCode::ExpressionSyntaxError,
-                        "expected '(' after type name in compile-time cast");
-                    return nullptr;
-                }
-
-                advance();
-                auto operand = parse_compile_time_expression();
-                if (operand == nullptr) { return nullptr; }
-
-                if (!expect(TokenType::RightParen, "expected ')' after compile-time cast")) {
-                    return nullptr;
-                }
-
-                return std::make_unique<PostfixExpression>(loc, std::move(operand),
-                    PostfixExpression::Operator::Cast,
-                    nullptr, std::vector<std::unique_ptr<Expression>>{},
-                    std::move(cast_type));
+                return reject_legacy_type_conversion(loc);
             }
             default:
                 report_error(ErrorCode::GenericNonTypeArgNotConstant,
@@ -708,8 +715,7 @@ namespace gallt {
             bool parsed_type = false;
             TokenType tt = current_.type;
             if (tt == TokenType::Identifier && current_.lexeme == "expr" &&
-                (lookahead_type(1) == TokenType::Identifier ||
-                    lookahead_type(1) == TokenType::LeftBrace)) {
+                lookahead_type(1) == TokenType::Identifier) {
                 advance();
                 arg.is_type = false;
                 arg.is_expr = true;
@@ -1066,6 +1072,38 @@ namespace gallt {
         return constraint;
     }
 
+    void Parser::skip_generic_definition_tail() {
+        while (current_.type != TokenType::EndOfFile &&
+            current_.type != TokenType::LeftBrace &&
+            current_.type != TokenType::Newline &&
+            current_.type != TokenType::Semicolon) {
+            advance();
+        }
+
+        if (current_.type != TokenType::LeftBrace) { return; }
+
+        int brace_depth = 0;
+
+        while (current_.type != TokenType::EndOfFile) {
+            if (current_.type == TokenType::LeftBrace) {
+                ++brace_depth;
+                advance();
+                continue;
+            }
+
+            if (current_.type == TokenType::RightBrace) {
+                --brace_depth;
+                advance();
+
+                if (brace_depth == 0) { break; }
+
+                continue;
+            }
+
+            advance();
+        }
+    }
+
     std::unique_ptr<TopLevel> Parser::parse_generic_definition() {
         SourceLocation loc = current_location();
         expect(TokenType::Keyword_Generics, "expected 'generics'");
@@ -1120,12 +1158,14 @@ namespace gallt {
                             }
                             if (!expect(TokenType::RightParen,
                                 "expected ')' after expression parameter list")) {
+                                skip_generic_definition_tail();
                                 return nullptr;
                             }
                         }
                         if (current_.type != TokenType::Arrow) {
                             report_error(ErrorCode::ExpressionSyntaxError,
                                 "expected '->' and a return type in expression parameter declaration");
+                            skip_generic_definition_tail();
                             return nullptr;
                         }
 
@@ -1191,6 +1231,7 @@ namespace gallt {
                         if (current_.type != TokenType::Identifier) {
                             report_error(ErrorCode::ExpressionSyntaxError,
                                 "expected constant parameter name");
+                            skip_generic_definition_tail();
                             return nullptr;
                         }
 
@@ -1200,6 +1241,7 @@ namespace gallt {
                     } else {
                         report_error(ErrorCode::ExpressionSyntaxError,
                             "invalid generic parameter");
+                        skip_generic_definition_tail();
                         return nullptr;
                     }
                 } else {
@@ -1211,6 +1253,7 @@ namespace gallt {
                             lookahead_type(1) == TokenType::LeftParen)) {
                         report_error_template(ErrorCode::ExprParameterInSpecializationPattern,
                             { std::string(lookahead(1).lexeme) });
+                        skip_generic_definition_tail();
                         return nullptr;
                     }
 
@@ -1224,6 +1267,7 @@ namespace gallt {
                             if (current_.type == TokenType::LeftBracket) {
                                 advance();
                                 if (!expect(TokenType::RightBracket, "expected ']' in pattern")) {
+                                    skip_generic_definition_tail();
                                     return nullptr;
                                 }
                                 t = Type::make_array(std::make_shared<Type>(std::move(t)),
@@ -1271,6 +1315,7 @@ namespace gallt {
                             (!expr || !fold_constant_expression(expr.get(), iv, dv, is_flt))) {
                             report_error_template(ErrorCode::GenericConstantPatternNotConstant,
                                 { compile_time_expr_text(expr.get()) });
+                            skip_generic_definition_tail();
                             return nullptr;
                         }
 
@@ -1302,6 +1347,7 @@ namespace gallt {
         }
 
         if (!expect(TokenType::Greater, "expected '>' to close generic parameter list")) {
+            skip_generic_definition_tail();
             return nullptr;
         }
 

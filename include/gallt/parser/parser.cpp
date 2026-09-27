@@ -110,7 +110,10 @@ namespace gallt {
     }
 
     void Parser::report_error(ErrorCode code, const std::string& msg) {
-        if (complexity_limit_hit_) { return; }
+        if (complexity_limit_hit_) {
+            ++suppressed_error_count_;
+            return;
+        }
 
         diag_.report_error(current_.location, code, msg);
         has_error_ = true;
@@ -118,7 +121,10 @@ namespace gallt {
     }
 
     void Parser::report_error_at(SourceLocation loc, ErrorCode code, const std::string& msg) {
-        if (complexity_limit_hit_) { return; }
+        if (complexity_limit_hit_) {
+            ++suppressed_error_count_;
+            return;
+        }
 
         diag_.report_error(loc, code, msg);
         has_error_ = true;
@@ -132,11 +138,34 @@ namespace gallt {
 
     void Parser::report_error_template_at(SourceLocation loc, ErrorCode code,
         const std::vector<std::string>& values) {
-        if (complexity_limit_hit_) { return; }
+        if (complexity_limit_hit_) {
+            ++suppressed_error_count_;
+            return;
+        }
 
         diag_.report_error_template(loc, code, values);
         has_error_ = true;
         in_error_recovery_ = true;
+    }
+
+    void Parser::finalize_complexity_limit() {
+        if (!complexity_limit_hit_) {
+            return;
+        }
+
+        complexity_limit_hit_ = false;
+
+        if (suppressed_error_count_ == 0) {
+            return;
+        }
+
+        std::string summary = "expression is too complex; " +
+            std::to_string(suppressed_error_count_) +
+            " further diagnostic(s) inside it were suppressed to avoid cascade errors";
+        suppressed_error_count_ = 0;
+
+        diag_.report_error(current_.location, ErrorCode::ExpressionSyntaxError, summary);
+        has_error_ = true;
     }
 
     void Parser::skip_newlines() {
@@ -145,30 +174,47 @@ namespace gallt {
         }
     }
 
-    void Parser::synchronize() {
+    bool Parser::synchronize() {
         bool advanced = false;
+        bool stopped_at_right_brace = false;
+        std::size_t skipped = 0;
+        SourceLocation skip_start = current_.location;
 
         while (current_.type != TokenType::EndOfFile) {
+            if (current_.type == TokenType::RightBrace) {
+                stopped_at_right_brace = true;
+                break;
+            }
+
             if (current_.type == TokenType::Semicolon ||
-                current_.type == TokenType::Newline ||
-                current_.type == TokenType::RightBrace) {
+                current_.type == TokenType::Newline) {
                 advance();
-                return;
+                break;
             }
 
             if (current_.is_keyword()) {
-                in_error_recovery_ = false;
                 if (!advanced) {
                     advance();
                 }
-                return;
+
+                break;
             }
 
             advance();
             advanced = true;
+            ++skipped;
         }
 
-        in_error_recovery_ = false;
+        if (!stopped_at_right_brace) {
+            in_error_recovery_ = false;
+        }
+
+        if (skipped > 1) {
+            diag_.report_note(skip_start, "skipped " + std::to_string(skipped) +
+                " token(s) while recovering from the previous error");
+        }
+
+        return stopped_at_right_brace;
     }
 
     SourceLocation Parser::current_location() const {
@@ -184,6 +230,14 @@ namespace gallt {
 
             if (current_.type == TokenType::EndOfFile) {
                 break;
+            }
+
+            if (current_.type == TokenType::RightBrace) {
+                report_error(ErrorCode::ExpressionSyntaxError,
+                    "unexpected '}' at top level");
+                in_error_recovery_ = false;
+                advance();
+                continue;
             }
 
             if (in_error_recovery_) {
@@ -207,7 +261,8 @@ namespace gallt {
     }
 
     std::unique_ptr<TopLevel> Parser::parse_top_level() {
-        complexity_limit_hit_ = false;
+        finalize_complexity_limit();
+
         switch (current_.type) {
         case TokenType::Keyword_Guide:
             return parse_guide_statement();
@@ -702,12 +757,11 @@ namespace gallt {
     }
 
     std::unique_ptr<Statement> Parser::parse_statement() {
-        complexity_limit_hit_ = false;
+        finalize_complexity_limit();
         skip_newlines();
 
         if (in_error_recovery_) {
-            synchronize();
-            if (in_error_recovery_) { return nullptr; }
+            if (synchronize()) { return nullptr; }
         }
 
         switch (current_.type) {

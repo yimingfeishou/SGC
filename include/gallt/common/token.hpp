@@ -40,6 +40,7 @@ namespace gallt {
         Keyword_Emit,
         Keyword_Export,
         Keyword_Const,
+        Keyword_Cast,
         Identifier,
         IntegerLiteral,
         FloatLiteral,
@@ -107,7 +108,7 @@ namespace gallt {
         bool is(TokenType t) const noexcept { return type == t; }
 
         bool is_keyword() const noexcept {
-            return type >= TokenType::Keyword_Int && type <= TokenType::Keyword_Const;
+            return type >= TokenType::Keyword_Int && type <= TokenType::Keyword_Cast;
         }
 
         bool is_literal() const noexcept {

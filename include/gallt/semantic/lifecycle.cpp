@@ -1,4 +1,5 @@
 #include "lifecycle.hpp"
+#include "diagnosed_registry.hpp"
 #include "lifecycle_detail.hpp"
 #include <algorithm>
 #include <cstdlib>
@@ -12,15 +13,35 @@ namespace gallt {
 
     LifecycleLowering::LifecycleLowering(DiagnosticEngine& diag) : diag_(diag) {}
 
+    LifecycleLowering::PoisonGuard::PoisonGuard(LifecycleLowering& pass,
+        const AST::Node* node)
+        : pass_(pass), node_(node), errors_(pass.diag_.error_count()) {}
+
+    LifecycleLowering::PoisonGuard::~PoisonGuard() {
+        if (node_ != nullptr && pass_.diag_.error_count() != errors_) {
+            pass_.poison_node(node_);
+        }
+    }
+
     void LifecycleLowering::report_template(SourceLocation loc, ErrorCode code,
         const std::vector<std::string>& values) {
-        diag_.report_error_template(loc, code, values);
+        if (!diagnosed_registry::reported_by_earlier_stage(diag_, loc,
+            SemanticStage::Lifecycle)) {
+            diag_.report_error_template(loc, code, values);
+        }
+
+        diagnosed_registry::record(diag_, loc, SemanticStage::Lifecycle);
         had_error_ = true;
     }
 
     void LifecycleLowering::report(SourceLocation loc, ErrorCode code,
         const std::string& message) {
-        diag_.report_error(loc, code, message);
+        if (!diagnosed_registry::reported_by_earlier_stage(diag_, loc,
+            SemanticStage::Lifecycle)) {
+            diag_.report_error(loc, code, message);
+        }
+
+        diagnosed_registry::record(diag_, loc, SemanticStage::Lifecycle);
         had_error_ = true;
     }
 
@@ -573,6 +594,7 @@ namespace gallt {
         if (program == nullptr) { return false; }
         program_ = program;
         had_error_ = false;
+        poisoned_.clear();
         collect_structs();
         collect_declarations();
         validate_special_members();

@@ -298,17 +298,11 @@ void gallt_string_from_f64(gallt_string* out, double v) {
 }
 
 void* gallt_alloc_bytes(int64_t size) {
-    if (size <= 0) { size = 1; }
+    if (size < 0) { return NULL; }
+    if (size == 0) { size = 1; }
     return calloc(1, (size_t)size);
 }
 
 void gallt_free_ptr(void* ptr) {
     free(ptr);
-}
-
-void gallt_check_fptr(void* fn) {
-    if (fn == NULL) {
-        fprintf(stderr, "RTER 0002: null function pointer call\n");
-        exit(1);
-    }
 }

@@ -130,6 +130,7 @@ namespace gallt {
             SourceLocation loc);
         void check_struct_initializer(AST::ArrayInitializer* init, const AST::Type& struct_type,
             SourceLocation loc);
+        void check_initializer_expressions(AST::Initializer* init);
         void check_if_statement(AST::IfStatement* if_stmt);
         void check_for_statement(AST::ForStatement* for_stmt);
         void check_while_statement(AST::WhileStatement* while_stmt);
@@ -197,6 +198,8 @@ namespace gallt {
 
         void report_error(SourceLocation loc, ErrorCode code, const std::string& msg);
         void report_error(ErrorCode code, const std::string& msg);
+        void report_error_template(SourceLocation loc, ErrorCode code,
+            const std::vector<std::string>& values);
         void report_warning(SourceLocation loc, ErrorCode code, const std::string& msg);
 
         void mangle_overload_set(const std::string& name);

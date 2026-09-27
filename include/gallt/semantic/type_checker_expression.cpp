@@ -1,5 +1,7 @@
 #include "../semantic/type_checker.hpp"
+#include "../semantic/diagnosed_registry.hpp"
 #include "type_checker_detail.hpp"
+#include "expression_parameter_names.hpp"
 #include "../parser/ast.hpp"
 #include "../semantic/constant_folding.hpp"
 #include <algorithm>
@@ -19,11 +21,17 @@ namespace gallt {
             return AST::Type::make_void();
         }
         {
+            auto cached = expression_types_.find(expr);
+            if (cached != expression_types_.end() && cached->second.is_error()) {
+                return cached->second;
+            }
+        }
+        {
             auto site = expression_call_sites_.find(expr);
             if (site != expression_call_sites_.end() &&
                 site->second.kind == TypeKind::Void) {
                 if (!allow_void) {
-                    diag_.report_error_template(expr->location,
+                    report_error_template(expr->location,
                         ErrorCode::ExprParameterExpansionTypeError,
                         { expression_display_name(expr), "void", "value" });
                 }
@@ -68,7 +76,7 @@ namespace gallt {
         } else {
             report_error(expr->location, ErrorCode::ExpressionSyntaxError,
                 "unknown expression type");
-            result = AST::Type::make_void();
+            result = AST::Type::make_error();
         }
 
         expression_types_[expr] = result;
@@ -84,7 +92,7 @@ namespace gallt {
 
         AST::Type left_type = check_expression(expr->left.get());
         if (left_type.is_const) {
-            diag_.report_error_template(expr->left->location, ErrorCode::ConstModification,
+            report_error_template(expr->left->location, ErrorCode::ConstModification,
                 { expression_display_name(expr->left.get()) });
         }
 
@@ -93,16 +101,20 @@ namespace gallt {
         AST::Type right_type = check_expression(expr->right.get());
         expected_type_ = saved_expected;
 
+        if (left_type.is_error() || right_type.is_error()) {
+            return AST::Type::make_error();
+        }
+
         if (expr->op == AST::AssignmentExpression::Operator::Assign &&
             left_type.kind == TypeKind::Struct && right_type.kind == TypeKind::Struct &&
             left_type.struct_name == right_type.struct_name) {
             if (is_move_expression(expr->right.get())) {
                 if (!type_is_movable(left_type)) {
-                    diag_.report_error_template(expr->location, ErrorCode::NoMoveViolation,
+                    report_error_template(expr->location, ErrorCode::NoMoveViolation,
                         { left_type.struct_name });
                 }
             } else if (!type_is_copyable(left_type)) {
-                diag_.report_error_template(expr->location, ErrorCode::NoCopyViolation,
+                report_error_template(expr->location, ErrorCode::NoCopyViolation,
                     { left_type.struct_name });
             }
         }
@@ -110,7 +122,7 @@ namespace gallt {
         if (left_type.kind == TypeKind::Array) {
             report_error(expr->location, ErrorCode::ArrayOperatorNotSupported,
                 "array type does not support assignment");
-            return left_type;
+            return AST::Type::make_error();
         }
 
         const bool const_address_assignment =
@@ -133,22 +145,22 @@ namespace gallt {
             report_error(expr->location, ErrorCode::PointerTypeMismatch,
                 "cannot assign pointer type '" + right_type.to_string() +
                 "' to '" + left_type.to_string() + "'");
-            return left_type;
+            return AST::Type::make_error();
         }
 
         if (left_type.kind == TypeKind::Function &&
             right_type.kind == TypeKind::Function) {
             if (!function_signatures_match(left_type, right_type)) {
                 if (left_type.is_variadic || right_type.is_variadic) {
-                    diag_.report_error_template(expr->location,
+                    report_error_template(expr->location,
                         ErrorCode::VariadicFunctionPointerSignatureMismatch,
                         { left_type.to_string(), right_type.to_string() });
-                    return left_type;
+                    return AST::Type::make_error();
                 }
                 report_error(expr->location, ErrorCode::FuncPtrTypeMismatch,
                     "function pointer type mismatch: expected '" +
                     left_type.to_string() + "', got '" + right_type.to_string() + "'");
-                return left_type;
+                return AST::Type::make_error();
             }
         }
 
@@ -202,8 +214,8 @@ namespace gallt {
         if (!ok && !const_address_assignment) {
             auto* target = dynamic_cast<AST::PrimaryExpression*>(expr->left.get());
             if (target != nullptr && target->kind == AST::PrimaryExpression::Kind::Identifier &&
-                target->identifier.rfind("__glt_expr", 0) == 0) {
-                diag_.report_error_template(expr->location,
+                expression_parameter_names::has_temporary_prefix(target->identifier)) {
+                report_error_template(expr->location,
                     ErrorCode::ExprParameterBlockReturnTypeMismatch,
                     { left_type.to_string(), right_type.to_string() });
             } else {
@@ -211,6 +223,7 @@ namespace gallt {
                     "cannot assign type '" + right_type.to_string() +
                     "' to type '" + left_type.to_string() + "'");
             }
+            return AST::Type::make_error();
         }
 
         return left_type;
@@ -219,21 +232,27 @@ namespace gallt {
     AST::Type TypeChecker::check_logical_or(AST::LogicalOrExpression* expr) {
         AST::Type left = check_expression(expr->left.get());
         AST::Type right = check_expression(expr->right.get());
+        if (left.is_error() || right.is_error()) {
+            return AST::Type::make_error();
+        }
+        bool reported = false;
         if (!is_bool_type(left) && !left.is_integer()) {
             report_error(expr->left->location, ErrorCode::BinaryOperatorTypeMismatch,
                 "left operand of '||' must be boolean or integer, got '" + left.to_string() + "'");
+            reported = true;
         }
 
         if (!is_bool_type(right) && !right.is_integer()) {
             report_error(expr->right->location, ErrorCode::BinaryOperatorTypeMismatch,
                 "right operand of '||' must be boolean or integer, got '" + right.to_string() + "'");
+            reported = true;
         }
-        return AST::Type::make_bool();
+        return reported ? AST::Type::make_error() : AST::Type::make_bool();
     }
 
     AST::Type TypeChecker::check_conditional(AST::ConditionalExpression* expr) {
         AST::Type condition = decay_array_type(check_expression(expr->condition.get()));
-        if (!is_bool_type(condition) && !condition.is_integer()) {
+        if (!condition.is_error() && !is_bool_type(condition) && !condition.is_integer()) {
             report_error(expr->condition->location, ErrorCode::ConditionNotBoolean,
                 "condition of '?:' must be boolean or integer, got '" +
                 condition.to_string() + "'");
@@ -245,11 +264,15 @@ namespace gallt {
         AST::Type right = decay_array_type(check_expression(expr->else_expr.get()));
         expected_type_ = saved_expected;
 
+        if (condition.is_error() || left.is_error() || right.is_error()) {
+            return AST::Type::make_error();
+        }
+
         if (left.kind == TypeKind::Void || right.kind == TypeKind::Void) {
             report_error(expr->location, ErrorCode::BinaryOperatorTypeMismatch,
                 "operator '?:' requires value operands, got '" + left.to_string() +
                 "' and '" + right.to_string() + "'");
-            return AST::Type::make_void();
+            return AST::Type::make_error();
         }
 
         if (left == right) {
@@ -299,12 +322,15 @@ namespace gallt {
         report_error(expr->location, ErrorCode::BinaryOperatorTypeMismatch,
             "operator '?:' operands must have a common type, got '" +
             left.to_string() + "' and '" + right.to_string() + "'");
-        return AST::Type::make_void();
+        return AST::Type::make_error();
     }
 
     AST::Type TypeChecker::check_bitwise(AST::BitwiseExpression* expr) {
         AST::Type left = decay_array_type(check_expression(expr->left.get()));
         AST::Type right = decay_array_type(check_expression(expr->right.get()));
+        if (left.is_error() || right.is_error()) {
+            return AST::Type::make_error();
+        }
         const char* op_text = "&";
         switch (expr->op) {
         case AST::BitwiseExpression::Operator::And: op_text = "&"; break;
@@ -315,7 +341,7 @@ namespace gallt {
         if (left.kind == TypeKind::Array || right.kind == TypeKind::Array) {
             report_error(expr->location, ErrorCode::ArrayOperatorNotSupported,
                 "array type does not support operator '" + std::string(op_text) + "'");
-            return AST::Type::make_void();
+            return AST::Type::make_error();
         }
 
         if (left.is_integer() && right.is_integer()) {
@@ -324,19 +350,22 @@ namespace gallt {
         report_error(expr->location, ErrorCode::BinaryOperatorTypeMismatch,
             "operator '" + std::string(op_text) + "' requires integer types, got '" +
             left.to_string() + "' and '" + right.to_string() + "'");
-        return AST::Type::make_void();
+        return AST::Type::make_error();
     }
 
     AST::Type TypeChecker::check_shift(AST::ShiftExpression* expr) {
         AST::Type left = decay_array_type(check_expression(expr->left.get()));
         AST::Type right = decay_array_type(check_expression(expr->right.get()));
+        if (left.is_error() || right.is_error()) {
+            return AST::Type::make_error();
+        }
         const char* op_text =
             expr->op == AST::ShiftExpression::Operator::Left ? "<<" : ">>";
 
         if (left.kind == TypeKind::Array || right.kind == TypeKind::Array) {
             report_error(expr->location, ErrorCode::ArrayOperatorNotSupported,
                 "array type does not support operator '" + std::string(op_text) + "'");
-            return AST::Type::make_void();
+            return AST::Type::make_error();
         }
 
         if (left.is_integer() && right.is_integer()) {
@@ -345,27 +374,36 @@ namespace gallt {
         report_error(expr->location, ErrorCode::BinaryOperatorTypeMismatch,
             "operator '" + std::string(op_text) + "' requires integer types, got '" +
             left.to_string() + "' and '" + right.to_string() + "'");
-        return AST::Type::make_void();
+        return AST::Type::make_error();
     }
 
     AST::Type TypeChecker::check_logical_and(AST::LogicalAndExpression* expr) {
         AST::Type left = check_expression(expr->left.get());
         AST::Type right = check_expression(expr->right.get());
+        if (left.is_error() || right.is_error()) {
+            return AST::Type::make_error();
+        }
+        bool reported = false;
         if (!is_bool_type(left) && !left.is_integer()) {
             report_error(expr->left->location, ErrorCode::BinaryOperatorTypeMismatch,
                 "left operand of '&&' must be boolean or integer, got '" + left.to_string() + "'");
+            reported = true;
         }
 
         if (!is_bool_type(right) && !right.is_integer()) {
             report_error(expr->right->location, ErrorCode::BinaryOperatorTypeMismatch,
                 "right operand of '&&' must be boolean or integer, got '" + right.to_string() + "'");
+            reported = true;
         }
-        return AST::Type::make_bool();
+        return reported ? AST::Type::make_error() : AST::Type::make_bool();
     }
 
     AST::Type TypeChecker::check_comparison(AST::ComparisonExpression* expr) {
         AST::Type left = decay_array_type(check_expression(expr->left.get()));
         AST::Type right = decay_array_type(check_expression(expr->right.get()));
+        if (left.is_error() || right.is_error()) {
+            return AST::Type::make_error();
+        }
         bool ok = false;
         bool reported = false;
 
@@ -452,10 +490,13 @@ namespace gallt {
             }
         }
 
-        if (!ok && !reported) {
-            report_error(expr->location, ErrorCode::BinaryOperatorTypeMismatch,
-                "comparison operands must be arithmetic types or compatible pointers, got '" +
-                left.to_string() + "' and '" + right.to_string() + "'");
+        if (!ok) {
+            if (!reported) {
+                report_error(expr->location, ErrorCode::BinaryOperatorTypeMismatch,
+                    "comparison operands must be arithmetic types or compatible pointers, got '" +
+                    left.to_string() + "' and '" + right.to_string() + "'");
+            }
+            return AST::Type::make_error();
         }
         return AST::Type::make_bool();
     }
@@ -463,6 +504,10 @@ namespace gallt {
     AST::Type TypeChecker::check_additive(AST::AdditiveExpression* expr) {
         AST::Type left = decay_array_type(check_expression(expr->left.get()));
         AST::Type right = decay_array_type(check_expression(expr->right.get()));
+
+        if (left.is_error() || right.is_error()) {
+            return AST::Type::make_error();
+        }
 
         if (expr->op == AST::AdditiveExpression::Operator::Plus) {
             if (left.kind == TypeKind::String || right.kind == TypeKind::String) {
@@ -474,7 +519,7 @@ namespace gallt {
                     report_error(expr->location, ErrorCode::BinaryOperatorTypeMismatch,
                         "operator '+' cannot mix string and numeric operands, got '" +
                         left.to_string() + "' and '" + right.to_string() + "'");
-                    return AST::Type::make_void();
+                    return AST::Type::make_error();
                 }
             }
             if (left.kind == TypeKind::Pointer && right.is_integer()) {
@@ -487,7 +532,7 @@ namespace gallt {
                 report_error(expr->location, ErrorCode::BinaryOperatorTypeMismatch,
                     "operator '+' requires arithmetic types or pointer and integer, got '" +
                     left.to_string() + "' and '" + right.to_string() + "'");
-                return AST::Type::make_void();
+                return AST::Type::make_error();
             }
         } else {
             if (left.kind == TypeKind::Pointer && right.is_integer()) {
@@ -501,7 +546,7 @@ namespace gallt {
                 } else {
                     report_error(expr->location, ErrorCode::BinaryOperatorTypeMismatch,
                         "pointer subtraction requires compatible pointer types");
-                    return AST::Type::make_void();
+                    return AST::Type::make_error();
                 }
             } else if (is_numeric_type(left) && is_numeric_type(right)) {
                 return usual_arithmetic_conversion(left, right);
@@ -509,7 +554,7 @@ namespace gallt {
                 report_error(expr->location, ErrorCode::BinaryOperatorTypeMismatch,
                     "operator '-' requires arithmetic types or pointer and integer, got '" +
                     left.to_string() + "' and '" + right.to_string() + "'");
-                return AST::Type::make_void();
+                return AST::Type::make_error();
             }
         }
     }
@@ -517,13 +562,16 @@ namespace gallt {
     AST::Type TypeChecker::check_multiplicative(AST::MultiplicativeExpression* expr) {
         AST::Type left = check_expression(expr->left.get());
         AST::Type right = check_expression(expr->right.get());
+        if (left.is_error() || right.is_error()) {
+            return AST::Type::make_error();
+        }
         if (left.kind == TypeKind::Array || right.kind == TypeKind::Array) {
             report_error(expr->location, ErrorCode::ArrayOperatorNotSupported,
                 "array type does not support operator '" +
                 std::string(expr->op == AST::MultiplicativeExpression::Operator::Multiply ? "*" :
                     (expr->op == AST::MultiplicativeExpression::Operator::Divide ? "/" : "%")) +
                 "'");
-            return AST::Type::make_void();
+            return AST::Type::make_error();
         }
 
         if (expr->op == AST::MultiplicativeExpression::Operator::Remainder) {
@@ -533,7 +581,7 @@ namespace gallt {
             report_error(expr->location, ErrorCode::BinaryOperatorTypeMismatch,
                 "operator '%' requires integer types, got '" +
                 left.to_string() + "' and '" + right.to_string() + "'");
-            return AST::Type::make_void();
+            return AST::Type::make_error();
         }
 
         if (is_numeric_type(left) && is_numeric_type(right)) {
@@ -543,17 +591,20 @@ namespace gallt {
                 "operator '" + std::string(expr->op == AST::MultiplicativeExpression::Operator::Multiply ? "*" : "/") +
                 "' requires arithmetic types, got '" +
                 left.to_string() + "' and '" + right.to_string() + "'");
-            return AST::Type::make_void();
+            return AST::Type::make_error();
         }
     }
 
     AST::Type TypeChecker::check_power(AST::PowerExpression* expr) {
         AST::Type left = check_expression(expr->left.get());
         AST::Type right = check_expression(expr->right.get());
+        if (left.is_error() || right.is_error()) {
+            return AST::Type::make_error();
+        }
         if (left.kind == TypeKind::Array || right.kind == TypeKind::Array) {
             report_error(expr->location, ErrorCode::ArrayOperatorNotSupported,
                 "array type does not support operator '**'");
-            return AST::Type::make_void();
+            return AST::Type::make_error();
         }
 
         if (is_numeric_type(left) && is_numeric_type(right)) {
@@ -562,7 +613,7 @@ namespace gallt {
             report_error(expr->location, ErrorCode::BinaryOperatorTypeMismatch,
                 "operator '**' requires arithmetic types, got '" +
                 left.to_string() + "' and '" + right.to_string() + "'");
-            return AST::Type::make_void();
+            return AST::Type::make_error();
         }
     }
 
@@ -573,11 +624,12 @@ namespace gallt {
                     const Symbol* constant = sym_table_.lookup(prim->identifier);
                     if (constant != nullptr && constant->kind != SymbolKind::Function &&
                         constant->type.is_const) {
-                        diag_.report_error_template(expr->operand->location,
+                        report_error_template(expr->operand->location,
                             ErrorCode::ConstModification, { prim->identifier });
                     }
                     std::vector<Symbol>* set = sym_table_.lookup_overloads(prim->identifier);
                     if (set != nullptr && !set->empty()) {
+                        const std::size_t resolution_errors_before = diag_.error_count();
                         Symbol* chosen = nullptr;
                         if (set->size() == 1) {
                             chosen = &(*set)[0];
@@ -588,7 +640,18 @@ namespace gallt {
                             report_error(expr->location, ErrorCode::OverloadAmbiguous,
                                 { prim->identifier });
                         }
-                        if (chosen == nullptr) { return AST::Type::make_void(); }
+                        if (chosen == nullptr) {
+                            if (diag_.error_count() == resolution_errors_before) {
+                                report_error(expr->location, ErrorCode::FuncPtrTypeMismatch,
+                                    "no overload of '" + prim->identifier +
+                                    "' matches the target type '" +
+                                    (expected_type_ != nullptr
+                                        ? expected_type_->to_string() : std::string("?")) +
+                                    "'");
+                            }
+
+                            return AST::Type::make_error();
+                        }
                         record_function_resolution(prim, *chosen);
                         return function_type_of(*chosen);
                     }
@@ -597,42 +660,51 @@ namespace gallt {
         }
 
         AST::Type operand = check_expression(expr->operand.get());
+        if (operand.is_error()) {
+            return AST::Type::make_error();
+        }
         switch (expr->op) {
         case AST::UnaryExpression::Operator::Increment:
-        case AST::UnaryExpression::Operator::Decrement:
+        case AST::UnaryExpression::Operator::Decrement: {
+            bool reported = false;
             if (!expr->operand->is_lvalue()) {
                 report_error(expr->operand->location, ErrorCode::ExpressionSyntaxError,
                     "operand of increment/decrement must be an lvalue");
+                reported = true;
             }
             if (operand.is_const) {
-                diag_.report_error_template(expr->operand->location,
+                report_error_template(expr->operand->location,
                     ErrorCode::ConstModification,
                     { expression_display_name(expr->operand.get()) });
+                reported = true;
             }
             if (!is_numeric_type(operand) && operand.kind != TypeKind::Pointer) {
                 report_error(expr->location, ErrorCode::UnaryOperatorTypeMismatch,
                     "increment/decrement requires arithmetic or pointer type, got '" +
                     operand.to_string() + "'");
+                reported = true;
             }
-            return operand;
+            return reported ? AST::Type::make_error() : operand;
+        }
         case AST::UnaryExpression::Operator::LogicalNot:
             if (!is_bool_type(operand) && !operand.is_integer()) {
                 report_error(expr->location, ErrorCode::UnaryOperatorTypeMismatch,
                     "operator '!' requires boolean or integer type, got '" +
                     operand.to_string() + "'");
+                return AST::Type::make_error();
             }
             return AST::Type::make_bool();
         case AST::UnaryExpression::Operator::BitwiseNot:
             if (operand.kind == TypeKind::Array) {
                 report_error(expr->location, ErrorCode::ArrayOperatorNotSupported,
                     "array type does not support operator '~'");
-                return AST::Type::make_void();
+                return AST::Type::make_error();
             }
             if (!operand.is_integer()) {
                 report_error(expr->location, ErrorCode::UnaryOperatorTypeMismatch,
                     "operator '~' requires integer type, got '" +
                     operand.to_string() + "'");
-                return AST::Type::make_void();
+                return AST::Type::make_error();
             }
             return operand;
         case AST::UnaryExpression::Operator::UnaryPlus:
@@ -643,7 +715,7 @@ namespace gallt {
                 report_error(expr->location, ErrorCode::UnaryOperatorTypeMismatch,
                     std::string("unary operator '") + op_text +
                     "' requires arithmetic type, got '" + operand.to_string() + "'");
-                return AST::Type::make_void();
+                return AST::Type::make_error();
             }
             return operand;
         }
@@ -661,29 +733,29 @@ namespace gallt {
                 report_error(expr->location, ErrorCode::DerefNonPointer,
                     "dereference operator requires pointer type, got '" +
                     operand.to_string() + "'");
-                return AST::Type::make_void();
+                return AST::Type::make_error();
             }
             if (is_null_literal_expr(expr->operand.get())) {
                 report_error(expr->location, ErrorCode::NullPointerDereference,
                     "cannot dereference a null pointer constant");
-                return AST::Type::make_void();
+                return AST::Type::make_error();
             }
             if (operand.pointee_type) {
                 if (operand.pointee_type->kind == TypeKind::Void) {
                     report_error(expr->location, ErrorCode::DerefNonPointer,
                         "dereference operator cannot be applied to 'void*'");
-                    return AST::Type::make_void();
+                    return AST::Type::make_error();
                 }
                 return *operand.pointee_type;
             } else {
                 report_error(expr->location, ErrorCode::ExpressionSyntaxError,
                     "pointer has no pointee type");
-                return AST::Type::make_void();
+                return AST::Type::make_error();
             }
         default:
             report_error(expr->location, ErrorCode::ExpressionSyntaxError,
                 "unknown unary operator");
-            return AST::Type::make_void();
+            return AST::Type::make_error();
         }
     }
 
@@ -698,10 +770,10 @@ namespace gallt {
                         return check_pack_subscript(expr, *pack);
                     }
                     if (expr->member_name == "get") {
-                        diag_.report_error_template(expr->location,
+                        report_error_template(expr->location,
                             ErrorCode::ParameterPackPropertyNotApplicable,
                             { expr->member_name });
-                        return AST::Type::make_void();
+                        return AST::Type::make_error();
                     }
                     return check_pack_property(expr, *pack);
                 }
@@ -726,7 +798,7 @@ namespace gallt {
         if (expr->op == AST::PostfixExpression::Operator::PackExpand) {
             report_error(expr->location, ErrorCode::PackExpansionNotAllowedHere,
                 "a pack expansion may only appear in an argument list or an initializer list");
-            return AST::Type::make_void();
+            return AST::Type::make_error();
         }
 
         if (expr->op == AST::PostfixExpression::Operator::FunctionCall) {
@@ -737,18 +809,40 @@ namespace gallt {
                         sym_table_.lookup_overloads(callee_name) != nullptr ||
                         sym_table_.lookup(callee_name) != nullptr;
                     if (!declared) {
-                        diag_.report_error_template(expr->location,
+                        if (!is_source_identifier_text(callee_name)) {
+                            // The callee name is the residue of a generic
+                            // instantiation (for example 'Box<int>.get') that the
+                            // generic layer already diagnosed; reporting an
+                            // undefined function here would only repeat it.
+                            for (auto& arg : expr->arguments) {
+                                check_expression(arg.get());
+                            }
+
+                            return AST::Type::make_error();
+                        }
+
+                        report_error_template(expr->location,
                             ErrorCode::UndefinedFunction, { callee_name });
                         for (auto& arg : expr->arguments) {
                             check_expression(arg.get());
                         }
-                        return AST::Type::make_void();
+                        return AST::Type::make_error();
                     }
                 }
             }
         }
 
         AST::Type base_type = check_expression(expr->base.get());
+
+        if (base_type.is_error()) {
+            if (expr->subscript_expr) {
+                check_expression(expr->subscript_expr.get());
+            }
+            for (auto& arg : expr->arguments) {
+                check_expression(arg.get());
+            }
+            return AST::Type::make_error();
+        }
 
         if (expr->op == AST::PostfixExpression::Operator::Subscript ||
             expr->op == AST::PostfixExpression::Operator::Arrow ||
@@ -766,15 +860,15 @@ namespace gallt {
                 report_error(expr->location, ErrorCode::ExpressionSyntaxError,
                     "subscript operator requires array or pointer type, got '" +
                     base_type.to_string() + "'");
-                return AST::Type::make_void();
+                return AST::Type::make_error();
             }
 
             if (expr->subscript_expr) {
                 AST::Type index_type = check_expression(expr->subscript_expr.get());
-                if (!index_type.is_integer()) {
+                if (!index_type.is_error() && !index_type.is_integer()) {
                     report_error(expr->subscript_expr->location, ErrorCode::SubscriptNotInteger,
                         "array index must be integer type, got '" + index_type.to_string() + "'");
-                } else if (base_type.kind == TypeKind::Array &&
+                } else if (index_type.is_integer() && base_type.kind == TypeKind::Array &&
                     base_type.array_size.has_value()) {
                     auto index_value =
                         evaluate_signed_const_integer_expression(
@@ -785,7 +879,7 @@ namespace gallt {
                             static_cast<std::size_t>(*index_value) >=
                                 *base_type.array_size;
                         if (negative || too_large) {
-                            diag_.report_error_template(expr->subscript_expr->location,
+                            report_error_template(expr->subscript_expr->location,
                                 ErrorCode::SubscriptOutOfBounds,
                                 { std::to_string(*index_value),
                                   std::to_string(*base_type.array_size) });
@@ -819,7 +913,7 @@ namespace gallt {
                 std::vector<Symbol>* set = sym_table_.lookup_overloads(func_name);
                 if (set != nullptr && set->size() > 1) {
                     Symbol* chosen = resolve_overload_call(func_name, expr, direct_primary);
-                    if (chosen == nullptr) { return AST::Type::make_void(); }
+                    if (chosen == nullptr) { return AST::Type::make_error(); }
                     return chosen->type;
                 }
             }
@@ -842,7 +936,7 @@ namespace gallt {
                         if (pack_base_identifier(expansion->base.get(), name)) {
                             const VariadicPack* pack = find_variadic_pack(name);
                             if (pack == nullptr) {
-                                diag_.report_error_template(
+                                report_error_template(
                                     expansion->location,
                                     ErrorCode::PackExpansionTargetNotPack, { name });
                                 continue;
@@ -854,7 +948,7 @@ namespace gallt {
                                 pack->element.kind == TypeKind::Function ||
                                 pack->element.kind == TypeKind::Array;
                             if (!printable) {
-                                diag_.report_error_template(
+                                report_error_template(
                                     expansion->location,
                                     ErrorCode::FunctionArgTypeMismatch,
                                     { std::to_string(i + 1), "printable value",
@@ -871,8 +965,8 @@ namespace gallt {
                         arg_type.kind == TypeKind::Pointer ||
                         arg_type.kind == TypeKind::Function ||
                         arg_type.kind == TypeKind::Array;
-                    if (!printable) {
-                        diag_.report_error_template(expr->arguments[i]->location,
+                    if (!arg_type.is_error() && !printable) {
+                        report_error_template(expr->arguments[i]->location,
                             ErrorCode::FunctionArgTypeMismatch,
                             { std::to_string(i + 1), "printable value",
                               arg_type.to_string() });
@@ -883,7 +977,12 @@ namespace gallt {
                 if (expr->arguments.size() != 1) {
                     report_error(expr->location, ErrorCode::FunctionArgCountMismatch,
                         func_name + " expects exactly one argument");
-                    return AST::Type::make_void();
+
+                    for (auto& argument : expr->arguments) {
+                        check_expression(argument.get());
+                    }
+
+                    return AST::Type::make_error();
                 }
                 auto* arg = expr->arguments[0].get();
                 bool is_type_name = false;
@@ -906,7 +1005,7 @@ namespace gallt {
                     return AST::Type::make_int();
                 } else {
                     AST::Type arg_type = check_expression(arg);
-                    if (arg_type.kind == TypeKind::Void) {
+                    if (!arg_type.is_error() && arg_type.kind == TypeKind::Void) {
                         report_error(arg->location, ErrorCode::InvalidTypeCast,
                             "cannot take size/align of void");
                     }
@@ -916,19 +1015,30 @@ namespace gallt {
                 if (expr->arguments.size() != 1) {
                     report_error(expr->location, ErrorCode::FunctionArgCountMismatch,
                         "free expects exactly one argument");
-                    return AST::Type::make_void();
+
+                    for (auto& argument : expr->arguments) {
+                        check_expression(argument.get());
+                    }
+
+                    return AST::Type::make_error();
                 }
                 AST::Type arg_type = check_expression(expr->arguments[0].get());
-                if (arg_type.kind != TypeKind::Pointer) {
+                if (!arg_type.is_error() && arg_type.kind != TypeKind::Pointer) {
                     report_error(expr->arguments[0]->location, ErrorCode::FreeNonPointer,
                         "free requires pointer type, got '" + arg_type.to_string() + "'");
+                    return AST::Type::make_error();
                 }
                 return AST::Type::make_void();
             } else if (func_name == "input") {
                 if (expr->arguments.size() > 1) {
                     report_error(expr->location, ErrorCode::FunctionArgCountMismatch,
                         "input expects zero or one argument");
-                    return AST::Type::make_void();
+
+                    for (auto& argument : expr->arguments) {
+                        check_expression(argument.get());
+                    }
+
+                    return AST::Type::make_error();
                 }
                 if (expr->arguments.size() == 1) {
                     AST::Expression* arg = expr->arguments[0].get();
@@ -937,23 +1047,25 @@ namespace gallt {
                             "input argument must be an lvalue");
                     }
                     AST::Type arg_type = check_expression(arg);
-                    if (arg_type.kind == TypeKind::Array) {
-                        report_error(arg->location, ErrorCode::ExpressionSyntaxError,
-                            "input cannot read directly into an array; use an element or pointer");
-                    } else if (arg_type.kind != TypeKind::Int &&
-                        arg_type.kind != TypeKind::Uint &&
-                        arg_type.kind != TypeKind::Lint &&
-                        arg_type.kind != TypeKind::Luint &&
-                        arg_type.kind != TypeKind::Char &&
-                        arg_type.kind != TypeKind::Uchar &&
-                        arg_type.kind != TypeKind::Bool &&
-                        arg_type.kind != TypeKind::Float &&
-                        arg_type.kind != TypeKind::Double &&
-                        arg_type.kind != TypeKind::String) {
-                        diag_.report_error_template(arg->location,
-                            ErrorCode::FunctionArgTypeMismatch,
-                            { std::to_string(1), "input-compatible type",
-                              arg_type.to_string() });
+                    if (!arg_type.is_error()) {
+                        if (arg_type.kind == TypeKind::Array) {
+                            report_error(arg->location, ErrorCode::ExpressionSyntaxError,
+                                "input cannot read directly into an array; use an element or pointer");
+                        } else if (arg_type.kind != TypeKind::Int &&
+                            arg_type.kind != TypeKind::Uint &&
+                            arg_type.kind != TypeKind::Lint &&
+                            arg_type.kind != TypeKind::Luint &&
+                            arg_type.kind != TypeKind::Char &&
+                            arg_type.kind != TypeKind::Uchar &&
+                            arg_type.kind != TypeKind::Bool &&
+                            arg_type.kind != TypeKind::Float &&
+                            arg_type.kind != TypeKind::Double &&
+                            arg_type.kind != TypeKind::String) {
+                            report_error_template(arg->location,
+                                ErrorCode::FunctionArgTypeMismatch,
+                                { std::to_string(1), "input-compatible type",
+                                  arg_type.to_string() });
+                        }
                     }
                     return AST::Type::make_void();
                 }
@@ -971,6 +1083,12 @@ namespace gallt {
                         if (prim->kind == AST::PrimaryExpression::Kind::Null) { is_null = true; }
                     }
                     arg_is_null.push_back(is_null);
+                }
+
+                for (const AST::Type& argument_type : arg_types) {
+                    if (argument_type.is_error()) {
+                        return AST::Type::make_error();
+                    }
                 }
 
                 bool has_declared_constructor = false;
@@ -999,6 +1117,7 @@ namespace gallt {
                     expr->location);
                 if (ctor != nullptr && ctor->function_node != nullptr) {
                     resolved_functions_[direct_primary] = ctor->function_node;
+                    bool argument_reported = false;
                     for (std::size_t i = 0; i < arg_types.size() &&
                         i + 1 < ctor->param_types.size(); ++i) {
                         bool compatible = can_implicit_convert(arg_types[i],
@@ -1014,7 +1133,11 @@ namespace gallt {
                                 " type '" + arg_types[i].to_string() +
                                 "' does not match parameter type '" +
                                 ctor->param_types[i + 1].to_string() + "'");
+                            argument_reported = true;
                         }
+                    }
+                    if (argument_reported) {
+                        return AST::Type::make_error();
                     }
                 }
                 return AST::Type::make_struct(func_name);
@@ -1044,7 +1167,7 @@ namespace gallt {
                 report_error(expr->location, ErrorCode::ExpressionSyntaxError,
                     "function call requires a function or function pointer, got '" +
                     base_type.to_string() + "'");
-                return AST::Type::make_void();
+                return AST::Type::make_error();
             }
 
             const bool variadic = func_type.is_variadic &&
@@ -1083,7 +1206,12 @@ namespace gallt {
                 report_error(expr->location, ErrorCode::FunctionArgCountMismatch,
                     "function expects " + std::to_string(expected) +
                     " arguments, but " + std::to_string(provided) + " provided");
-                return AST::Type::make_void();
+
+                for (auto& argument : expr->arguments) {
+                    check_expression(argument.get());
+                }
+
+                return AST::Type::make_error();
             }
 
             if (provided < expected) {
@@ -1106,7 +1234,7 @@ namespace gallt {
             if (c_variadic) {
                 for (std::size_t i = expected; i < expr->arguments.size(); ++i) {
                     AST::Type extra = check_expression(expr->arguments[i].get());
-                    if (extra.kind == TypeKind::Void) {
+                    if (!extra.is_error() && extra.kind == TypeKind::Void) {
                         report_error(expr->arguments[i]->location,
                             ErrorCode::FunctionArgTypeMismatch,
                             "argument " + std::to_string(i + 1) +
@@ -1130,17 +1258,21 @@ namespace gallt {
                     AST::Type arg_type = check_expression(expr->arguments[i].get());
                     expected_type_ = saved_expected;
 
+                    if (arg_type.is_error()) {
+                        continue;
+                    }
+
                     if (func_type.parameter_types[i].kind == TypeKind::Struct &&
                         arg_type.kind == TypeKind::Struct &&
                         arg_type.struct_name == func_type.parameter_types[i].struct_name) {
                         if (is_move_expression(expr->arguments[i].get())) {
                             if (!type_is_movable(func_type.parameter_types[i])) {
-                                diag_.report_error_template(expr->arguments[i]->location,
+                                report_error_template(expr->arguments[i]->location,
                                     ErrorCode::NoMoveViolation,
                                     { func_type.parameter_types[i].struct_name });
                             }
                         } else if (!type_is_copyable(func_type.parameter_types[i])) {
-                            diag_.report_error_template(expr->arguments[i]->location,
+                            report_error_template(expr->arguments[i]->location,
                                 ErrorCode::NoCopyViolation,
                                 { func_type.parameter_types[i].struct_name });
                         }
@@ -1174,13 +1306,13 @@ namespace gallt {
             if (!is_complete_type(expr->cast_type) && expr->cast_type.kind != TypeKind::Void) {
                 report_error(expr->location, ErrorCode::ExpressionSyntaxError,
                     "cast target type is incomplete");
-                return AST::Type::make_void();
+                return AST::Type::make_error();
             }
 
             if (expr->cast_type.kind == TypeKind::Void) {
                 report_error(expr->location, ErrorCode::InvalidTypeCast,
                     "cannot cast to void");
-                return AST::Type::make_void();
+                return AST::Type::make_error();
             }
 
             bool allowed = false;
@@ -1202,7 +1334,7 @@ namespace gallt {
             if (!allowed) {
                 auto argument = expression_argument_casts_.find(expr);
                 if (argument != expression_argument_casts_.end()) {
-                    diag_.report_error_template(expr->location,
+                    report_error_template(expr->location,
                         ErrorCode::ExprParameterCallArgTypeMismatch,
                         { std::get<0>(argument->second),
                           std::to_string(std::get<1>(argument->second) + 1),
@@ -1213,34 +1345,38 @@ namespace gallt {
                         "cannot cast type '" + base_type.to_string() +
                         "' to '" + expr->cast_type.to_string() + "'");
                 }
-                return AST::Type::make_void();
+                return AST::Type::make_error();
             }
 
             return expr->cast_type;
         }
         case AST::PostfixExpression::Operator::Increment:
         case AST::PostfixExpression::Operator::Decrement: {
+            bool reported = false;
             if (!expr->base->is_lvalue()) {
                 report_error(expr->base->location, ErrorCode::ExpressionSyntaxError,
                     "operand of increment/decrement must be an lvalue");
+                reported = true;
             }
             if (base_type.is_const) {
-                diag_.report_error_template(expr->base->location,
+                report_error_template(expr->base->location,
                     ErrorCode::ConstModification,
                     { expression_display_name(expr->base.get()) });
+                reported = true;
             }
             if (!is_numeric_type(base_type) && base_type.kind != TypeKind::Pointer) {
                 report_error(expr->location, ErrorCode::UnaryOperatorTypeMismatch,
                     "increment/decrement requires arithmetic or pointer type, got '" +
                     base_type.to_string() + "'");
+                reported = true;
             }
-            return base_type;
+            return reported ? AST::Type::make_error() : base_type;
         }
         case AST::PostfixExpression::Operator::Dot: {
             if (base_type.kind != TypeKind::Struct) {
                 report_error(expr->location, ErrorCode::DotOnNonStruct,
                     "dot operator requires struct type, got '" + base_type.to_string() + "'");
-                return AST::Type::make_void();
+                return AST::Type::make_error();
             }
 
             const auto* member = get_struct_member(base_type, expr->member_name);
@@ -1253,7 +1389,7 @@ namespace gallt {
             if (!member) {
                 report_error(expr->location, ErrorCode::StructMemberNotFound,
                    "struct has no member named '" + expr->member_name + "'");
-                return AST::Type::make_void();
+                return AST::Type::make_error();
             }
 
             AST::Type member_type = member->type;
@@ -1288,14 +1424,14 @@ namespace gallt {
             if (base_type.kind != TypeKind::Pointer) {
                 report_error(expr->location, ErrorCode::ArrowOnNonStructPtr,
                    "arrow operator requires pointer to struct, got '" + base_type.to_string() + "'");
-                return AST::Type::make_void();
+                return AST::Type::make_error();
             }
 
             auto pointee = base_type.pointee_type;
             if (!pointee || pointee->kind != TypeKind::Struct) {
                 report_error(expr->location, ErrorCode::ArrowOnNonStructPtr,
                    "arrow operator requires pointer to struct, got '" + base_type.to_string() + "'");
-                return AST::Type::make_void();
+                return AST::Type::make_error();
             }
 
             if (expr->member_name == "destructor") {
@@ -1308,7 +1444,7 @@ namespace gallt {
             if (!member) {
                 report_error(expr->location, ErrorCode::StructMemberNotFound,
                    "struct has no member named '" + expr->member_name + "'");
-                return AST::Type::make_void();
+                return AST::Type::make_error();
             }
 
             AST::Type member_type = member->type;
@@ -1320,7 +1456,7 @@ namespace gallt {
         default:
             report_error(expr->location, ErrorCode::ExpressionSyntaxError,
                 "unknown postfix operator");
-            return AST::Type::make_void();
+            return AST::Type::make_error();
         }
     }
 
@@ -1343,20 +1479,26 @@ namespace gallt {
         }
 
         if (expr->arguments.size() != info.params.size()) {
-            diag_.report_error_template(expr->location,
+            report_error_template(expr->location,
                 ErrorCode::FunctionArgCountMismatch,
                 { std::to_string(info.params.size()),
                   std::to_string(expr->arguments.size()) });
             for (auto& arg : expr->arguments) {
                 check_expression(arg.get());
             }
-            return result_type;
+            return AST::Type::make_error();
         }
+
+        bool reported = false;
 
         for (size_t i = 0; i < expr->arguments.size(); ++i) {
             AST::Expression* arg = expr->arguments[i].get();
             AST::Type arg_type = check_expression(arg);
             const std::string index = std::to_string(i + 1);
+
+            if (arg_type.is_error()) {
+                continue;
+            }
 
             bool is_null_literal = false;
             if (auto* prim = dynamic_cast<AST::PrimaryExpression*>(arg)) {
@@ -1368,47 +1510,58 @@ namespace gallt {
             switch (info.params[i]) {
             case StringParamKind::StringValue:
                 if (arg_type.kind != TypeKind::String) {
-                    diag_.report_error_template(arg->location,
+                    report_error_template(arg->location,
                         ErrorCode::FunctionArgTypeMismatch,
                         { index, "string", arg_type.to_string() });
+                    reported = true;
                 }
                 break;
             case StringParamKind::StringRef:
                 if (arg_type.kind != TypeKind::String) {
-                    diag_.report_error_template(arg->location,
+                    report_error_template(arg->location,
                         ErrorCode::FunctionArgTypeMismatch,
                         { index, "string", arg_type.to_string() });
+                    reported = true;
                 } else if (!arg->is_lvalue()) {
                     report_error(arg->location, ErrorCode::ExpressionSyntaxError,
                         "string operation '" + func_name +
                         "' argument " + index +
                         " must be a modifiable string lvalue");
+                    reported = true;
+                } else if (arg_type.is_const) {
+                    report_error_template(arg->location,
+                        ErrorCode::ConstModification,
+                        { expression_display_name(arg) });
+                    reported = true;
                 }
                 break;
             case StringParamKind::IntValue:
                 if (!arg_type.is_integer()) {
-                    diag_.report_error_template(arg->location,
+                    report_error_template(arg->location,
                         ErrorCode::FunctionArgTypeMismatch,
                         { index, "int", arg_type.to_string() });
+                    reported = true;
                 }
                 break;
             case StringParamKind::CharValue:
                 if (!arg_type.is_integer()) {
-                    diag_.report_error_template(arg->location,
+                    report_error_template(arg->location,
                         ErrorCode::FunctionArgTypeMismatch,
                         { index, "char", arg_type.to_string() });
+                    reported = true;
                 }
                 break;
             case StringParamKind::FileHandle:
                 if (!is_file_pointer_type(arg_type) && !is_null_literal) {
-                    diag_.report_error_template(arg->location,
+                    report_error_template(arg->location,
                         ErrorCode::FunctionArgTypeMismatch,
                         { index, "file*", arg_type.to_string() });
+                    reported = true;
                 }
                 break;
             }
         }
-        return result_type;
+        return reported ? AST::Type::make_error() : result_type;
     }
 
     AST::Type TypeChecker::check_file_builtin_call(AST::PostfixExpression* expr,
@@ -1439,13 +1592,19 @@ namespace gallt {
             for (auto& arg : expr->arguments) {
                 check_expression(arg.get());
             }
-            return result_type;
+            return AST::Type::make_error();
         }
+
+        bool reported = false;
 
         for (size_t i = 0; i < expr->arguments.size(); ++i) {
             AST::Expression* arg = expr->arguments[i].get();
             AST::Type arg_type = check_expression(arg);
             const std::string index = std::to_string(i + 1);
+
+            if (arg_type.is_error()) {
+                continue;
+            }
 
             bool is_null_literal = false;
             if (auto* prim = dynamic_cast<AST::PrimaryExpression*>(arg)) {
@@ -1460,6 +1619,7 @@ namespace gallt {
                     report_error(arg->location, ErrorCode::FileHandleRequired,
                         "file operation '" + func_name + "' argument " + index +
                         " requires 'file*', got '" + arg_type.to_string() + "'");
+                    reported = true;
                 }
                 break;
             case FileParamKind::Buffer:
@@ -1467,6 +1627,7 @@ namespace gallt {
                     report_error(arg->location, ErrorCode::FileBufferNotPointer,
                         "file operation '" + func_name + "' argument " + index +
                         " buffer must be a pointer, got '" + arg_type.to_string() + "'");
+                    reported = true;
                 }
                 break;
             case FileParamKind::IntValue:
@@ -1474,6 +1635,7 @@ namespace gallt {
                     report_error(arg->location, ErrorCode::FileArgTypeMismatch,
                         "file operation '" + func_name + "' argument " + index +
                         " type mismatch: expected 'int', got '" + arg_type.to_string() + "'");
+                    reported = true;
                 }
                 break;
             case FileParamKind::SizeValue:
@@ -1481,6 +1643,7 @@ namespace gallt {
                     report_error(arg->location, ErrorCode::FileSizeNotInt,
                         "file operation '" + func_name + "' argument " + index +
                         " size must be 'int', got '" + arg_type.to_string() + "'");
+                    reported = true;
                 }
                 break;
             case FileParamKind::StringValue:
@@ -1488,6 +1651,7 @@ namespace gallt {
                     report_error(arg->location, ErrorCode::FilePathOrModeNotString,
                         "file operation '" + func_name + "' argument " + index +
                         " must be 'string', got '" + arg_type.to_string() + "'");
+                    reported = true;
                 }
                 break;
             case FileParamKind::TextValue:
@@ -1495,6 +1659,7 @@ namespace gallt {
                     report_error(arg->location, ErrorCode::FileArgTypeMismatch,
                         "file operation '" + func_name + "' argument " + index +
                         " type mismatch: expected 'string', got '" + arg_type.to_string() + "'");
+                    reported = true;
                 }
                 break;
             case FileParamKind::SeekOrigin:
@@ -1502,6 +1667,7 @@ namespace gallt {
                     report_error(arg->location, ErrorCode::FileArgTypeMismatch,
                         "file operation '" + func_name + "' argument " + index +
                         " type mismatch: expected 'int', got '" + arg_type.to_string() + "'");
+                    reported = true;
                 }
                 break;
             }
@@ -1515,6 +1681,7 @@ namespace gallt {
                             !is_valid_file_open_mode(mode)) {
                             report_error(arg->location, ErrorCode::FileOpenModeInvalid,
                                 "invalid file open mode: '" + mode + "'");
+                            reported = true;
                         }
                     }
                 }
@@ -1533,12 +1700,13 @@ namespace gallt {
                             report_error(arg->location, ErrorCode::FileSeekOriginInvalid,
                                 "fileseek() origin must be 0, 1 or 2, got " +
                                 std::to_string(origin));
+                            reported = true;
                         }
                     }
                 }
             }
         }
-        return result_type;
+        return reported ? AST::Type::make_error() : result_type;
     }
 
     AST::Type TypeChecker::check_primary(AST::PrimaryExpression* expr) {
@@ -1558,7 +1726,7 @@ namespace gallt {
             default:
                 report_error(expr->location, ErrorCode::ExpressionSyntaxError,
                     "unknown literal type");
-                return AST::Type::make_void();
+                return AST::Type::make_error();
             }
         }
         case AST::PrimaryExpression::Kind::Identifier: {
@@ -1566,7 +1734,7 @@ namespace gallt {
                 report_error(expr->location, ErrorCode::ParameterPackUsedAsValue,
                     "parameter pack '" + pack->name +
                     "' cannot be assigned, addressed, returned or used as an ordinary value");
-                return AST::Type::make_void();
+                return AST::Type::make_error();
             }
 
             if (std::vector<Symbol>* set = sym_table_.lookup_overloads(expr->identifier)) {
@@ -1592,17 +1760,17 @@ namespace gallt {
 
             auto from_expression = expression_free_identifiers_.find(expr);
             if (from_expression != expression_free_identifiers_.end()) {
-                diag_.report_error_template(expr->location,
+                report_error_template(expr->location,
                     ErrorCode::ExprParameterFreeIdentifierUndefined,
                     { from_expression->second });
             } else if (sym_table_.was_declared(expr->identifier)) {
-                diag_.report_error_template(expr->location,
+                report_error_template(expr->location,
                     ErrorCode::IdentifierNotInScope, { expr->identifier });
             } else {
                 report_error(expr->location, ErrorCode::UndefinedIdentifier,
                     "undefined identifier '" + expr->identifier + "'");
             }
-            return AST::Type::make_void();
+            return AST::Type::make_error();
         }
         case AST::PrimaryExpression::Kind::Parens: {
             if (expr->paren_expr) {
@@ -1617,14 +1785,18 @@ namespace gallt {
             if (!is_complete_type(expr->heap_type) && expr->heap_type.kind != TypeKind::Void) {
                 report_error(expr->location, ErrorCode::HeapFirstArgNotType,
                     "heap() first argument must be a complete type");
-                return AST::Type::make_void();
+                return AST::Type::make_error();
             }
 
             if (expr->heap_size) {
                 AST::Type size_type = check_expression(expr->heap_size.get());
+                if (size_type.is_error()) {
+                    return AST::Type::make_error();
+                }
                 if (!size_type.is_integer()) {
                     report_error(expr->heap_size->location, ErrorCode::HeapSecondArgNotInteger,
                         "heap() second argument must be integer type, got '" + size_type.to_string() + "'");
+                    return AST::Type::make_error();
                 }
                 return AST::Type::make_pointer(std::make_shared<AST::Type>(expr->heap_type));
             } else {
@@ -1634,19 +1806,28 @@ namespace gallt {
         case AST::PrimaryExpression::Kind::Construct:
         case AST::PrimaryExpression::Kind::PlacementConstruct: {
             if (expr->construct_type.kind != TypeKind::Struct) {
-                diag_.report_error_template(expr->location, ErrorCode::SpecialMemberOnNonStruct,
+                report_error_template(expr->location, ErrorCode::SpecialMemberOnNonStruct,
                     { expr->construct_type.to_string() });
-                return AST::Type::make_void();
+                return AST::Type::make_error();
             }
             if (!is_complete_type(expr->construct_type)) {
                 report_error(expr->location, ErrorCode::ExpressionSyntaxError,
                     "construct target type is incomplete");
-                return AST::Type::make_void();
+                return AST::Type::make_error();
             }
 
             for (auto& arg : expr->construct_args) {
                 check_expression(arg.get());
             }
+
+            for (auto& arg : expr->construct_args) {
+                auto found = expression_types_.find(arg.get());
+                if (found != expression_types_.end() && found->second.is_error()) {
+                    return AST::Type::make_error();
+                }
+            }
+
+            bool argument_reported = false;
 
             {
                 std::vector<AST::Type> arg_types;
@@ -1684,6 +1865,7 @@ namespace gallt {
                                 " type '" + arg_types[i].to_string() +
                                 "' does not match parameter type '" +
                                 ctor->param_types[i + 1].to_string() + "'");
+                            argument_reported = true;
                         }
                     }
                 }
@@ -1691,6 +1873,9 @@ namespace gallt {
 
             if (expr->kind == AST::PrimaryExpression::Kind::PlacementConstruct) {
                 AST::Type target_type = check_expression(expr->placement_target.get());
+                if (target_type.is_error()) {
+                    return AST::Type::make_error();
+                }
                 bool invalid = false;
                 if (target_type.kind != TypeKind::Pointer) {
                     invalid = true;
@@ -1715,31 +1900,42 @@ namespace gallt {
                 }
 
                 if (invalid) {
-                    diag_.report_error_template(expr->location,
+                    report_error_template(expr->location,
                         ErrorCode::PlacementTargetInvalid, std::vector<std::string>{});
                 }
+            }
+
+            if (argument_reported) {
+                return AST::Type::make_error();
             }
             return AST::Type::make_pointer(
                 std::make_shared<AST::Type>(expr->construct_type));
         }
         case AST::PrimaryExpression::Kind::CopyMove: {
             AST::Type operand = check_expression(expr->paren_expr.get());
-            return operand;
+            return operand.is_error() ? AST::Type::make_error() : operand;
         }
         case AST::PrimaryExpression::Kind::QualifiedName: {
             report_error(expr->location, ErrorCode::GenericUndefined,
                 expr->generic_ref ? expr->generic_ref->generic_name : std::string());
-            return AST::Type::make_void();
+            return AST::Type::make_error();
         }
+        case AST::PrimaryExpression::Kind::NamespaceQualified:
+            return AST::Type::make_error();
         default:
             report_error(expr->location, ErrorCode::ExpressionSyntaxError,
                 "unknown primary expression kind");
-            return AST::Type::make_void();
+            return AST::Type::make_error();
         }
     }
 
     bool TypeChecker::can_implicit_convert(const AST::Type& from, const AST::Type& to) {
-        if (from == to) { return true; }
+        AST::Type unqualified_from = from;
+        AST::Type unqualified_to = to;
+        unqualified_from.is_const = false;
+        unqualified_to.is_const = false;
+
+        if (unqualified_from == unqualified_to) { return true; }
 
         auto documented_lattice_rank = [](const AST::Type& type) -> int {
             switch (type.kind) {

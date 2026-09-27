@@ -112,9 +112,9 @@ addition namespace sl {
     char to_upper(char c) {
         bool lower = is_lower(c)
         if (lower) {
-            int code = int(c)
+            int code = cast<int>(c)
             int shifted = code - 32
-            return char(shifted)
+            return cast<char>(shifted)
         }
         return c
     }
@@ -122,9 +122,9 @@ addition namespace sl {
     char to_lower(char c) {
         bool upper = is_upper(c)
         if (upper) {
-            int code = int(c)
+            int code = cast<int>(c)
             int shifted = code + 32
-            return char(shifted)
+            return cast<char>(shifted)
         }
         return c
     }
@@ -132,18 +132,18 @@ addition namespace sl {
     int hex_value(char c) {
         bool digit = is_digit(c)
         if (digit) {
-            int code = int(c)
+            int code = cast<int>(c)
             return code - 48
         }
         if (c >= 'a') {
             if (c <= 'f') {
-                int code = int(c)
+                int code = cast<int>(c)
                 return code - 87
             }
         }
         if (c >= 'A') {
             if (c <= 'F') {
-                int code = int(c)
+                int code = cast<int>(c)
                 return code - 55
             }
         }

@@ -709,10 +709,13 @@ namespace gallt {
         if (auto* s = dynamic_cast<const IfStatement*>(stmt)) {
             if (s->is_compile_time) {
                 bool taken = false;
+                const std::size_t condition_errors_before = diag_.error_count();
 
                 if (!eval_compile_time_condition(s->condition.get(), sub, taken)) {
-                    report(s->location, ErrorCode::CompileTimeConditionNotBoolean,
-                        std::vector<std::string>{ expression_text(s->condition.get()) });
+                    if (diag_.error_count() == condition_errors_before) {
+                        report(s->location, ErrorCode::CompileTimeConditionNotBoolean,
+                            std::vector<std::string>{ expression_text(s->condition.get()) });
+                    }
                     return std::make_unique<Block>(s->location,
                         std::vector<std::unique_ptr<Statement>>{});
                 }

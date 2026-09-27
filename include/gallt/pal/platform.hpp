@@ -53,6 +53,8 @@ namespace pal {
     int process_id() noexcept;
     std::string process_id_text();
     bool enable_utf8_console() noexcept;
+    bool standard_input_is_interactive() noexcept;
+    bool standard_input_is_readable() noexcept;
     int exit_success_code() noexcept;
     int exit_failure_code() noexcept;
 

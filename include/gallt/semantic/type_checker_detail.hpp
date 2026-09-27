@@ -33,6 +33,22 @@ namespace gallt {
             return true;
         }
 
+        // Gallt source identifiers are the only names the parser can produce for a
+        // call target. A callee name that is not shaped like one can only be the
+        // residue of a generic instantiation the generic layer already diagnosed.
+        inline bool is_source_identifier_text(std::string_view name) {
+            if (name.empty()) { return false; }
+
+            for (char c : name) {
+                const unsigned char value = static_cast<unsigned char>(c);
+                if (!(std::isalnum(value) || value == '_' || value == '$')) {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
         inline const char* export_conflict_kind_name(SymbolKind kind) {
             switch (kind) {
             case SymbolKind::Variable: return "variable";
@@ -271,6 +287,24 @@ namespace gallt {
             default:
                 break;
             }
+        }
+
+        inline bool type_has_unresolved_generic(const AST::Type& type) {
+            if (type.kind == TypeKind::Error) { return true; }
+            if (type.generic_ref) { return true; }
+            if (type.element_type && type_has_unresolved_generic(*type.element_type)) {
+                return true;
+            }
+            if (type.pointee_type && type_has_unresolved_generic(*type.pointee_type)) {
+                return true;
+            }
+            if (type.return_type && type_has_unresolved_generic(*type.return_type)) {
+                return true;
+            }
+            for (const AST::Type& parameter : type.parameter_types) {
+                if (type_has_unresolved_generic(parameter)) { return true; }
+            }
+            return false;
         }
 
         inline std::string sanitize_identifier(std::string_view text) {

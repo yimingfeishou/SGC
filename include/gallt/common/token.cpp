@@ -39,6 +39,7 @@ namespace gallt {
                 {"emit", TokenType::Keyword_Emit},
                 {"export", TokenType::Keyword_Export},
                 {"const", TokenType::Keyword_Const},
+                {"cast", TokenType::Keyword_Cast},
             };
             return table;
         }
@@ -78,6 +79,7 @@ namespace gallt {
         case TokenType::Keyword_Emit: return "emit";
         case TokenType::Keyword_Export: return "export";
         case TokenType::Keyword_Const: return "const";
+        case TokenType::Keyword_Cast: return "cast";
         case TokenType::Identifier: return "identifier";
         case TokenType::IntegerLiteral: return "integer literal";
         case TokenType::FloatLiteral: return "float literal";

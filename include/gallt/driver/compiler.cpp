@@ -43,6 +43,15 @@ namespace {
         return pal::write_file(pal::to_utf8(path.wstring()), content);
     }
 
+    bool contains_error_type(
+        const std::unordered_map<const AST::Expression*, AST::Type>& types) {
+        for (const auto& entry : types) {
+            if (entry.second.is_error()) { return true; }
+        }
+
+        return false;
+    }
+
     std::string find_llvm_executable(const std::string& tool_name) {
         for (const char* env : { "SGC_LLVM_BIN", "LLVM_BIN" }) {
             std::string dir = pal::environment_variable(env);
@@ -379,6 +388,13 @@ namespace {
         }
 
         if (diag.has_errors()) {
+            diag.report_note(SourceLocation{},
+                "the lexical and syntactic phases completed with " +
+                std::to_string(diag.error_count()) +
+                " error(s); all of their diagnostics were listed above and the "
+                "remaining phases (semantic passes, type checking and code "
+                "generation) were skipped because the parser could not provide a "
+                "healthy AST");
             diag.print_all(std::cerr);
             return pal::exit_failure_code();
         }
@@ -423,32 +439,14 @@ namespace {
         AST::Program combined(fake_start, std::move(all_nodes));
 
         ConditionCompiler conditions(diag);
-
-        if (!conditions.run(&combined) || diag.has_errors()) {
-            diag.print_all(std::cerr);
-            return pal::exit_failure_code();
-        }
-
         NamespaceLowering namespaces(diag);
-
-        if (!namespaces.run(&combined) || diag.has_errors()) {
-            diag.print_all(std::cerr);
-            return pal::exit_failure_code();
-        }
-
         GenericExpander expander(diag);
-
-        if (!expander.expand(&combined) || diag.has_errors()) {
-            diag.print_all(std::cerr);
-            return pal::exit_failure_code();
-        }
-
         LifecycleLowering lifecycle(diag);
 
-        if (!lifecycle.run(&combined) || diag.has_errors()) {
-            diag.print_all(std::cerr);
-            return pal::exit_failure_code();
-        }
+        conditions.run(&combined);
+        namespaces.run(&combined);
+        expander.expand(&combined);
+        lifecycle.run(&combined);
 
         TypeChecker checker(diag, expander.expression_free_identifiers(),
             expander.expression_argument_casts(), emit_entry_point);
@@ -463,7 +461,27 @@ namespace {
             checker.set_expression_call_sites(call_sites);
         }
 
-        if (!checker.check_program(&combined)) {
+        checker.check_program(&combined);
+
+        if (diag.has_errors()) {
+            diag.report_note(SourceLocation{},
+                "the semantic passes and type checking completed with " +
+                std::to_string(diag.error_count()) +
+                " error(s); all of their diagnostics were listed above and "
+                "downstream code generation was skipped because the semantic "
+                "layer could not provide a healthy AST");
+            diag.print_all(std::cerr);
+            return pal::exit_failure_code();
+        }
+
+        // Health-region contract: the sticky Error type is stage-local and must
+        // never reach code generation. Any Error type implies a diagnostic was
+        // already reported, so it is checked again here instead of being trusted.
+        if (contains_error_type(checker.expression_types())) {
+            diag.report_note(SourceLocation{},
+                "the type checker left an unresolved error type without a matching "
+                "diagnostic; downstream code generation was skipped because the "
+                "semantic layer could not provide a healthy AST");
             diag.print_all(std::cerr);
             return pal::exit_failure_code();
         }
@@ -475,6 +493,12 @@ namespace {
         generator.generate();
 
         if (diag.has_errors()) {
+            diag.report_note(SourceLocation{},
+                "code generation completed with " +
+                std::to_string(diag.error_count()) +
+                " error(s); all of its diagnostics were listed above and the "
+                "remaining steps (artifact emission and linking) were skipped, so "
+                "no output artifact was produced");
             diag.print_all(std::cerr);
             return pal::exit_failure_code();
         }

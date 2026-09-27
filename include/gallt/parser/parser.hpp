@@ -60,6 +60,7 @@ namespace gallt {
         int expression_depth_ = 0;
         std::size_t expression_tokens_ = 0;
         bool complexity_limit_hit_ = false;
+        std::size_t suppressed_error_count_ = 0;
         int block_depth_ = 0;
         int initializer_depth_ = 0;
 
@@ -81,7 +82,9 @@ namespace gallt {
 
         void skip_newlines();
 
-        void synchronize();
+        bool synchronize();
+
+        void finalize_complexity_limit();
 
         std::unique_ptr<AST::TopLevel> parse_top_level();
         std::unique_ptr<AST::GuideStatement> parse_guide_statement();
@@ -122,6 +125,7 @@ namespace gallt {
         std::unique_ptr<AST::Expression> parse_property_argument();
         bool check_identifier_name(std::string& out, const char* context);
         std::unique_ptr<AST::TopLevel> parse_generic_definition();
+        void skip_generic_definition_tail();
         bool generic_param_list_is_primary_shaped() const;
         std::vector<AST::GenericArgument> parse_generic_arguments();
         AST::GenericRef parse_generic_reference(std::string_view name);
@@ -182,10 +186,16 @@ namespace gallt {
         std::unique_ptr<AST::Expression> parse_postfix_expression();
         std::unique_ptr<AST::Expression> parse_primary_expression();
 
+        std::unique_ptr<AST::Expression> reject_legacy_type_conversion(
+            SourceLocation loc);
+
+        bool parse_cast_target_type(AST::Type& out, bool allow_void);
+
         std::unique_ptr<AST::Expression> parse_postfix_operator(
             std::unique_ptr<AST::Expression> base);
 
         bool looks_like_pointer_type_cast() const;
+        bool looks_like_qualified_pointer_type_cast() const;
         bool cast_type_has_function_pointer_suffix() const;
         bool declaration_name_after_star_suffix(std::size_t index) const;
         bool declaration_name_after_pointer_suffix(std::size_t index) const;

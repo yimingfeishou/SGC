@@ -5,7 +5,9 @@
 #include <cerrno>
 #include <cstdlib>
 #include <fstream>
+#include <poll.h>
 #include <sstream>
+#include <sys/stat.h>
 #include <thread>
 #include <unistd.h>
 
@@ -138,6 +140,33 @@ namespace pal {
     }
 
     bool enable_utf8_console() noexcept { return true; }
+
+    bool standard_input_is_interactive() noexcept {
+        return ::isatty(STDIN_FILENO) == 1;
+    }
+
+    bool standard_input_is_readable() noexcept {
+        struct stat info = {};
+
+        if (::fstat(STDIN_FILENO, &info) != 0) {
+            return false;
+        }
+
+        if (S_ISREG(info.st_mode)) {
+            const off_t position = ::lseek(STDIN_FILENO, 0, SEEK_CUR);
+
+            if (position < 0) {
+                return false;
+            }
+
+            return info.st_size > position;
+        }
+
+        struct pollfd descriptor = {};
+        descriptor.fd = STDIN_FILENO;
+        descriptor.events = POLLIN;
+        return ::poll(&descriptor, 1, 0) == 1;
+    }
 
     int exit_success_code() noexcept { return 0; }
 

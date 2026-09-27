@@ -1,4 +1,5 @@
 #include "generic_expander.hpp"
+#include "diagnosed_registry.hpp"
 #include "generic_expander_detail.hpp"
 #include "constant_folding.hpp"
 #include "../lexer/lexer.hpp"
@@ -17,6 +18,16 @@ namespace gallt {
 
     GenericExpander::GenericExpander(DiagnosticEngine& diag) : diag_(diag) {}
 
+    GenericExpander::PoisonGuard::PoisonGuard(GenericExpander& pass,
+        const AST::Node* node)
+        : pass_(pass), node_(node), errors_(pass.diag_.error_count()) {}
+
+    GenericExpander::PoisonGuard::~PoisonGuard() {
+        if (node_ != nullptr && pass_.diag_.error_count() != errors_) {
+            pass_.poison_node(node_);
+        }
+    }
+
     std::string GenericExpander::signature_text(const std::vector<AST::Type>& types) {
         std::string out;
 
@@ -30,12 +41,22 @@ namespace gallt {
 
     void GenericExpander::report(SourceLocation loc, ErrorCode code,
         const std::vector<std::string>& values) {
-        diag_.report_error_template(loc, code, values);
+        if (!diagnosed_registry::reported_by_earlier_stage(diag_, loc,
+            SemanticStage::Generics)) {
+            diag_.report_error_template(loc, code, values);
+        }
+
+        diagnosed_registry::record(diag_, loc, SemanticStage::Generics);
         had_error_ = true;
     }
 
     void GenericExpander::report(SourceLocation loc, ErrorCode code, const std::string& message) {
-        diag_.report_error(loc, code, message);
+        if (!diagnosed_registry::reported_by_earlier_stage(diag_, loc,
+            SemanticStage::Generics)) {
+            diag_.report_error(loc, code, message);
+        }
+
+        diagnosed_registry::record(diag_, loc, SemanticStage::Generics);
         had_error_ = true;
     }
 
@@ -1103,8 +1124,12 @@ namespace gallt {
 
                 bool condition = false;
 
+                const std::size_t condition_errors_before = diag_.error_count();
+
                 if (!eval_compile_time_condition(ifs->condition.get(), sub, condition)) {
-                    report(ifs->location, ErrorCode::CompileTimeConditionNotBoolean, std::vector<std::string>{ expression_text(ifs->condition.get()) });
+                    if (diag_.error_count() == condition_errors_before) {
+                        report(ifs->location, ErrorCode::CompileTimeConditionNotBoolean, std::vector<std::string>{ expression_text(ifs->condition.get()) });
+                    }
                     return false;
                 }
 
@@ -1134,6 +1159,9 @@ namespace gallt {
 
     void GenericExpander::expand_initializer(Initializer* init) {
         if (init == nullptr) { return; }
+        if (poisoned_node(init)) { return; }
+        PoisonGuard guard(*this, init);
+
         if (auto* e = dynamic_cast<ExpressionInitializer*>(init)) {
             expand_expression(e->expr);
         } else if (auto* a = dynamic_cast<ArrayInitializer*>(init)) {
@@ -1143,6 +1171,8 @@ namespace gallt {
 
     void GenericExpander::expand_statement(Statement* stmt) {
         if (stmt == nullptr) { return; }
+        if (poisoned_node(stmt)) { return; }
+        PoisonGuard guard(*this, stmt);
 
         if (auto* block = dynamic_cast<Block*>(stmt)) {
             push_scope();
@@ -1252,6 +1282,10 @@ namespace gallt {
     }
 
     void GenericExpander::expand_top_level(TopLevel* node) {
+        if (node == nullptr) { return; }
+        if (poisoned_node(node)) { return; }
+        PoisonGuard guard(*this, node);
+
         if (dynamic_cast<GenericDefinition*>(node) != nullptr) {
             return;
         }
@@ -1326,6 +1360,7 @@ namespace gallt {
         if (program == nullptr) { return false; }
         program_ = program;
         had_error_ = false;
+        poisoned_.clear();
         push_scope();
         collect_declarations();
         collect_generics();

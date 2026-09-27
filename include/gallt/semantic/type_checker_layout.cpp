@@ -1,5 +1,7 @@
 #include "../semantic/type_checker.hpp"
+#include "../semantic/diagnosed_registry.hpp"
 #include "type_checker_detail.hpp"
+#include "expression_parameter_names.hpp"
 #include "../parser/ast.hpp"
 #include "../semantic/constant_folding.hpp"
 #include <algorithm>
@@ -133,6 +135,8 @@ namespace gallt {
 
             return round_up(offset, alignment);
         }
+        case TypeKind::Error:
+            return 0;
         }
         return 0;
     }
@@ -181,6 +185,8 @@ namespace gallt {
 
             return alignment;
         }
+        case TypeKind::Error:
+            return 1;
         }
         return 1;
     }
@@ -229,6 +235,7 @@ namespace gallt {
 
     bool TypeChecker::is_complete_type(const AST::Type& type) {
         if (type.kind == TypeKind::Void) { return true; }
+        if (type_has_unresolved_generic(type)) { return true; }
         if (type.kind == TypeKind::Int || type.kind == TypeKind::Lint ||
             type.kind == TypeKind::Uint || type.kind == TypeKind::Luint ||
             type.kind == TypeKind::Float ||
@@ -583,7 +590,7 @@ namespace gallt {
     void TypeChecker::check_const_declaration(AST::VariableDeclaration* decl) {
         const std::string& name = decl->name;
         if (decl->initializer == nullptr) {
-            diag_.report_error_template(decl->location,
+            report_error_template(decl->location,
                 ErrorCode::ConstCannotStoreVariable, { name });
             return;
         }
@@ -597,13 +604,13 @@ namespace gallt {
                 if (init == nullptr) { return; }
                 if (auto* expr_init = dynamic_cast<AST::ExpressionInitializer*>(init)) {
                     if (expression_mentions_variadic_pack(expr_init->expr.get())) {
-                        diag_.report_error_template(init->location,
+                        report_error_template(init->location,
                         ErrorCode::ParameterPackInConstantExpression, { name });
                         return;
                     }
 
                     if (!is_compile_time_constant_expression(expr_init->expr.get())) {
-                        diag_.report_error_template(init->location,
+                        report_error_template(init->location,
                             ErrorCode::ConstCannotStoreVariable, { name });
                     }
 
@@ -722,7 +729,7 @@ namespace gallt {
         const auto* prim = dynamic_cast<const AST::PrimaryExpression*>(
             expr_init->expr.get());
         return prim != nullptr && prim->kind == AST::PrimaryExpression::Kind::Identifier &&
-            prim->identifier.rfind("__glt_expr", 0) == 0;
+            expression_parameter_names::is_generated_name(prim->identifier);
     }
 
     bool TypeChecker::is_move_expression(const AST::Expression* expr) {

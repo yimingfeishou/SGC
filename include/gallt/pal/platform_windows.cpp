@@ -138,6 +138,56 @@ namespace pal {
         return ok;
     }
 
+    bool standard_input_is_interactive() noexcept {
+        HANDLE handle = ::GetStdHandle(STD_INPUT_HANDLE);
+
+        if (handle == nullptr || handle == INVALID_HANDLE_VALUE) {
+            return false;
+        }
+
+        DWORD mode = 0;
+        return ::GetConsoleMode(handle, &mode) != FALSE;
+    }
+
+    bool standard_input_is_readable() noexcept {
+        HANDLE handle = ::GetStdHandle(STD_INPUT_HANDLE);
+
+        if (handle == nullptr || handle == INVALID_HANDLE_VALUE) {
+            return false;
+        }
+
+        switch (::GetFileType(handle)) {
+        case FILE_TYPE_DISK: {
+            LARGE_INTEGER size = {};
+            LARGE_INTEGER position = {};
+
+            if (::GetFileSizeEx(handle, &size) == FALSE) {
+                return false;
+            }
+
+            position.QuadPart = 0;
+
+            if (::SetFilePointerEx(handle, position, &position, FILE_CURRENT) == FALSE) {
+                return false;
+            }
+
+            return size.QuadPart > position.QuadPart;
+        }
+        case FILE_TYPE_PIPE: {
+            DWORD available = 0;
+
+            if (::PeekNamedPipe(handle, nullptr, 0, nullptr, &available,
+                nullptr) == FALSE) {
+                return false;
+            }
+
+            return available > 0;
+        }
+        default:
+            return false;
+        }
+    }
+
     int exit_success_code() noexcept { return 0; }
 
     int exit_failure_code() noexcept { return 1; }

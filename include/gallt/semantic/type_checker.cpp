@@ -1,4 +1,5 @@
 #include "../semantic/type_checker.hpp"
+#include "../semantic/diagnosed_registry.hpp"
 #include "type_checker_detail.hpp"
 #include "../parser/ast.hpp"
 #include "../semantic/constant_folding.hpp"
@@ -137,14 +138,17 @@ namespace gallt {
         } else if (auto* empty = dynamic_cast<AST::EmptyStatement*>(stmt)) {
         } else if (auto* destruct_stmt = dynamic_cast<AST::DestructStatement*>(stmt)) {
             AST::Type target_type = check_expression(destruct_stmt->target.get());
-            if (target_type.kind != TypeKind::Pointer) {
-                report_error(destruct_stmt->location, ErrorCode::FreeNonPointer,
-                    "destruct requires a pointer, got '" + target_type.to_string() + "'");
-            } else if (!is_null_literal_expr(destruct_stmt->target.get()) &&
-               (!target_type.pointee_type ||
-               target_type.pointee_type->kind != TypeKind::Struct)) {
-                diag_.report_error_template(destruct_stmt->location,
-                    ErrorCode::DestructNonConstructed, std::vector<std::string>{});
+
+            if (!target_type.is_error()) {
+                if (target_type.kind != TypeKind::Pointer) {
+                    report_error(destruct_stmt->location, ErrorCode::FreeNonPointer,
+                        "destruct requires a pointer, got '" + target_type.to_string() + "'");
+                } else if (!is_null_literal_expr(destruct_stmt->target.get()) &&
+                   (!target_type.pointee_type ||
+                   target_type.pointee_type->kind != TypeKind::Struct)) {
+                    report_error_template(destruct_stmt->location,
+                        ErrorCode::DestructNonConstructed, std::vector<std::string>{});
+                }
             }
         } else if (auto* struct_def = dynamic_cast<AST::StructDefinition*>(stmt)) {
             if (struct_defs_.find(struct_def->name) != struct_defs_.end()) {
@@ -206,12 +210,27 @@ namespace gallt {
     }
 
     void TypeChecker::report_error(SourceLocation loc, ErrorCode code, const std::string& msg) {
-        diag_.report_error(loc, code, msg);
+        if (!diagnosed_registry::reported_by_earlier_stage(diag_, loc,
+            SemanticStage::TypeCheck)) {
+            diag_.report_error(loc, code, msg);
+        }
+
+        diagnosed_registry::record(diag_, loc, SemanticStage::TypeCheck);
     }
 
     void TypeChecker::report_error(ErrorCode code, const std::string& msg) {
         SourceLocation loc = current_function_ ? current_function_->location : SourceLocation{};
-        diag_.report_error(loc, code, msg);
+        report_error(loc, code, msg);
+    }
+
+    void TypeChecker::report_error_template(SourceLocation loc, ErrorCode code,
+        const std::vector<std::string>& values) {
+        if (!diagnosed_registry::reported_by_earlier_stage(diag_, loc,
+            SemanticStage::TypeCheck)) {
+            diag_.report_error_template(loc, code, values);
+        }
+
+        diagnosed_registry::record(diag_, loc, SemanticStage::TypeCheck);
     }
 
     void TypeChecker::report_warning(SourceLocation loc, ErrorCode code, const std::string& msg) {
