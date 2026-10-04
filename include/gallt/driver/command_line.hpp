@@ -1,6 +1,8 @@
 #ifndef GALLT_DRIVER_COMMAND_LINE_HPP
 #define GALLT_DRIVER_COMMAND_LINE_HPP
 
+#include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -19,6 +21,11 @@ namespace gallt {
         DynamicLibrary,
     };
 
+    enum class LinkerMode {
+        Dynamic,
+        Static,
+    };
+
     OutputKind classify_output_path(const std::string& path);
 
     struct CommandOptions {
@@ -31,6 +38,10 @@ namespace gallt {
         bool release_mode = false;
         bool no_runtime = false;
         bool gallt_abi = false;
+        std::optional<std::uint64_t> stack_size;
+        std::optional<std::uint64_t> commit_size;
+        std::optional<std::uint64_t> instantiation_depth;
+        LinkerMode linker_mode = LinkerMode::Dynamic;
         bool optimization_level_explicit = false;
         bool debug_symbols_explicit = false;
         bool debug_mode_explicit = false;

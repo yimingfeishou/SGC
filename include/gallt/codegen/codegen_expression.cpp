@@ -225,18 +225,11 @@ namespace gallt {
                 } else {
                     std::string result = new_temp("cmpd");
                     std::string type_text2 = llvm_type(left.type);
-                    const bool integer_compound_new =
-                        assign->op == AST::AssignmentExpression::Operator::AndAssign ||
-                        assign->op == AST::AssignmentExpression::Operator::OrAssign ||
-                        assign->op == AST::AssignmentExpression::Operator::XorAssign ||
-                        assign->op == AST::AssignmentExpression::Operator::ShiftLeftAssign ||
-                        assign->op == AST::AssignmentExpression::Operator::ShiftRightAssign;
                     AST::Type op_type = left.type;
 
-                    if (left.type.is_integer()) {
-                        if (!integer_compound_new || left.type.integer_bit_width() <= 8) {
-                            op_type = Type::make_int();
-                        }
+                    if (left.type.is_integer() &&
+                        left.type.integer_bit_width() <= 8) {
+                        op_type = Type::make_int();
                     }
 
                     std::string lv = convert_value(old_value, left.type, op_type);
@@ -322,6 +315,7 @@ namespace gallt {
             std::string rhs_i1 = truth_condition(right.value, right.type);
             std::string rhs_i8 = new_temp("or_rhs");
             emit_line(rhs_i8 + " = zext i1 " + rhs_i1 + " to i8");
+            std::string rhs_block = current_label_.empty() ? eval_label : current_label_;
             emit_line("br label %" + end_label);
 
             start_block(true_label);
@@ -332,7 +326,7 @@ namespace gallt {
             result.type = Type::make_bool();
             result.value = new_temp("or_result");
             emit_line(result.value + " = phi i8 [ 1, %" + true_label +
-                " ], [ " + rhs_i8 + ", %" + eval_label + " ]");
+                " ], [ " + rhs_i8 + ", %" + rhs_block + " ]");
             return result;
         }
 
@@ -350,6 +344,7 @@ namespace gallt {
             std::string rhs_i1 = truth_condition(right.value, right.type);
             std::string rhs_i8 = new_temp("and_rhs");
             emit_line(rhs_i8 + " = zext i1 " + rhs_i1 + " to i8");
+            std::string rhs_block = current_label_.empty() ? eval_label : current_label_;
             emit_line("br label %" + end_label);
 
             start_block(false_label);
@@ -360,7 +355,7 @@ namespace gallt {
             result.type = Type::make_bool();
             result.value = new_temp("and_result");
             emit_line(result.value + " = phi i8 [ 0, %" + false_label +
-                " ], [ " + rhs_i8 + ", %" + eval_label + " ]");
+                " ], [ " + rhs_i8 + ", %" + rhs_block + " ]");
             return result;
         }
 
@@ -1164,10 +1159,6 @@ namespace gallt {
                     for (auto& arg : expr->construct_args) { ctor_args.push_back(arg.get()); }
                     collect_constructor_defaults(ctor_name, ctor_args);
 
-                    // The lowered constructor takes aggregate parameters (struct and
-                    // string) by pointer, exactly like an ordinary call, so the
-                    // construction site must use the same convention instead of
-                    // passing those arguments by value.
                     AST::FunctionDefinition* ctor_def = nullptr;
 
                     if (auto found = function_by_name_.find(ctor_name);
@@ -1181,7 +1172,6 @@ namespace gallt {
                     for (std::size_t i = 0; i < ctor_args.size(); ++i) {
                         ExprValue value = gen_expr(ctor_args[i]);
                         AST::Type want = value.type;
-                        // Lowered special members receive the object pointer first.
                         const std::size_t parameter_index = i + 1;
 
                         if (ctor_def != nullptr &&
@@ -1204,8 +1194,6 @@ namespace gallt {
                     call_text += ")";
                     emit_line(call_text);
 
-                    // Argument temporaries outlive the call: the constructor reads
-                    // them while it copies its parameters into the object.
                     for (const std::string& owned : owned_ctor_args) {
                         emit_line("call void @gallt_string_destroy(ptr " + owned + ")");
                     }
@@ -1839,46 +1827,21 @@ namespace gallt {
             bool c_variadic_callee = false;
 
             if (!direct_name.empty()) {
-                if (direct_name == "main") {
-                    callee = "@main";
-                } else {
-                    if (AST::PrimaryExpression* callee_node =
-                        dynamic_cast<AST::PrimaryExpression*>(expr->base.get())) {
-                        auto resolved = resolved_functions_.find(callee_node);
-                        if (resolved != resolved_functions_.end() && resolved->second != nullptr) {
-                            const AST::FunctionDefinition* f = resolved->second;
-                            callee = source_function_symbol(f->name);
-                            params = f->parameters;
-                            variadic_callee = f->is_variadic;
-                            func_type = AST::Type::make_function(
-                                std::make_shared<AST::Type>(f->return_type), params);
-                        } else {
-                            auto resolved_ext = resolved_externs_.find(callee_node);
-                            if (resolved_ext != resolved_externs_.end() &&
-                                resolved_ext->second != nullptr) {
-                                const AST::ExternDeclaration* e = resolved_ext->second;
-                                callee = "@" + extern_ir_symbol(e);
-                                params = e->parameters;
-                                c_variadic_callee = e->c_variadic;
-                                func_type = AST::Type::make_function(
-                                    std::make_shared<AST::Type>(e->return_type), params);
-                            }
-                        }
-                    }
-                    if (!callee.empty()) {
-                    } else {
-                    auto fit = function_by_name_.find(direct_name);
-                    if (fit != function_by_name_.end()) {
-                        AST::FunctionDefinition* f = fit->second;
+                if (AST::PrimaryExpression* callee_node =
+                    dynamic_cast<AST::PrimaryExpression*>(expr->base.get())) {
+                    auto resolved = resolved_functions_.find(callee_node);
+                    if (resolved != resolved_functions_.end() && resolved->second != nullptr) {
+                        const AST::FunctionDefinition* f = resolved->second;
                         callee = source_function_symbol(f->name);
                         params = f->parameters;
                         variadic_callee = f->is_variadic;
                         func_type = AST::Type::make_function(
                             std::make_shared<AST::Type>(f->return_type), params);
                     } else {
-                        auto eit = extern_by_name_.find(direct_name);
-                        if (eit != extern_by_name_.end()) {
-                            AST::ExternDeclaration* e = eit->second;
+                        auto resolved_ext = resolved_externs_.find(callee_node);
+                        if (resolved_ext != resolved_externs_.end() &&
+                            resolved_ext->second != nullptr) {
+                            const AST::ExternDeclaration* e = resolved_ext->second;
                             callee = "@" + extern_ir_symbol(e);
                             params = e->parameters;
                             c_variadic_callee = e->c_variadic;
@@ -1886,26 +1849,47 @@ namespace gallt {
                                 std::make_shared<AST::Type>(e->return_type), params);
                         }
                     }
+                }
+                if (!callee.empty()) {
+                } else {
+                auto fit = function_by_name_.find(direct_name);
+                if (fit != function_by_name_.end()) {
+                    AST::FunctionDefinition* f = fit->second;
+                    callee = source_function_symbol(f->name);
+                    params = f->parameters;
+                    variadic_callee = f->is_variadic;
+                    func_type = AST::Type::make_function(
+                        std::make_shared<AST::Type>(f->return_type), params);
+                } else {
+                    auto eit = extern_by_name_.find(direct_name);
+                    if (eit != extern_by_name_.end()) {
+                        AST::ExternDeclaration* e = eit->second;
+                        callee = "@" + extern_ir_symbol(e);
+                        params = e->parameters;
+                        c_variadic_callee = e->c_variadic;
+                        func_type = AST::Type::make_function(
+                            std::make_shared<AST::Type>(e->return_type), params);
                     }
+                }
+                }
 
-                    if (callee.empty()) {
-                        direct_name.clear();
-                        ExprValue base = gen_expr(expr->base.get());
-                        if (base.type.kind == TypeKind::Function) {
-                            func_type = base.type;
-                        } else if (base.type.kind == TypeKind::Pointer &&
-                            base.type.pointee_type &&
-                            base.type.pointee_type->kind == TypeKind::Function) {
-                            func_type = *base.type.pointee_type;
-                        }
-                        variadic_callee = func_type.is_variadic &&
-                            func_type.variadic_element_type != nullptr;
-                        params = func_type.parameter_types;
-                        if (variadic_callee) {
-                            params.push_back(*func_type.variadic_element_type);
-                        }
-                        callee = base.value;
+                if (callee.empty()) {
+                    direct_name.clear();
+                    ExprValue base = gen_expr(expr->base.get());
+                    if (base.type.kind == TypeKind::Function) {
+                        func_type = base.type;
+                    } else if (base.type.kind == TypeKind::Pointer &&
+                        base.type.pointee_type &&
+                        base.type.pointee_type->kind == TypeKind::Function) {
+                        func_type = *base.type.pointee_type;
                     }
+                    variadic_callee = func_type.is_variadic &&
+                        func_type.variadic_element_type != nullptr;
+                    params = func_type.parameter_types;
+                    if (variadic_callee) {
+                        params.push_back(*func_type.variadic_element_type);
+                    }
+                    callee = base.value;
                 }
             } else {
                 ExprValue base = gen_expr(expr->base.get());

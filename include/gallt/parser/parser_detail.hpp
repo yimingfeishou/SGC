@@ -44,6 +44,10 @@ namespace gallt {
         }
 
         inline std::string unquote_string(std::string_view lexeme) {
+            if (is_literal_string_lexeme(lexeme)) {
+                return std::string(literal_string_content(lexeme));
+            }
+
             if (lexeme.size() >= 2 && lexeme.front() == '"' && lexeme.back() == '"') {
                 lexeme.remove_prefix(1);
                 lexeme.remove_suffix(1);
@@ -147,7 +151,15 @@ namespace gallt {
 
             if (auto* call = dynamic_cast<const PostfixExpression*>(expr)) {
                 if (call->op == PostfixExpression::Operator::FunctionCall) {
-                    return compile_time_expr_text(call->base.get()) + "(...)";
+                    std::string text = compile_time_expr_text(call->base.get()) + "(";
+
+                    for (std::size_t i = 0; i < call->arguments.size(); ++i) {
+                        if (i != 0) { text += ", "; }
+                        text += compile_time_expr_text(call->arguments[i].get());
+                    }
+
+                    text += ")";
+                    return text;
                 }
 
                 if (call->op == PostfixExpression::Operator::Cast) {

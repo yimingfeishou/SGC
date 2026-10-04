@@ -165,6 +165,7 @@ namespace gallt {
         }
 
         bool ok = false;
+        bool operator_mismatch_reported = false;
         if (expr->op == AST::AssignmentExpression::Operator::Assign) {
             ok = can_implicit_convert(right_type, left_type);
             if (!ok && left_type.kind == TypeKind::File) {
@@ -176,15 +177,14 @@ namespace gallt {
             expr->op == AST::AssignmentExpression::Operator::MinusAssign) {
             if (is_numeric_type(left_type) && is_numeric_type(right_type)) {
                 ok = can_implicit_convert(right_type, left_type);
+            } else if (left_type.kind == TypeKind::Pointer && right_type.is_integer()) {
+                ok = true;
             } else {
-                if (left_type.kind == TypeKind::Pointer && right_type.is_integer()) {
-                    ok = true;
-                } else {
-                    report_error(expr->location, ErrorCode::BinaryOperatorTypeMismatch,
-                        "operator '" + std::string(expr->op == AST::AssignmentExpression::Operator::PlusAssign ? "+=" : "-=") +
-                        "' requires arithmetic types or pointer and integer");
-                    ok = false;
-                }
+                report_error(expr->location, ErrorCode::BinaryOperatorTypeMismatch,
+                    "operator '" + std::string(expr->op == AST::AssignmentExpression::Operator::PlusAssign ? "+=" : "-=") +
+                    "' requires arithmetic types or pointer and integer, got '" +
+                    left_type.to_string() + "' and '" + right_type.to_string() + "'");
+                operator_mismatch_reported = true;
             }
         } else if (expr->op == AST::AssignmentExpression::Operator::AndAssign ||
             expr->op == AST::AssignmentExpression::Operator::OrAssign ||
@@ -207,21 +207,23 @@ namespace gallt {
                     "operator '" + std::string(compound_text) +
                     "' requires integer types, got '" + left_type.to_string() +
                     "' and '" + right_type.to_string() + "'");
-                ok = false;
+                operator_mismatch_reported = true;
             }
         }
 
         if (!ok && !const_address_assignment) {
-            auto* target = dynamic_cast<AST::PrimaryExpression*>(expr->left.get());
-            if (target != nullptr && target->kind == AST::PrimaryExpression::Kind::Identifier &&
-                expression_parameter_names::has_temporary_prefix(target->identifier)) {
-                report_error_template(expr->location,
-                    ErrorCode::ExprParameterBlockReturnTypeMismatch,
-                    { left_type.to_string(), right_type.to_string() });
-            } else {
-                report_error(expr->location, ErrorCode::AssignmentTypeMismatch,
-                    "cannot assign type '" + right_type.to_string() +
-                    "' to type '" + left_type.to_string() + "'");
+            if (!operator_mismatch_reported) {
+                auto* target = dynamic_cast<AST::PrimaryExpression*>(expr->left.get());
+                if (target != nullptr && target->kind == AST::PrimaryExpression::Kind::Identifier &&
+                    expression_parameter_names::has_temporary_prefix(target->identifier)) {
+                    report_error_template(expr->location,
+                        ErrorCode::ExprParameterBlockReturnTypeMismatch,
+                        { left_type.to_string(), right_type.to_string() });
+                } else {
+                    report_error(expr->location, ErrorCode::AssignmentTypeMismatch,
+                        "cannot assign type '" + right_type.to_string() +
+                        "' to type '" + left_type.to_string() + "'");
+                }
             }
             return AST::Type::make_error();
         }
@@ -637,7 +639,8 @@ namespace gallt {
                             chosen = select_overload_by_target_type(*set, *expected_type_,
                                 prim->identifier, expr->location);
                         } else {
-                            report_error(expr->location, ErrorCode::OverloadAmbiguous,
+                            report_error_template(expr->location,
+                                ErrorCode::OverloadAmbiguous,
                                 { prim->identifier });
                         }
                         if (chosen == nullptr) {
@@ -810,10 +813,6 @@ namespace gallt {
                         sym_table_.lookup(callee_name) != nullptr;
                     if (!declared) {
                         if (!is_source_identifier_text(callee_name)) {
-                            // The callee name is the residue of a generic
-                            // instantiation (for example 'Box<int>.get') that the
-                            // generic layer already diagnosed; reporting an
-                            // undefined function here would only repeat it.
                             for (auto& arg : expr->arguments) {
                                 check_expression(arg.get());
                             }
@@ -914,6 +913,7 @@ namespace gallt {
                 if (set != nullptr && set->size() > 1) {
                     Symbol* chosen = resolve_overload_call(func_name, expr, direct_primary);
                     if (chosen == nullptr) { return AST::Type::make_error(); }
+                    check_constexpr_call(expr, *chosen);
                     return chosen->type;
                 }
             }
@@ -1298,6 +1298,9 @@ namespace gallt {
             }
 
             if (func_type.return_type) {
+                if (callee_symbol != nullptr) {
+                    check_constexpr_call(expr, *callee_symbol);
+                }
                 return *func_type.return_type;
             }
             return AST::Type::make_void();

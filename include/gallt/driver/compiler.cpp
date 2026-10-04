@@ -12,6 +12,7 @@
 #include "../semantic/lifecycle.hpp"
 #include "../semantic/namespace_lowering.hpp"
 #include "../semantic/type_checker.hpp"
+#include <algorithm>
 #include <filesystem>
 #include <functional>
 #include <fstream>
@@ -52,36 +53,6 @@ namespace {
         return false;
     }
 
-    std::string find_llvm_executable(const std::string& tool_name) {
-        for (const char* env : { "SGC_LLVM_BIN", "LLVM_BIN" }) {
-            std::string dir = pal::environment_variable(env);
-            if (dir.empty()) { continue; }
-            std::string candidate = pal::join_path(dir, tool_name);
-            if (pal::file_exists(candidate)) { return candidate; }
-        }
-
-        std::string module_path = pal::executable_path();
-
-        if (!module_path.empty()) {
-            std::string candidate = pal::join_path(pal::parent_path(module_path),
-                tool_name);
-            if (pal::file_exists(candidate)) { return candidate; }
-        }
-
-        const char* candidates[] = {
-            "C:/LLVM/build/Release/bin",
-            "D:/LLVM/build/Release/bin",
-            "E:/LLVM/build/Release/bin",
-        };
-
-        for (const char* dir : candidates) {
-            std::string candidate = pal::join_path(dir, tool_name);
-            if (pal::file_exists(candidate)) { return candidate; }
-        }
-
-        return tool_name;
-    }
-
     struct LoadedSource {
         std::shared_ptr<std::string> source;
         std::shared_ptr<std::string> name;
@@ -100,15 +71,21 @@ namespace {
 
         auto source = std::make_shared<std::string>(std::move(*bytes));
         auto name = std::make_shared<std::string>(pal::to_utf8(path.wstring()));
-        std::string_view source_view(*source);
+
+        std::vector<LineSplice> splices;
+        auto spliced = std::make_shared<std::string>(
+            splice_line_continuations(*source, splices));
+
+        std::string_view source_view(*spliced);
         std::string_view name_view(*name);
-        Lexer lexer(source_view, name_view, diag);
+        Lexer lexer(source_view, name_view, diag,
+            splices.empty() ? nullptr : &splices);
         Parser parser(lexer, diag);
 
         if (generic_names != nullptr) {
             parser.seed_generic_names(*generic_names);
         }
-        out.source = source;
+        out.source = spliced;
         out.name = name;
         out.program = parser.parse();
 
@@ -155,16 +132,6 @@ namespace {
         return text;
     }
 
-    void append_runtime_debug_flags(std::vector<std::string>& args,
-        int debug_symbols_level) {
-        if (debug_symbols_level == 1) {
-            args.push_back("-gline-tables-only");
-        } else if (debug_symbols_level >= 2) {
-            args.push_back("-gcodeview");
-            args.push_back("-g");
-        }
-    }
-
     std::string acquire_runtime_object(const std::string& clang_path,
         const std::string& temp_dir, const std::string& runtime_c_path,
         const std::string& runtime_source, const std::string& optimization_flag,
@@ -186,7 +153,7 @@ namespace {
         }
 
         const std::string staging = pal::join_path(temp_dir,
-            unique + "_runtime.obj");
+            unique + "_runtime" + pal::object_file_extension());
         std::vector<std::string> args = {
             std::string("--target=") + pal::target_triple(),
             optimization_flag,
@@ -197,7 +164,9 @@ namespace {
             runtime_c_path,
             "-o", staging,
         };
-        append_runtime_debug_flags(args, debug_symbols_level);
+        const std::vector<std::string> debug_arguments =
+            pal::compile_debug_arguments(debug_symbols_level);
+        args.insert(args.end(), debug_arguments.begin(), debug_arguments.end());
         std::string output;
 
         if (pal::run_process(clang_path, args, &output) != 0) {
@@ -221,7 +190,10 @@ namespace {
         name_pool.push_back(std::make_shared<std::string>(
             pal::to_utf8(path.wstring())));
         DiagnosticEngine scratch;
-        Lexer lexer(*bytes, *name_pool.back(), scratch);
+        std::vector<LineSplice> splices;
+        std::string spliced = splice_line_continuations(*bytes, splices);
+        Lexer lexer(spliced, *name_pool.back(), scratch,
+            splices.empty() ? nullptr : &splices);
 
         for (;;) {
             Token token = lexer.next_token();
@@ -321,11 +293,13 @@ namespace {
         }
 
         std::string output_path = options.output.empty()
-            ? pal::replace_extension(options.input, "exe")
+            ? pal::replace_extension(options.input,
+                pal::default_executable_extension())
             : options.output;
 
-        if (pal::extension(output_path).empty()) {
-            output_path += ".exe";
+        if (pal::extension(output_path).empty() &&
+            pal::default_executable_extension()[0] != '\0') {
+            output_path += pal::default_executable_extension();
         }
 
         const OutputKind output_kind = classify_output_path(output_path);
@@ -440,12 +414,17 @@ namespace {
 
         ConditionCompiler conditions(diag);
         NamespaceLowering namespaces(diag);
-        GenericExpander expander(diag);
+        GenericExpander expander(diag, namespaces, options.instantiation_depth);
         LifecycleLowering lifecycle(diag);
 
         conditions.run(&combined);
         namespaces.run(&combined);
         expander.expand(&combined);
+
+        if (expander.stack_probe_triggered()) {
+            return pal::exit_failure_code();
+        }
+
         lifecycle.run(&combined);
 
         TypeChecker checker(diag, expander.expression_free_identifiers(),
@@ -463,6 +442,8 @@ namespace {
 
         checker.check_program(&combined);
 
+        checker.apply_constexpr_folding(combined);
+
         if (diag.has_errors()) {
             diag.report_note(SourceLocation{},
                 "the semantic passes and type checking completed with " +
@@ -474,9 +455,6 @@ namespace {
             return pal::exit_failure_code();
         }
 
-        // Health-region contract: the sticky Error type is stage-local and must
-        // never reach code generation. Any Error type implies a diagnostic was
-        // already reported, so it is checked again here instead of being trusted.
         if (contains_error_type(checker.expression_types())) {
             diag.report_note(SourceLocation{},
                 "the type checker left an unresolved error type without a matching "
@@ -520,7 +498,7 @@ namespace {
             return pal::exit_failure_code();
         }
 
-        const std::string clang_path = find_llvm_executable("clang.exe");
+        const std::string clang_path = pal::find_llvm_clang();
 
         std::string optimization_flag;
 
@@ -554,33 +532,51 @@ namespace {
 
         std::vector<std::string> tool_args = {
             std::string("--target=") + pal::target_triple(),
-            "-fuse-ld=lld",
             optimization_flag,
             "-Wno-override-module",
             "-Wno-deprecated-declarations",
             "-x", "ir",
             pal::to_utf8(ir_path.wstring()),
         };
+        const std::vector<std::string> linker_arguments =
+            pal::linker_selection_arguments();
+        tool_args.insert(tool_args.begin() + 1, linker_arguments.begin(),
+            linker_arguments.end());
         tool_args.insert(tool_args.end(), runtime_arguments.begin(),
             runtime_arguments.end());
         tool_args.push_back("-o");
         tool_args.push_back(output_path);
 
+        if (output_kind == OutputKind::Executable) {
+            const std::vector<std::string> stack_arguments =
+                pal::stack_arguments(options.stack_size, options.commit_size);
+            tool_args.insert(tool_args.end(), stack_arguments.begin(),
+                stack_arguments.end());
+            const std::vector<std::string> linker_mode_arguments =
+                pal::linker_mode_arguments(
+                    options.linker_mode == LinkerMode::Static);
+            tool_args.insert(tool_args.end(), linker_mode_arguments.begin(),
+                linker_mode_arguments.end());
+        }
+
         if (output_kind == OutputKind::DynamicLibrary) {
             tool_args.insert(tool_args.begin() + 2, "-shared");
 
-            for (const std::string& exported : generator.exported_functions()) {
-                tool_args.push_back("-Wl,/EXPORT:" + exported);
-            }
+            const std::vector<std::string> export_arguments =
+                pal::dynamic_library_export_arguments(
+                    generator.exported_functions());
+            tool_args.insert(tool_args.end(), export_arguments.begin(),
+                export_arguments.end());
         }
 
-        if (options.debug_symbols_level == 1) {
-            tool_args.push_back("-gline-tables-only");
-        } else if (options.debug_symbols_level >= 2) {
-            tool_args.push_back("-gcodeview");
-            tool_args.push_back("-g");
-            tool_args.push_back("-Wl,/DEBUG");
-        }
+        const std::vector<std::string> compile_debug_arguments =
+            pal::compile_debug_arguments(options.debug_symbols_level);
+        tool_args.insert(tool_args.end(), compile_debug_arguments.begin(),
+            compile_debug_arguments.end());
+        const std::vector<std::string> link_debug_arguments =
+            pal::link_debug_arguments(options.debug_symbols_level);
+        tool_args.insert(tool_args.end(), link_debug_arguments.begin(),
+            link_debug_arguments.end());
 
         bool reset_language = false;
         bool link_library_missing = false;
@@ -651,14 +647,15 @@ namespace {
         std::vector<fs::path> object_paths;
 
         if (output_kind == OutputKind::StaticLibrary) {
-            const std::string librarian = find_llvm_executable("llvm-lib.exe");
+            const std::string librarian = pal::find_llvm_librarian();
             if (!pal::file_exists(librarian)) {
                 std::cerr << "sgc: LLVM librarian not found: " << librarian
                     << "\n";
                 return pal::exit_failure_code();
             }
             object_paths.push_back(fs::path(pal::to_wide(
-                pal::join_path(temp_dir, unique + "_gallt.obj"))));
+                pal::join_path(temp_dir,
+                    unique + "_gallt" + pal::object_file_extension()))));
             const std::string gallt_object = pal::to_utf8(
                 object_paths[0].wstring());
             fs::path runtime_object_path;
@@ -666,7 +663,8 @@ namespace {
 
             if (attach_runtime) {
                 runtime_object_path = fs::path(pal::to_wide(
-                    pal::join_path(temp_dir, unique + "_runtime.obj")));
+                    pal::join_path(temp_dir,
+                        unique + "_runtime" + pal::object_file_extension())));
                 runtime_object_file = pal::to_utf8(runtime_object_path.wstring());
                 object_paths.push_back(runtime_object_path);
             }
@@ -684,12 +682,10 @@ namespace {
             ir_compile.push_back(pal::to_utf8(ir_path.wstring()));
             ir_compile.push_back("-o");
             ir_compile.push_back(gallt_object);
-            if (options.debug_symbols_level == 1) {
-                ir_compile.push_back("-gline-tables-only");
-            } else if (options.debug_symbols_level >= 2) {
-                ir_compile.push_back("-gcodeview");
-                ir_compile.push_back("-g");
-            }
+            const std::vector<std::string> ir_debug_arguments =
+                pal::compile_debug_arguments(options.debug_symbols_level);
+            ir_compile.insert(ir_compile.end(), ir_debug_arguments.begin(),
+                ir_debug_arguments.end());
             link_result = pal::run_process(clang_path, ir_compile, &tool_output);
 
             if (link_result != 0) {
@@ -708,8 +704,10 @@ namespace {
                 c_compile.push_back(c_path_text);
                 c_compile.push_back("-o");
                 c_compile.push_back(runtime_object_file);
-                append_runtime_debug_flags(c_compile,
-                    options.debug_symbols_level);
+                const std::vector<std::string> c_debug_arguments =
+                    pal::compile_debug_arguments(options.debug_symbols_level);
+                c_compile.insert(c_compile.end(), c_debug_arguments.begin(),
+                    c_debug_arguments.end());
                 link_result = pal::run_process(clang_path, c_compile,
                     &tool_output);
 
@@ -722,15 +720,15 @@ namespace {
                 runtime_archive_member = runtime_object_file;
             }
 
-            std::vector<std::string> archive_args = {
-                "/nologo",
-                "/out:" + output_path,
-                gallt_object,
-            };
+            std::vector<std::string> archive_members;
+            archive_members.push_back(gallt_object);
 
             if (attach_runtime) {
-                archive_args.push_back(runtime_archive_member);
+                archive_members.push_back(runtime_archive_member);
             }
+
+            const std::vector<std::string> archive_args =
+                pal::llvm_librarian_arguments(output_path, archive_members);
 
             link_result = pal::run_process(librarian, archive_args, &tool_output);
         } else {
@@ -753,7 +751,7 @@ namespace {
             std::cerr << "sgc: LLVM backend failed with exit code "
                 << link_result << '\n';
         } else {
-            std::cout << "Compilation successful\n";
+            std::cout << "compilation successful\n";
         }
 
         if (!pal::environment_variable_defined("SGC_KEEP_TEMP")) {

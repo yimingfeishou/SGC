@@ -26,6 +26,8 @@ $Sources = @(
     'include\gallt\pal\platform_paths.cpp',
     'include\gallt\pal\platform_windows.cpp',
     'include\gallt\pal\platform_linux.cpp',
+    'include\gallt\pal\entry_windows.cpp',
+    'include\gallt\pal\entry_linux.cpp',
     'include\gallt\parser\ast.cpp',
     'include\gallt\parser\parser.cpp',
     'include\gallt\parser\parser_expression.cpp',
@@ -37,8 +39,10 @@ $Sources = @(
     'include\gallt\semantic\generic_expander_clone.cpp',
     'include\gallt\semantic\generic_expander_property.cpp',
     'include\gallt\semantic\generic_expander_pack.cpp',
+    'include\gallt\semantic\generic_expander_constexpr.cpp',
     'include\gallt\semantic\condition_compiler.cpp',
     'include\gallt\semantic\constant_folding.cpp',
+    'include\gallt\semantic\constexpr_function.cpp',
     'include\gallt\semantic\lifecycle.cpp',
     'include\gallt\semantic\lifecycle_rewrite.cpp',
     'include\gallt\semantic\namespace_lowering.cpp',
@@ -47,6 +51,7 @@ $Sources = @(
     'include\gallt\semantic\type_checker_overload.cpp',
     'include\gallt\semantic\type_checker_declaration.cpp',
     'include\gallt\semantic\type_checker_control.cpp',
+    'include\gallt\semantic\type_checker_constexpr.cpp',
     'include\gallt\semantic\type_checker_layout.cpp',
     'include\gallt\semantic\type_checker_variadic.cpp'
 )

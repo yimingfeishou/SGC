@@ -134,92 +134,104 @@ namespace gallt {
             return false;
         }
 
+        namespace {
+            std::string type_text(const Type& type, bool source_form) {
+                std::ostringstream out;
+
+                if (type.is_const) {
+                    out << "const ";
+                }
+
+                switch (type.kind) {
+                case TypeKind::Int:    out << "int"; break;
+                case TypeKind::Lint:   out << "lint"; break;
+                case TypeKind::Uint:   out << "uint"; break;
+                case TypeKind::Luint:  out << "luint"; break;
+                case TypeKind::Float:  out << "float"; break;
+                case TypeKind::Double: out << "double"; break;
+                case TypeKind::Char:   out << "char"; break;
+                case TypeKind::Uchar:  out << "uchar"; break;
+                case TypeKind::Bool:   out << "bool"; break;
+                case TypeKind::String: out << "string"; break;
+                case TypeKind::File:   out << "file"; break;
+                case TypeKind::Void:   out << "void"; break;
+                case TypeKind::Error:  out << "error"; break;
+                case TypeKind::Array:
+                    if (type.element_type) {
+                        out << type_text(*type.element_type, source_form);
+                    } else {
+                        out << "?";
+                    }
+
+                    out << '[';
+
+                    if (type.array_size.has_value()) {
+                        out << *type.array_size;
+                    }
+
+                    out << ']';
+                    break;
+                case TypeKind::Pointer:
+                    if (type.pointee_type) {
+                        out << type_text(*type.pointee_type, source_form);
+                    } else {
+                        out << "void";
+                    }
+
+                    out << '*';
+                    break;
+                case TypeKind::Struct:
+                    if (type.generic_ref) {
+                        out << type.generic_ref->to_string();
+                    } else if (source_form) {
+                        out << type.struct_name;
+                    } else {
+                        out << "struct " << type.struct_name;
+                    }
+                    break;
+                case TypeKind::Function:
+                    if (type.return_type) {
+                        out << type_text(*type.return_type, source_form);
+                    } else {
+                        out << "void";
+                    }
+
+                    out << '(';
+
+                    for (size_t i = 0; i < type.parameter_types.size(); ++i) {
+                        if (i != 0) {
+                            out << ", ";
+                        }
+
+                        out << type_text(type.parameter_types[i], source_form);
+                    }
+
+                    if (type.is_variadic) {
+                        if (!type.parameter_types.empty()) {
+                            out << ", ";
+                        }
+
+                        if (type.variadic_element_type) {
+                            out << type_text(*type.variadic_element_type, source_form);
+                        }
+
+                        out << "...";
+                    }
+
+                    out << ")*";
+                    break;
+                }
+
+                return out.str();
+            }
+        }
+
         std::string Type::to_string() const {
-            std::ostringstream out;
+            return type_text(*this, false);
+        }
 
-            if (is_const) {
-                out << "const ";
-            }
-
-            switch (kind) {
-            case TypeKind::Int:    out << "int"; break;
-            case TypeKind::Lint:   out << "lint"; break;
-            case TypeKind::Uint:   out << "uint"; break;
-            case TypeKind::Luint:  out << "luint"; break;
-            case TypeKind::Float:  out << "float"; break;
-            case TypeKind::Double: out << "double"; break;
-            case TypeKind::Char:   out << "char"; break;
-            case TypeKind::Uchar:  out << "uchar"; break;
-            case TypeKind::Bool:   out << "bool"; break;
-            case TypeKind::String: out << "string"; break;
-            case TypeKind::File:   out << "file"; break;
-            case TypeKind::Void:   out << "void"; break;
-            case TypeKind::Error:  out << "error"; break;
-            case TypeKind::Array:
-                if (element_type) {
-                    out << element_type->to_string();
-                } else {
-                    out << "?";
-                }
-
-                out << '[';
-
-                if (array_size.has_value()) {
-                    out << *array_size;
-                }
-
-                out << ']';
-                break;
-            case TypeKind::Pointer:
-                if (pointee_type) {
-                    out << pointee_type->to_string();
-                } else {
-                    out << "void";
-                }
-
-                out << '*';
-                break;
-            case TypeKind::Struct:
-                if (generic_ref) {
-                    out << generic_ref->to_string();
-                } else {
-                    out << "struct " << struct_name;
-                }
-                break;
-            case TypeKind::Function:
-                if (return_type) {
-                    out << return_type->to_string();
-                } else {
-                    out << "void";
-                }
-
-                out << '(';
-
-                for (size_t i = 0; i < parameter_types.size(); ++i) {
-                    if (i != 0) {
-                        out << ", ";
-                    }
-
-                    out << parameter_types[i].to_string();
-                }
-
-                if (is_variadic) {
-                    if (!parameter_types.empty()) {
-                        out << ", ";
-                    }
-
-                    if (variadic_element_type) {
-                        out << variadic_element_type->to_string();
-                    }
-
-                    out << "...";
-                }
-
-                out << ")*";
-                break;
-            }
-
-            return out.str();
+        std::string Type::to_source_string() const {
+            return type_text(*this, true);
         }
 
     }

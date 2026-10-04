@@ -78,6 +78,9 @@ namespace gallt {
 
         bool resolve_pointer_origin(const AST::Expression* expr, int& group);
 
+        class ExpressionRewriter;
+        class StatementRewriter;
+
         void collect_structs();
         void register_struct_definition(AST::StructDefinition* def);
         void validate_special_members();

@@ -61,7 +61,8 @@ namespace gallt {
                     if (&other == &(*set).back()) { continue; }
 
                     if (overloads_ambiguous_by_defaults(other, (*set).back())) {
-                        report_error(node->location, ErrorCode::OverloadAmbiguous, { node->name });
+                        report_error_template(node->location,
+                            ErrorCode::OverloadAmbiguous, { node->name });
                         break;
                     }
                 }
@@ -158,6 +159,15 @@ namespace gallt {
 
     void TypeChecker::check_function_definition(AST::FunctionDefinition* node) {
         const std::size_t pack_depth = variadic_packs_.size();
+        const AST::FunctionDefinition* saved_constexpr_owner = constexpr_owner_;
+
+        if (node->is_constexpr_function) {
+            constexpr_owner_ = node;
+            ++constexpr_owner_depth_;
+        }
+
+        const bool redefinition_already_reported =
+            node->is_operator && redefined_operators_.count(node) != 0;
         if (node->is_export) {
             validate_export_function(node);
         }
@@ -227,9 +237,11 @@ namespace gallt {
                             node->parameters, node->param_names, node->location, node,
                             node->is_variadic);
                         if (!sym_table_.declare_overload(overload_sym)) {
-                            report_error(node->location, ErrorCode::RedefinedFunction,
-                                "function '" + node->name +
-                                "' already defined with the same parameter list");
+                            if (!redefinition_already_reported) {
+                                report_error(node->location, ErrorCode::RedefinedFunction,
+                                    "function '" + node->name +
+                                    "' already defined with the same parameter list");
+                            }
                             return;
                         }
 
@@ -237,7 +249,8 @@ namespace gallt {
                             for (const Symbol& other : *set) {
                                 if (&other == &(*set).back()) { continue; }
                                 if (overloads_ambiguous_by_defaults(other, (*set).back())) {
-                                    report_error(node->location, ErrorCode::OverloadAmbiguous,
+                                    report_error_template(node->location,
+                                        ErrorCode::OverloadAmbiguous,
                                         { node->name });
                                     break;
                                 }
@@ -251,9 +264,11 @@ namespace gallt {
                         node->name, node->return_type, node->parameters, node->param_names,
                         node->location, node, node->is_variadic);
                     if (!sym_table_.declare_overload(overload_sym)) {
-                        report_error(node->location, ErrorCode::RedefinedFunction,
-                            "function '" + node->name +
-                            "' already defined with the same parameter list");
+                        if (!redefinition_already_reported) {
+                            report_error(node->location, ErrorCode::RedefinedFunction,
+                                "function '" + node->name +
+                                "' already defined with the same parameter list");
+                        }
                         return;
                     }
 
@@ -261,7 +276,8 @@ namespace gallt {
                         for (const Symbol& other : *set) {
                             if (&other == &(*set).back()) { continue; }
                             if (overloads_ambiguous_by_defaults(other, (*set).back())) {
-                                report_error(node->location, ErrorCode::OverloadAmbiguous,
+                                report_error_template(node->location,
+                                    ErrorCode::OverloadAmbiguous,
                                     { node->name });
                                 break;
                             }
@@ -282,8 +298,10 @@ namespace gallt {
                 node->location, node, node->is_variadic
             );
             if (!sym_table_.declare(sym)) {
-                report_error(node->location, ErrorCode::RedefinedFunction,
-                    "function '" + node->name + "' already declared");
+                if (!redefinition_already_reported) {
+                    report_error(node->location, ErrorCode::RedefinedFunction,
+                        "function '" + node->name + "' already declared");
+                }
                 return;
             }
             sym_table_.declare_overload(sym);
@@ -367,6 +385,17 @@ namespace gallt {
         exit_scope();
         variadic_packs_.resize(pack_depth);
         current_function_ = nullptr;
+
+        if (node->is_constexpr_function) {
+            validate_constexpr_types(node);
+
+            if (node->body != nullptr) {
+                validate_constexpr_statement(node->body.get());
+            }
+
+            --constexpr_owner_depth_;
+            constexpr_owner_ = saved_constexpr_owner;
+        }
     }
 
     void TypeChecker::check_struct_definition(AST::StructDefinition* node) {
@@ -730,6 +759,8 @@ namespace gallt {
             report_error(decl->location, ErrorCode::RedefinedIdentifier,
                 "variable '" + decl->name + "' already declared");
         }
+
+        record_constexpr_declaration(decl);
     }
 
     void TypeChecker::check_struct_initializer(AST::ArrayInitializer* init,

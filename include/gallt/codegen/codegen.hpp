@@ -143,6 +143,9 @@ namespace gallt {
 
         void collect_structs();
         void collect_structs_in_statement(AST::Statement* stmt);
+
+        class StructCollectRewriter;
+        class StatementEmitter;
         bool type_contains_string(const AST::Type& type);
 
         void emit_preamble();

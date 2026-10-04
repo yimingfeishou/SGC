@@ -319,7 +319,23 @@ namespace gallt {
         double float_value = 0.0;
         bool is_float = false;
         if (!evaluate_constant_expression(expr, int_value, float_value, is_float, ctx)) {
-            return std::nullopt;
+            if (!contains_call_expression(expr)) { return std::nullopt; }
+
+            check_expression(expr);
+
+            ConstexprValue value;
+            if (!evaluate_constexpr_expression(expr, value)) {
+                return std::nullopt;
+            }
+
+            if (value.type.kind == TypeKind::String ||
+                !value.type.is_arithmetic()) {
+                return std::nullopt;
+            }
+
+            is_float = value.type.is_floating();
+            int_value = value.as_integer();
+            float_value = value.as_floating();
         }
         if (is_float) {
             const auto truncated = static_cast<long long>(float_value);
@@ -559,6 +575,7 @@ namespace gallt {
                     callee->kind != PrimaryExpression::Kind::Identifier) {
                     return false;
                 }
+                if (is_constexpr_call_expression(post)) { return true; }
                 if (callee->identifier != "size" && callee->identifier != "align") {
                     return false;
                 }

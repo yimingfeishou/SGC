@@ -51,15 +51,18 @@ namespace gallt {
         bool is_boolean_expression(const AST::Expression* expr) const;
         bool is_condition_name(const AST::Expression* expr) const;
         Token make_bool_token(SourceLocation loc, bool value);
-        void transform_expression(AST::Expression* expr);
-        void transform_initializer(AST::Initializer* init);
+        void transform_expression(std::unique_ptr<AST::Expression>& expr);
+        void transform_initializer(std::unique_ptr<AST::Initializer>& init);
+        void transform_is_defined_call(AST::PostfixExpression* postfix);
         void resolve_condition_references(AST::Expression* expr);
-        void sanitize_condition_references(AST::Expression* expr);
+        void sanitize_condition_references(std::unique_ptr<AST::Expression>& expr);
         std::unique_ptr<AST::Expression> make_integer_literal(SourceLocation loc,
             long long value);
 
         void report(SourceLocation loc, ErrorCode code, const std::vector<std::string>& values);
         void report(SourceLocation loc, ErrorCode code, const std::string& message);
+
+        void register_platform_conditions();
     };
 
 }

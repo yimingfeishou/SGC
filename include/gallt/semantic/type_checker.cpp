@@ -1,4 +1,5 @@
 #include "../semantic/type_checker.hpp"
+#include "../parser/ast_visitor.hpp"
 #include "../semantic/diagnosed_registry.hpp"
 #include "type_checker_detail.hpp"
 #include "../parser/ast.hpp"
@@ -25,6 +26,7 @@ namespace gallt {
         : diag_(diag), expression_free_identifiers_(expression_free_identifiers),
         expression_argument_casts_(expression_argument_casts),
         require_main_(require_main) {
+        configure_constexpr_host();
     }
 
     bool TypeChecker::check_program(AST::Program* program) {
@@ -58,6 +60,7 @@ namespace gallt {
 
         for (auto& top : program->top_levels) {
             if (auto* func = dynamic_cast<AST::FunctionDefinition*>(top.get())) {
+                declared_functions_.insert(func);
                 collect_local_structs(func->body.get());
             } else if (auto* strct = dynamic_cast<AST::StructDefinition*>(top.get())) {
                 for (auto& member : strct->special_members) {
@@ -85,23 +88,192 @@ namespace gallt {
         return !diag_.has_errors();
     }
 
-    void TypeChecker::check_top_level(AST::TopLevel* node) {
-        if (auto* guide = dynamic_cast<AST::GuideStatement*>(node)) {
-            check_guide_statement(guide);
-        } else if (auto* clib = dynamic_cast<AST::ClibStatement*>(node)) {
-            check_clib_statement(clib);
-        } else if (auto* ext = dynamic_cast<AST::ExternDeclaration*>(node)) {
-            check_extern_declaration(ext);
-        } else if (auto* func = dynamic_cast<AST::FunctionDefinition*>(node)) {
-            check_function_definition(func);
-        } else if (auto* var = dynamic_cast<AST::VariableDeclaration*>(node)) {
-            check_variable_declaration(var);
-        } else if (auto* st = dynamic_cast<AST::StructDefinition*>(node)) {
-            check_struct_definition(st);
-        } else {
-            report_error(node->location, ErrorCode::ExpressionSyntaxError,
-                "unknown top-level node");
+    class TypeChecker::NodeChecker : public AST::AstRewriter {
+    public:
+        explicit NodeChecker(TypeChecker& owner, bool top_level)
+            : owner_(owner), top_level_(top_level) {
         }
+
+    protected:
+        bool EnterGuideStatement(AST::GuideStatement* node) override {
+            owner_.check_guide_statement(node);
+            return false;
+        }
+
+        bool EnterClibStatement(AST::ClibStatement* node) override {
+            owner_.check_clib_statement(node);
+            return false;
+        }
+
+        bool EnterExternDeclaration(AST::ExternDeclaration* node) override {
+            owner_.check_extern_declaration(
+                node);
+            return false;
+        }
+
+        bool EnterFunctionDefinition(AST::FunctionDefinition* node) override {
+            owner_.check_function_definition(
+                node);
+            return false;
+        }
+
+        bool EnterVariableDeclaration(AST::VariableDeclaration* node) override {
+            owner_.check_variable_declaration(
+                node);
+            return false;
+        }
+
+        bool EnterStructDefinition(AST::StructDefinition* node) override {
+            auto* def = node;
+
+            if (top_level_) {
+                owner_.check_struct_definition(def);
+                return false;
+            }
+
+            if (owner_.struct_defs_.find(def->name) != owner_.struct_defs_.end()) {
+                owner_.report_error(def->location, ErrorCode::RedefinedIdentifier,
+                    "struct '" + def->name + "' already defined in this scope");
+                return false;
+            }
+
+            owner_.struct_defs_[def->name] = def;
+            Symbol sym = Symbol::make_struct(def->name, def->location, def);
+
+            if (!owner_.sym_table_.declare(sym)) {
+                owner_.report_error(def->location, ErrorCode::RedefinedIdentifier,
+                    "struct '" + def->name + "' already declared");
+            }
+
+            owner_.check_struct_definition(def);
+            return false;
+        }
+
+        bool EnterBlock(AST::Block*) override {
+            owner_.enter_scope();
+            return true;
+        }
+
+        void LeaveBlock(AST::Block*) override {
+            owner_.exit_scope();
+        }
+
+        bool EnterIfStatement(AST::IfStatement* node) override {
+            owner_.check_if_statement(node);
+            return false;
+        }
+
+        bool EnterForStatement(AST::ForStatement* node) override {
+            owner_.check_for_statement(node);
+            return false;
+        }
+
+        bool EnterWhileStatement(AST::WhileStatement* node) override {
+            owner_.check_while_statement(node);
+            return false;
+        }
+
+        bool EnterBreakStatement(AST::BreakStatement* node) override {
+            owner_.check_break_statement(node);
+            return false;
+        }
+
+        bool EnterReturnStatement(AST::ReturnStatement* node) override {
+            owner_.check_return_statement(node);
+            return false;
+        }
+
+        bool EnterExpressionStatement(AST::ExpressionStatement* node) override {
+            owner_.check_expression_statement(
+                node);
+            return false;
+        }
+
+        bool EnterEmptyStatement(AST::EmptyStatement*) override {
+            return false;
+        }
+
+        bool EnterDestructStatement(AST::DestructStatement* node) override {
+            auto* stmt = node;
+            AST::Type target_type = owner_.check_expression(stmt->target.get());
+
+            if (!target_type.is_error()) {
+                if (target_type.kind != TypeKind::Pointer) {
+                    owner_.report_error(stmt->location, ErrorCode::FreeNonPointer,
+                        "destruct requires a pointer, got '" +
+                        target_type.to_string() + "'");
+                } else if (!is_null_literal_expr(stmt->target.get()) &&
+                    (!target_type.pointee_type ||
+                    target_type.pointee_type->kind != TypeKind::Struct)) {
+                    owner_.report_error_template(stmt->location,
+                        ErrorCode::DestructNonConstructed,
+                        std::vector<std::string>{});
+                }
+            }
+
+            return false;
+        }
+
+        bool EnterGenericDefinition(AST::GenericDefinition* node) override {
+            return report_unknown_node(node);
+        }
+
+        bool EnterInstantiationStatement(AST::InstantiationStatement* node) override {
+            return report_unknown_node(node);
+        }
+
+        bool EnterNamespaceDefinition(AST::NamespaceDefinition* node) override {
+            return report_unknown_node(node);
+        }
+
+        bool EnterAccessNamespaceStatement(AST::AccessNamespaceStatement* node) override {
+            return report_unknown_node(node);
+        }
+
+        bool EnterAdditionNamespaceStatement(AST::AdditionNamespaceStatement* node) override {
+            return report_unknown_node(node);
+        }
+
+        bool EnterCondDefinition(AST::CondDefinition* node) override {
+            return report_unknown_node(node);
+        }
+
+        bool EnterUncondDefinition(AST::UncondDefinition* node) override {
+            return report_unknown_node(node);
+        }
+
+        bool EnterConditionalBlock(AST::ConditionalBlock* node) override {
+            return report_unknown_node(node);
+        }
+
+        bool EnterTopLevelBlock(AST::TopLevelBlock* node) override {
+            return report_unknown_node(node);
+        }
+
+        bool EnterEmitStatement(AST::EmitStatement* node) override {
+            return report_unknown_node(node);
+        }
+
+    private:
+        bool report_unknown_node(AST::Node* node) {
+            owner_.report_error(node->location, ErrorCode::ExpressionSyntaxError,
+                top_level_ ? "unknown top-level node" : "unknown statement type");
+            return false;
+        }
+
+        TypeChecker& owner_;
+        bool top_level_ = false;
+    };
+
+    void TypeChecker::check_top_level(AST::TopLevel* node) {
+        if (node == nullptr) {
+            return;
+        }
+
+        NodeChecker checker(*this, true);
+        std::unique_ptr<AST::TopLevel> holder(node);
+        checker.rewrite_top_level(holder);
+        holder.release();
     }
 
     void TypeChecker::check_guide_statement(AST::GuideStatement* node) {
@@ -117,66 +289,26 @@ namespace gallt {
                 "clib library name cannot be empty");
         }
     }
-
     void TypeChecker::check_statement(AST::Statement* stmt) {
-        if (auto* block = dynamic_cast<AST::Block*>(stmt)) {
-            check_block(block);
-        } else if (auto* var = dynamic_cast<AST::VariableDeclaration*>(stmt)) {
-            check_variable_declaration(var);
-        } else if (auto* if_ = dynamic_cast<AST::IfStatement*>(stmt)) {
-            check_if_statement(if_);
-        } else if (auto* for_ = dynamic_cast<AST::ForStatement*>(stmt)) {
-            check_for_statement(for_);
-        } else if (auto* while_ = dynamic_cast<AST::WhileStatement*>(stmt)) {
-            check_while_statement(while_);
-        } else if (auto* br = dynamic_cast<AST::BreakStatement*>(stmt)) {
-            check_break_statement(br);
-        } else if (auto* ret = dynamic_cast<AST::ReturnStatement*>(stmt)) {
-            check_return_statement(ret);
-        } else if (auto* expr = dynamic_cast<AST::ExpressionStatement*>(stmt)) {
-            check_expression_statement(expr);
-        } else if (auto* empty = dynamic_cast<AST::EmptyStatement*>(stmt)) {
-        } else if (auto* destruct_stmt = dynamic_cast<AST::DestructStatement*>(stmt)) {
-            AST::Type target_type = check_expression(destruct_stmt->target.get());
-
-            if (!target_type.is_error()) {
-                if (target_type.kind != TypeKind::Pointer) {
-                    report_error(destruct_stmt->location, ErrorCode::FreeNonPointer,
-                        "destruct requires a pointer, got '" + target_type.to_string() + "'");
-                } else if (!is_null_literal_expr(destruct_stmt->target.get()) &&
-                   (!target_type.pointee_type ||
-                   target_type.pointee_type->kind != TypeKind::Struct)) {
-                    report_error_template(destruct_stmt->location,
-                        ErrorCode::DestructNonConstructed, std::vector<std::string>{});
-                }
-            }
-        } else if (auto* struct_def = dynamic_cast<AST::StructDefinition*>(stmt)) {
-            if (struct_defs_.find(struct_def->name) != struct_defs_.end()) {
-                report_error(struct_def->location, ErrorCode::RedefinedIdentifier,
-                    "struct '" + struct_def->name + "' already defined in this scope");
-            } else {
-                struct_defs_[struct_def->name] = struct_def;
-                Symbol sym = Symbol::make_struct(struct_def->name, struct_def->location, struct_def);
-                if (!sym_table_.declare(sym)) {
-                    report_error(struct_def->location, ErrorCode::RedefinedIdentifier,
-                        "struct '" + struct_def->name + "' already declared");
-                }
-                check_struct_definition(struct_def);
-            }
-        } else {
-            report_error(stmt->location, ErrorCode::ExpressionSyntaxError,
-                "unknown statement type");
+        if (stmt == nullptr) {
+            return;
         }
+
+        NodeChecker checker(*this, false);
+        std::unique_ptr<AST::Statement> holder(stmt);
+        checker.rewrite_statement(holder);
+        holder.release();
     }
 
     void TypeChecker::check_block(AST::Block* block) {
-        enter_scope();
-
-        for (auto& stmt : block->statements) {
-            check_statement(stmt.get());
+        if (block == nullptr) {
+            return;
         }
 
-        exit_scope();
+        NodeChecker checker(*this, false);
+        std::unique_ptr<AST::Statement> holder(block);
+        checker.rewrite_statement(holder);
+        holder.release();
     }
 
     AST::StructDefinition* TypeChecker::get_struct_definition(const std::string& name) const {
@@ -401,6 +533,7 @@ namespace gallt {
     void TypeChecker::enter_scope() {
         sym_table_.enter_scope();
         const_values_.emplace_back();
+        constexpr_values_.emplace_back();
     }
 
     void TypeChecker::exit_scope() {
@@ -408,6 +541,10 @@ namespace gallt {
 
         if (!const_values_.empty()) {
             const_values_.pop_back();
+        }
+
+        if (!constexpr_values_.empty()) {
+            constexpr_values_.pop_back();
         }
     }
 

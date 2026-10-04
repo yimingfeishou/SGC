@@ -12,6 +12,7 @@
 #else
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <unistd.h>
 #define GALLT_PLATFORM_MKDIR(path) mkdir((path), 0755)
 #define GALLT_PLATFORM_RMDIR(path) rmdir(path)
 #endif
@@ -145,7 +146,7 @@ void gallt_string_concat(gallt_string* out, const gallt_string* a, const gallt_s
 }
 
 static int gallt_format_fp(double v, char* buffer, size_t size) {
-    int n = snprintf(buffer, size, "%g", v);
+    int n = snprintf(buffer, size, "%.17g", v);
     if (n < 0) { return 0; }
     if ((size_t)n + 2 >= size) { return n; }
     if (strpbrk(buffer, ".eEnNiI") == NULL) {

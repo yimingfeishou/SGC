@@ -387,6 +387,38 @@ namespace gallt {
                 }
 
                 advance();
+
+                if (current_.type == TokenType::LeftParen) {
+                    advance();
+                    std::vector<std::unique_ptr<Expression>> arguments;
+
+                    if (current_.type != TokenType::RightParen) {
+                        for (;;) {
+                            auto argument = parse_compile_time_expression();
+                            if (argument == nullptr) { return nullptr; }
+                            arguments.push_back(std::move(argument));
+
+                            if (current_.type == TokenType::Comma) {
+                                advance();
+                                continue;
+                            }
+
+                            break;
+                        }
+                    }
+
+                    if (!expect(TokenType::RightParen,
+                        "expected ')' after compile-time call arguments")) {
+                        return nullptr;
+                    }
+
+                    auto call = std::make_unique<PostfixExpression>(loc,
+                        std::make_unique<PrimaryExpression>(loc, id),
+                        PostfixExpression::Operator::FunctionCall);
+                    call->arguments = std::move(arguments);
+                    return call;
+                }
+
                 return std::make_unique<PrimaryExpression>(loc, id);
             }
             case TokenType::Keyword_Cast: {
@@ -867,6 +899,9 @@ namespace gallt {
             }
             bool type_start = (is_builtin_or_void_type_keyword(tt) ||
                 tt == TokenType::Identifier);
+            const bool single_bare_identifier = tt == TokenType::Identifier &&
+                (lookahead_type(1) == TokenType::Comma ||
+                    lookahead_type(1) == TokenType::Greater);
 
             if (tt == TokenType::Identifier &&
                 lookahead_type(1) == TokenType::Ellipsis) {
@@ -910,6 +945,7 @@ namespace gallt {
                 if ((current_.type == TokenType::Comma || current_.type == TokenType::Greater) &&
                     !t.to_string().empty()) {
                     arg.is_type = true;
+                    arg.is_ambiguous_name = single_bare_identifier;
                     arg.type = std::move(t);
                     arg.text = arg.type.to_string();
                     parsed_type = true;
@@ -957,6 +993,10 @@ namespace gallt {
                         }
                     } else {
                         arg.text = compile_time_expr_text(arg.expression.get());
+                    }
+
+                    if (!ok && contains_call_expression(arg.expression.get())) {
+                        arg.expression_constant = true;
                     }
 
                     if (current_.type != TokenType::Comma && current_.type != TokenType::Greater) {

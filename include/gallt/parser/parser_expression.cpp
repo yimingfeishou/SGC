@@ -911,10 +911,6 @@ namespace gallt {
 
     std::unique_ptr<Expression> Parser::reject_legacy_type_conversion(
         SourceLocation loc) {
-        // '[type](value)' and '[type]*(value)' are no longer part of the language;
-        // the documented form is cast<[type]>(value). The tokens are still consumed
-        // so that the remainder of the file keeps parsing, and the operand is
-        // returned without a conversion node because the conversion is invalid.
         report_error_at(loc, ErrorCode::ExpressionSyntaxError,
             "type conversion must be written as cast<[type]>(value)");
 
@@ -935,8 +931,6 @@ namespace gallt {
             return nullptr;
         }
 
-        // The construct was consumed and the operand parsed, so the enclosing
-        // statement can complete normally instead of being resynchronized.
         in_error_recovery_ = false;
         return operand;
     }

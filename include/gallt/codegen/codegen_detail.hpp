@@ -197,6 +197,10 @@ namespace gallt {
     }
 
     inline std::string decode_escaped_bytes(std::string_view raw, bool is_char) {
+        if (is_literal_string_lexeme(raw)) {
+            return std::string(literal_string_content(raw));
+        }
+
         std::string content = strip_literal_quotes(raw);
         std::string out;
 

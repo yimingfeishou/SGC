@@ -38,6 +38,49 @@ namespace pal {
         return out;
     }
 
+    const char* default_executable_extension() noexcept {
+#if SGC_PLATFORM_WINDOWS
+        return ".exe";
+#else
+        return "";
+#endif
+    }
+
+    const char* object_file_extension() noexcept {
+#if SGC_PLATFORM_WINDOWS
+        return ".obj";
+#else
+        return ".o";
+#endif
+    }
+
+    std::vector<std::string> compile_debug_arguments(int debug_symbols_level) {
+        std::vector<std::string> out;
+
+        if (debug_symbols_level == 1) {
+            out.push_back("-gline-tables-only");
+        } else if (debug_symbols_level >= 2) {
+#if SGC_PLATFORM_WINDOWS
+            out.push_back("-gcodeview");
+#endif
+            out.push_back("-g");
+        }
+
+        return out;
+    }
+
+    std::vector<std::string> link_debug_arguments(int debug_symbols_level) {
+        std::vector<std::string> out;
+#if SGC_PLATFORM_WINDOWS
+        if (debug_symbols_level >= 2) {
+            out.push_back("-Wl,/DEBUG");
+        }
+#else
+        (void)debug_symbols_level;
+#endif
+        return out;
+    }
+
     std::string replace_extension(const std::string& path,
         const std::string& ext) {
         fs::path p(to_wide(path));

@@ -1,3 +1,4 @@
+#include <iostream>
 #include "command_line.hpp"
 #include "../pal/platform.hpp"
 
@@ -5,6 +6,25 @@ namespace gallt {
 namespace {
     std::string narrow_utf8(const std::wstring& w) {
         return pal::to_utf8(w);
+    }
+
+    std::optional<std::uint64_t> parse_positive_size(const std::string& text) {
+        if (text.empty()) { return std::nullopt; }
+
+        std::uint64_t value = 0;
+
+        for (char c : text) {
+            if (c < '0' || c > '9') { return std::nullopt; }
+
+            const std::uint64_t digit = static_cast<std::uint64_t>(c - '0');
+
+            if (value > (UINT64_MAX - digit) / 10) { return std::nullopt; }
+
+            value = value * 10 + digit;
+        }
+
+        if (value == 0) { return std::nullopt; }
+        return value;
     }
 }
 
@@ -15,8 +35,14 @@ namespace {
             if (c >= 'A' && c <= 'Z') { c = static_cast<char>(c - 'A' + 'a'); }
         }
 
-        if (extension == ".lib") { return OutputKind::StaticLibrary; }
-        if (extension == ".dll") { return OutputKind::DynamicLibrary; }
+        if (extension == pal::static_library_extension()) {
+            return OutputKind::StaticLibrary;
+        }
+
+        if (extension == pal::preferred_library_extension()) {
+            return OutputKind::DynamicLibrary;
+        }
+
         return OutputKind::Executable;
     }
 
@@ -110,6 +136,53 @@ namespace {
                 out.no_runtime = true;
             } else if (arg == L"--gallt-abi" || arg == L"-GA") {
                 out.gallt_abi = true;
+            } else if (arg == L"--stack") {
+                std::string* v = require_value(L"--stack");
+                if (!v) { return false; }
+
+                std::optional<std::uint64_t> parsed = parse_positive_size(*v);
+
+                if (parsed.has_value()) {
+                    out.stack_size = parsed;
+                } else {
+                    std::cerr << "--stack: invalid value, will revert to the system default value\n";
+                }
+            } else if (arg == L"--commit") {
+                std::string* v = require_value(L"--commit");
+                if (!v) { return false; }
+
+                std::optional<std::uint64_t> parsed = parse_positive_size(*v);
+
+                if (parsed.has_value()) {
+                    out.commit_size = parsed;
+                } else {
+                    std::cerr << "--commit: invalid value, will revert to the system default value\n";
+                }
+            } else if (arg == L"--instantiation-depth") {
+                std::string* v = require_value(L"--instantiation-depth");
+                if (!v) { return false; }
+
+                std::optional<std::uint64_t> parsed = parse_positive_size(*v);
+
+                if (parsed.has_value()) {
+                    out.instantiation_depth = parsed;
+                } else {
+                    std::cerr << "--instantiation-depth: invalid value, will revert to the default value\n";
+                }
+            } else if (arg == L"--linker") {
+                std::string* v = require_value(L"--linker");
+                if (!v) { return false; }
+
+                if (*v == "dynamic") {
+                    out.linker_mode = LinkerMode::Dynamic;
+                } else if (*v == "static") {
+                    out.linker_mode = LinkerMode::Static;
+                } else {
+                    out.mode = CommandMode::Invalid;
+                    out.error_message = "invalid linker mode: " + *v +
+                        " (expected dynamic or static)";
+                    return false;
+                }
             } else if (!arg.empty() && arg[0] == L'-') {
                 out.mode = CommandMode::Invalid;
                 out.error_message = "unknown option: " + narrow_utf8(arg);
@@ -178,6 +251,14 @@ namespace {
             "  sgc --compile --input \"file.glt\" --output \"library.lib\" -NR\n"
             "  sgc --compile --input \"file.glt\" --output \"program.exe\" --gallt-abi\n"
             "  sgc --compile --input \"file.glt\" --output \"program.exe\" -GA\n"
+            "  sgc --compile --input \"file.glt\" --output \"program.exe\" "
+            "--stack <bytes> --commit <bytes>\n"
+            "  sgc --compile --input \"file.glt\" --output \"program.exe\" "
+            "--linker dynamic\n"
+            "  sgc --compile --input \"file.glt\" --output \"program.exe\" "
+            "--linker static\n"
+            "  sgc --compile --input \"file.glt\" --output \"program.exe\" "
+            "--instantiation-depth <n>\n"
             "  sgc --help\n"
             "  sgc --version\n"
             "Options:\n"
@@ -197,26 +278,43 @@ namespace {
             "and line number tables\n"
             "  --debug                       enable debug mode\n"
             "  --release                     enable release mode\n"
-            "  --no-runtime, -NR             emit without the C runtime (importable\n"
+            "  --no-runtime, -NR             emit without the Gallt runtime (importable\n"
             "                                library output; only exported functions\n"
             "                                stay externally visible)\n"
             "  --gallt-abi, -GA              call extern declarations with the native\n"
             "                                Gallt ABI (use when importing a library\n"
             "                                produced by sgc; C libraries need the\n"
             "                                default C ABI)\n"
+            "  --stack <bytes>               main-thread stack reserve size in bytes\n"
+            "                                (non-zero positive integer; zero or\n"
+            "                                negative values are silently ignored)\n"
+            "  --commit <bytes>              main-thread stack commit size in bytes\n"
+            "                                (non-zero positive integer; zero or\n"
+            "                                negative values are silently ignored)\n"
+            "  --linker <dynamic|static>     system C library linking mode:\n"
+            "                                dynamic (default) or static\n"
+            "  --instantiation-depth <n>     generic instantiation recursion depth limit\n"
+            "                                (non-zero positive integer; default 2048;\n"
+            "                                values above 2048 are allowed but\n"
+            "                                compile time is not guaranteed and\n"
+            "                                compilation may terminate)\n"
             "Conflicts:\n"
             "  --optimization-level and --debug-symbols cannot be combined\n"
             "  --debug and --release cannot be combined\n"
             "  --debug does not allow --optimization-level\n"
-            "  --release does not allow --debug-symbols\n";
+            "  --release does not allow --debug-symbols\n"
+            "Notes:\n"
+            "  --stack, --commit and --linker only affect executable output;\n"
+            "  they are silently ignored for library output\n"
+            "  --linker does not affect the Gallt runtime, which is controlled\n"
+            "  by --no-runtime\n";
     }
 
     std::string version_text() {
         return
-        "sgc Standard Gallt Compiler 0.4.2-0926 Preview (LLVM backend, x86-64 Windows)\n"
-        "Gallt Lang Standard Version 26.09 (Preview)\n"
-        "Build date: 2026-09-26\n"
-            "The compiler is an early preview version, and support for certain syntax and edge cases may not be fully covered. We appreciate your understanding";
+        "Standard Gallt Compiler (sgc) 0.5.0-1004 Preview (LLVM backend, x86-64 Windows and Linux)\n"
+        "Build date: 2026-10-04\n"
+        "This version is experimental";
     }
 
 }

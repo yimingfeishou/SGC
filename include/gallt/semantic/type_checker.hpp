@@ -2,8 +2,10 @@
 #define GALLT_SEMANTIC_TYPE_CHECKER_HPP
 
 #include "symbol_table.hpp"
+#include "constexpr_function.hpp"
 #include "../common/diagnostics.hpp"
 #include "../parser/ast.hpp"
+#include <deque>
 #include <memory>
 #include <vector>
 #include <string>
@@ -27,6 +29,8 @@ namespace gallt {
         TypeChecker& operator=(const TypeChecker&) = delete;
 
         bool check_program(AST::Program* program);
+
+        void apply_constexpr_folding(AST::Program& program);
 
         bool has_errors() const { return diag_.has_errors(); }
 
@@ -71,6 +75,11 @@ namespace gallt {
         std::unordered_map<std::string, AST::StructDefinition*> struct_defs_;
 
         std::unordered_map<const AST::Expression*, AST::Type> expression_types_;
+        std::unordered_set<const AST::FunctionDefinition*> declared_functions_;
+
+        bool is_declared_function(const AST::FunctionDefinition* node) const {
+            return node != nullptr && declared_functions_.count(node) != 0;
+        }
 
         std::unordered_map<const AST::PrimaryExpression*, const AST::FunctionDefinition*>
             resolved_functions_;
@@ -78,6 +87,7 @@ namespace gallt {
             resolved_externs_;
         std::unordered_map<const AST::Expression*, AST::FunctionDefinition*> resolved_operators_;
         std::unordered_map<std::string, std::vector<AST::FunctionDefinition*>> operator_overloads_;
+        std::unordered_set<const AST::FunctionDefinition*> redefined_operators_;
 
         void collect_operator_overloads();
         struct VariadicPack {
@@ -116,6 +126,9 @@ namespace gallt {
         const AST::Type* expected_type_ = nullptr;
 
         void check_top_level(AST::TopLevel* node);
+
+        class NodeChecker;
+        class FoldRewriter;
         bool validate_export_function(AST::FunctionDefinition* node);
         void check_guide_statement(AST::GuideStatement* node);
         void check_clib_statement(AST::ClibStatement* node);
@@ -239,6 +252,47 @@ namespace gallt {
         std::optional<size_t> evaluate_const_expression(AST::Expression* expr);
         bool is_constant_integer_expression(AST::Expression* expr, size_t* out_value = nullptr);
 
+        ConstexprInterpreter constexpr_interpreter_;
+        std::unordered_map<const AST::PostfixExpression*, ConstexprValue>
+            constexpr_calls_;
+        std::vector<std::unordered_map<std::string, ConstexprValue>>
+            constexpr_values_;
+        std::deque<std::string> constexpr_lexemes_;
+        const AST::FunctionDefinition* constexpr_owner_ = nullptr;
+        int constexpr_owner_depth_ = 0;
+
+        void configure_constexpr_host();
+        bool constexpr_type_is_compilable(const AST::Type& type,
+            std::string& offender_type, std::string& offender_member);
+        void validate_constexpr_types(AST::FunctionDefinition* node);
+        void validate_constexpr_statement(const AST::Statement* stmt);
+        void validate_constexpr_expression(const AST::Expression* expr);
+        void validate_constexpr_call_expression(
+            const AST::PostfixExpression* call);
+        void report_constexpr_operation(const AST::Node* node,
+            const std::string& operation, bool side_effect);
+        void check_constexpr_call(AST::PostfixExpression* call, const Symbol& callee);
+        bool evaluate_constexpr_expression(const AST::Expression* expr,
+            ConstexprValue& out);
+        bool evaluate_constexpr_initializer(const AST::Initializer* init,
+            const AST::Type& type, ConstexprValue& out);
+        bool evaluate_constexpr_function_call(
+            const AST::FunctionDefinition* function,
+            const std::vector<ConstexprValue>& arguments, ConstexprValue& out);
+        const AST::FunctionDefinition* resolve_constexpr_function(
+            const std::string& name, const std::vector<ConstexprValue>& arguments);
+        void record_constexpr_declaration(AST::VariableDeclaration* decl);
+
+        void fold_top_level(AST::TopLevel* node);
+        void fold_statement(AST::Statement* stmt);
+        void fold_initializer(std::unique_ptr<AST::Initializer>& holder);
+        void fold_expression(std::unique_ptr<AST::Expression>& holder);
+        void fold_expression_tree(AST::Expression* expr);
+        std::unique_ptr<AST::Expression> make_constexpr_literal(
+            SourceLocation loc, const ConstexprValue& value);
+        std::unique_ptr<AST::Initializer> make_constexpr_initializer(
+            SourceLocation loc, const AST::Type& type, const ConstexprValue& value);
+
         struct ConstValue {
             long long int_value = 0;
             double float_value = 0.0;
@@ -256,6 +310,7 @@ namespace gallt {
             AST::Expression* expr);
         void check_const_declaration(AST::VariableDeclaration* decl);
         bool is_compile_time_constant_expression(AST::Expression* expr);
+        bool is_constexpr_call_expression(const AST::PostfixExpression* call);
         static std::string expression_display_name(const AST::Expression* expr);
 
     };

@@ -1,4 +1,5 @@
 #include "namespace_lowering.hpp"
+#include "../parser/ast_visitor.hpp"
 #include "diagnosed_registry.hpp"
 #include <algorithm>
 #include <cstddef>
@@ -531,129 +532,457 @@ namespace gallt {
         rewrite_expression_nested(holder.get());
     }
 
+    class NamespaceLowering::ExpressionRewriter : public AST::AstRewriter {
+    public:
+        explicit ExpressionRewriter(NamespaceLowering& owner) : owner_(owner) {
+        }
+
+    protected:
+        bool EnterPrimaryExpression(PrimaryExpression* node) override {
+            switch (node->kind) {
+            case PrimaryExpression::Kind::QualifiedName:
+                if (node->generic_ref) {
+                    owner_.rewrite_generic_ref(*node->generic_ref);
+                }
+                return false;
+            case PrimaryExpression::Kind::Parens:
+                owner_.rewrite_expression(node->paren_expr);
+                return false;
+            case PrimaryExpression::Kind::Heap:
+                owner_.rewrite_type(node->heap_type);
+                owner_.rewrite_expression(node->heap_size);
+                return false;
+            case PrimaryExpression::Kind::Construct:
+            case PrimaryExpression::Kind::PlacementConstruct:
+                owner_.rewrite_type(node->construct_type);
+                for (std::unique_ptr<Expression>& arg : node->construct_args) {
+                    owner_.rewrite_expression(arg);
+                }
+                owner_.rewrite_expression(node->placement_target);
+                return false;
+            case PrimaryExpression::Kind::CopyMove:
+                owner_.rewrite_expression(node->paren_expr);
+                return false;
+            default:
+                return false;
+            }
+        }
+
+        bool EnterCompileTimePropertyExpression(
+            CompileTimePropertyExpression* node) override {
+            owner_.rewrite_expression(node->receiver);
+
+            for (std::unique_ptr<Expression>& arg : node->arguments) {
+                owner_.rewrite_expression(arg);
+            }
+
+            return false;
+        }
+
+        bool EnterAssignmentExpression(AssignmentExpression* node) override {
+            owner_.rewrite_expression(node->left);
+            owner_.rewrite_expression(node->right);
+            return false;
+        }
+
+        bool EnterLogicalOrExpression(LogicalOrExpression* node) override {
+            owner_.rewrite_expression(node->left);
+            owner_.rewrite_expression(node->right);
+            return false;
+        }
+
+        bool EnterLogicalAndExpression(LogicalAndExpression* node) override {
+            owner_.rewrite_expression(node->left);
+            owner_.rewrite_expression(node->right);
+            return false;
+        }
+
+        bool EnterComparisonExpression(ComparisonExpression* node) override {
+            owner_.rewrite_expression(node->left);
+            owner_.rewrite_expression(node->right);
+            return false;
+        }
+
+        bool EnterAdditiveExpression(AdditiveExpression* node) override {
+            owner_.rewrite_expression(node->left);
+            owner_.rewrite_expression(node->right);
+            return false;
+        }
+
+        bool EnterMultiplicativeExpression(MultiplicativeExpression* node) override {
+            owner_.rewrite_expression(node->left);
+            owner_.rewrite_expression(node->right);
+            return false;
+        }
+
+        bool EnterPowerExpression(PowerExpression* node) override {
+            owner_.rewrite_expression(node->left);
+            owner_.rewrite_expression(node->right);
+            return false;
+        }
+
+        bool EnterBitwiseExpression(BitwiseExpression* node) override {
+            owner_.rewrite_expression(node->left);
+            owner_.rewrite_expression(node->right);
+            return false;
+        }
+
+        bool EnterShiftExpression(ShiftExpression* node) override {
+            owner_.rewrite_expression(node->left);
+            owner_.rewrite_expression(node->right);
+            return false;
+        }
+
+        bool EnterConditionalExpression(ConditionalExpression* node) override {
+            owner_.rewrite_expression(node->condition);
+            owner_.rewrite_expression(node->then_expr);
+            owner_.rewrite_expression(node->else_expr);
+            return false;
+        }
+
+        bool EnterUnaryExpression(UnaryExpression* node) override {
+            owner_.rewrite_expression(node->operand);
+            return false;
+        }
+
+        bool EnterPostfixExpression(PostfixExpression* node) override {
+            owner_.rewrite_expression(node->base);
+            owner_.rewrite_expression(node->subscript_expr);
+
+            for (std::unique_ptr<Expression>& arg : node->arguments) {
+                owner_.rewrite_expression(arg);
+            }
+
+            owner_.rewrite_type(node->cast_type);
+            return false;
+        }
+
+    private:
+        NamespaceLowering& owner_;
+    };
+
     void NamespaceLowering::rewrite_expression_nested(Expression* expr) {
         if (expr == nullptr) { return; }
         if (poisoned_node(expr)) { return; }
         type_location_hint_ = expr->location;
-        if (auto* e = dynamic_cast<PrimaryExpression*>(expr)) {
-            switch (e->kind) {
-            case PrimaryExpression::Kind::QualifiedName: {
-                if (e->generic_ref) {
-                    rewrite_generic_ref(*e->generic_ref);
-                }
-                return;
-            }
-            case PrimaryExpression::Kind::Parens:
-                rewrite_expression(e->paren_expr);
-                return;
-            case PrimaryExpression::Kind::Heap:
-                rewrite_type(e->heap_type);
-                rewrite_expression(e->heap_size);
-                return;
-            case PrimaryExpression::Kind::Construct:
-            case PrimaryExpression::Kind::PlacementConstruct:
-                rewrite_type(e->construct_type);
-                for (auto& arg : e->construct_args) { rewrite_expression(arg); }
-                rewrite_expression(e->placement_target);
-                return;
-            case PrimaryExpression::Kind::CopyMove:
-                rewrite_expression(e->paren_expr);
-                return;
-            default:
-                return;
-            }
-        }
-        if (auto* e = dynamic_cast<CompileTimePropertyExpression*>(expr)) {
-            rewrite_expression(e->receiver);
-            for (auto& arg : e->arguments) { rewrite_expression(arg); }
-            return;
-        }
 
-        if (auto* e = dynamic_cast<AssignmentExpression*>(expr)) {
-            rewrite_expression(e->left);
-            rewrite_expression(e->right);
-            return;
-        }
-
-        if (auto* e = dynamic_cast<LogicalOrExpression*>(expr)) {
-            rewrite_expression(e->left);
-            rewrite_expression(e->right);
-            return;
-        }
-
-        if (auto* e = dynamic_cast<LogicalAndExpression*>(expr)) {
-            rewrite_expression(e->left);
-            rewrite_expression(e->right);
-            return;
-        }
-
-        if (auto* e = dynamic_cast<ComparisonExpression*>(expr)) {
-            rewrite_expression(e->left);
-            rewrite_expression(e->right);
-            return;
-        }
-
-        if (auto* e = dynamic_cast<AdditiveExpression*>(expr)) {
-            rewrite_expression(e->left);
-            rewrite_expression(e->right);
-            return;
-        }
-
-        if (auto* e = dynamic_cast<MultiplicativeExpression*>(expr)) {
-            rewrite_expression(e->left);
-            rewrite_expression(e->right);
-            return;
-        }
-
-        if (auto* e = dynamic_cast<PowerExpression*>(expr)) {
-            rewrite_expression(e->left);
-            rewrite_expression(e->right);
-            return;
-        }
-
-        if (auto* e = dynamic_cast<BitwiseExpression*>(expr)) {
-            rewrite_expression(e->left);
-            rewrite_expression(e->right);
-            return;
-        }
-
-        if (auto* e = dynamic_cast<ShiftExpression*>(expr)) {
-            rewrite_expression(e->left);
-            rewrite_expression(e->right);
-            return;
-        }
-
-        if (auto* e = dynamic_cast<ConditionalExpression*>(expr)) {
-            rewrite_expression(e->condition);
-            rewrite_expression(e->then_expr);
-            rewrite_expression(e->else_expr);
-            return;
-        }
-
-        if (auto* e = dynamic_cast<UnaryExpression*>(expr)) {
-            rewrite_expression(e->operand);
-            return;
-        }
-
-        if (auto* e = dynamic_cast<PostfixExpression*>(expr)) {
-            rewrite_expression(e->base);
-            rewrite_expression(e->subscript_expr);
-            for (auto& arg : e->arguments) { rewrite_expression(arg); }
-            rewrite_type(e->cast_type);
-            return;
-        }
+        std::unique_ptr<Expression> holder(expr);
+        ExpressionRewriter rewriter(*this);
+        rewriter.rewrite_expression(holder);
+        holder.release();
     }
+
+    class NamespaceLowering::StatementRewriter : public AST::AstRewriter {
+    public:
+        explicit StatementRewriter(NamespaceLowering& owner) : owner_(owner) {
+        }
+
+    protected:
+        bool EnterTopLevel(std::unique_ptr<TopLevel>&) override {
+            ++top_level_entry_;
+            return true;
+        }
+
+        void LeaveTopLevel(std::unique_ptr<TopLevel>&) override {
+            --top_level_entry_;
+        }
+
+        bool EnterBlock(Block* node) override {
+            owner_.push_scope();
+
+            for (std::unique_ptr<Statement>& child : node->statements) {
+                if (auto* vd = dynamic_cast<VariableDeclaration*>(child.get())) {
+                    owner_.declare_name(vd->name, vd->type.to_string());
+                } else if (auto* sd = dynamic_cast<StructDefinition*>(child.get())) {
+                    owner_.declare_name(sd->name, sd->name);
+                } else if (auto* fd = dynamic_cast<FunctionDefinition*>(child.get())) {
+                    owner_.declare_name(fd->name,
+                        fd->return_type.to_string() + "(...)");
+                }
+            }
+
+            for (std::unique_ptr<Statement>& child : node->statements) {
+                owner_.rewrite_statement(child.get());
+            }
+
+            std::vector<std::unique_ptr<Statement>> kept;
+            kept.reserve(node->statements.size());
+
+            for (std::unique_ptr<Statement>& child : node->statements) {
+                if (dynamic_cast<AccessNamespaceStatement*>(child.get()) != nullptr) {
+                    continue;
+                }
+
+                kept.push_back(std::move(child));
+            }
+
+            node->statements = std::move(kept);
+            owner_.pop_scope();
+            return false;
+        }
+
+        bool EnterVariableDeclaration(VariableDeclaration* node) override {
+            owner_.rewrite_type(node->type);
+
+            if (node->array_size_expr) {
+                owner_.rewrite_expression(node->array_size_expr);
+            }
+
+            if (node->function_pointer_type) {
+                owner_.rewrite_type(*node->function_pointer_type);
+            }
+
+            owner_.rewrite_initializer(node->initializer.get());
+            return false;
+        }
+
+        bool EnterStructDefinition(StructDefinition* node) override {
+            for (StructDefinition::Member& member : node->members) {
+                owner_.rewrite_type(member.type);
+
+                if (member.array_size_expr) {
+                    owner_.rewrite_expression(member.array_size_expr);
+                }
+
+                if (member.function_pointer_type) {
+                    owner_.rewrite_type(*member.function_pointer_type);
+                }
+
+                owner_.rewrite_initializer(member.initializer.get());
+            }
+
+            for (std::unique_ptr<SpecialMemberFunction>& smf : node->special_members) {
+                for (Type& parameter : smf->parameters) {
+                    owner_.rewrite_type(parameter);
+                }
+
+                owner_.rewrite_type(smf->parameter_type);
+
+                for (std::unique_ptr<Expression>& value : smf->parameter_defaults) {
+                    owner_.rewrite_expression(value);
+                }
+
+                owner_.push_scope();
+
+                if (!smf->parameter_name.empty()) {
+                    owner_.declare_name(smf->parameter_name, "object*");
+                }
+
+                for (const std::string& name : smf->parameter_names) {
+                    if (!name.empty()) {
+                        owner_.declare_name(name, "object");
+                    }
+                }
+
+                owner_.rewrite_statement(smf->body.get());
+                owner_.pop_scope();
+            }
+
+            return false;
+        }
+
+        bool EnterFunctionDefinition(FunctionDefinition* node) override {
+            owner_.rewrite_type(node->return_type);
+
+            for (Type& parameter : node->parameters) {
+                owner_.rewrite_type(parameter);
+            }
+
+            for (std::unique_ptr<Expression>& value : node->param_defaults) {
+                owner_.rewrite_expression(value);
+            }
+
+            owner_.push_scope();
+
+            for (std::size_t i = 0; i < node->param_names.size(); ++i) {
+                if (node->param_names[i].empty()) { continue; }
+
+                std::string type_text = i < node->parameters.size()
+                    ? node->parameters[i].to_string() : std::string("object");
+                owner_.declare_name(node->param_names[i], type_text);
+            }
+
+            owner_.rewrite_statement(node->body.get());
+            owner_.pop_scope();
+            return false;
+        }
+
+        bool EnterIfStatement(IfStatement* node) override {
+            owner_.rewrite_expression(node->condition);
+            owner_.rewrite_statement(node->then_block.get());
+            owner_.rewrite_statement(node->else_block.get());
+            return false;
+        }
+
+        bool EnterForStatement(ForStatement* node) override {
+            owner_.push_scope();
+
+            if (node->init) {
+                if (auto* vd = dynamic_cast<VariableDeclaration*>(node->init.get())) {
+                    owner_.declare_name(vd->name, vd->type.to_string());
+                }
+
+                owner_.rewrite_statement(node->init.get());
+            }
+
+            owner_.rewrite_expression(node->condition);
+            owner_.rewrite_expression(node->step);
+            owner_.rewrite_statement(node->body.get());
+            owner_.pop_scope();
+            return false;
+        }
+
+        bool EnterWhileStatement(WhileStatement* node) override {
+            owner_.rewrite_expression(node->condition);
+            owner_.rewrite_statement(node->body.get());
+            return false;
+        }
+
+        bool EnterReturnStatement(ReturnStatement* node) override {
+            owner_.rewrite_expression(node->value);
+            return false;
+        }
+
+        bool EnterExpressionStatement(ExpressionStatement* node) override {
+            owner_.rewrite_expression(node->expr);
+            return false;
+        }
+
+        bool EnterDestructStatement(DestructStatement* node) override {
+            owner_.rewrite_expression(node->target);
+            return false;
+        }
+
+        bool EnterAccessNamespaceStatement(AccessNamespaceStatement* node) override {
+            if (top_level_entry_ == 0) {
+                owner_.handle_access_namespace(node);
+            }
+
+            return false;
+        }
+
+        bool EnterInstantiationStatement(InstantiationStatement* node) override {
+            owner_.rewrite_generic_ref(node->reference);
+            return false;
+        }
+
+        bool EnterGenericDefinition(GenericDefinition* node) override {
+            if (top_level_entry_ == 0) {
+                return false;
+            }
+
+            owner_.push_scope();
+
+            for (const GenericParameter& param : node->parameters) {
+                owner_.declare_name(param.name, "generic parameter");
+            }
+
+            for (std::unique_ptr<TopLevel>& member : node->members) {
+                if (member == nullptr) { continue; }
+
+                if (std::string(declaration_kind(member.get())) == "unknown") {
+                    continue;
+                }
+
+                std::string member_name = declaration_name(member.get());
+
+                if (member_name.empty()) { continue; }
+
+                owner_.declare_name(member_name,
+                    declaration_type_text(member.get()));
+            }
+
+            for (std::unique_ptr<TopLevel>& member : node->members) {
+                owner_.rewrite_top_level(member.get());
+            }
+
+            for (std::unique_ptr<Statement>& item : node->compile_time_items) {
+                owner_.rewrite_statement(item.get());
+            }
+
+            owner_.pop_scope();
+            return false;
+        }
+
+        bool EnterExternDeclaration(ExternDeclaration* node) override {
+            owner_.rewrite_type(node->return_type);
+
+            for (Type& parameter : node->parameters) {
+                owner_.rewrite_type(parameter);
+            }
+
+            return false;
+        }
+
+        bool EnterEmitStatement(EmitStatement* node) override {
+            for (std::unique_ptr<Expression>& piece : node->pieces) {
+                owner_.rewrite_expression(piece);
+            }
+
+            for (std::unique_ptr<Node>& item : node->block_items) {
+                if (auto* top = dynamic_cast<TopLevel*>(item.get())) {
+                    owner_.rewrite_top_level(top);
+                } else if (auto* inner = dynamic_cast<Statement*>(item.get())) {
+                    owner_.rewrite_statement(inner);
+                }
+            }
+
+            return false;
+        }
+
+        bool EnterNamespaceDefinition(NamespaceDefinition*) override {
+            return false;
+        }
+
+        bool EnterAdditionNamespaceStatement(AdditionNamespaceStatement*) override {
+            return false;
+        }
+
+        bool EnterCondDefinition(CondDefinition*) override { return false; }
+
+        bool EnterUncondDefinition(UncondDefinition*) override { return false; }
+
+        bool EnterConditionalBlock(ConditionalBlock*) override { return false; }
+
+        bool EnterTopLevelBlock(TopLevelBlock*) override { return false; }
+
+    private:
+        NamespaceLowering& owner_;
+        int top_level_entry_ = 0;
+    };
+
+    class NamespaceLowering::InitializerRewriter : public AST::AstRewriter {
+    public:
+        explicit InitializerRewriter(NamespaceLowering& owner) : owner_(owner) {
+        }
+
+    protected:
+        bool EnterExpressionInitializer(ExpressionInitializer* node) override {
+            owner_.rewrite_expression(node->expr);
+            return false;
+        }
+
+        bool EnterArrayInitializer(ArrayInitializer* node) override {
+            for (std::unique_ptr<Initializer>& element : node->elements) {
+                owner_.rewrite_initializer(element.get());
+            }
+
+            return false;
+        }
+
+    private:
+        NamespaceLowering& owner_;
+    };
 
     void NamespaceLowering::rewrite_initializer(Initializer* init) {
         if (init == nullptr) { return; }
         if (poisoned_node(init)) { return; }
         PoisonGuard guard(*this, init);
 
-        if (auto* e = dynamic_cast<ExpressionInitializer*>(init)) {
-            rewrite_expression(e->expr);
-        } else if (auto* a = dynamic_cast<ArrayInitializer*>(init)) {
-            for (auto& element : a->elements) { rewrite_initializer(element.get()); }
-        }
+        std::unique_ptr<Initializer> holder(init);
+        InitializerRewriter rewriter(*this);
+        rewriter.rewrite_initializer(holder);
+        holder.release();
     }
 
     void NamespaceLowering::rewrite_statement(Statement* stmt) {
@@ -662,158 +991,10 @@ namespace gallt {
         PoisonGuard guard(*this, stmt);
         type_location_hint_ = stmt->location;
 
-        if (auto* block = dynamic_cast<Block*>(stmt)) {
-            push_scope();
-
-            for (auto& child : block->statements) {
-                if (auto* vd = dynamic_cast<VariableDeclaration*>(child.get())) {
-                    declare_name(vd->name, vd->type.to_string());
-                } else if (auto* sd = dynamic_cast<StructDefinition*>(child.get())) {
-                    declare_name(sd->name, sd->name);
-                } else if (auto* fd = dynamic_cast<FunctionDefinition*>(child.get())) {
-                    declare_name(fd->name, fd->return_type.to_string() + "(...)");
-                }
-            }
-
-            for (auto& child : block->statements) { rewrite_statement(child.get()); }
-            std::vector<std::unique_ptr<Statement>> kept;
-            kept.reserve(block->statements.size());
-
-            for (auto& child : block->statements) {
-                if (dynamic_cast<AccessNamespaceStatement*>(child.get()) != nullptr) {
-                    continue;
-                }
-
-                kept.push_back(std::move(child));
-            }
-
-            block->statements = std::move(kept);
-            pop_scope();
-            return;
-        }
-
-        if (auto* vd = dynamic_cast<VariableDeclaration*>(stmt)) {
-            rewrite_type(vd->type);
-            if (vd->array_size_expr) { rewrite_expression(vd->array_size_expr); }
-            if (vd->function_pointer_type) { rewrite_type(*vd->function_pointer_type); }
-            rewrite_initializer(vd->initializer.get());
-            return;
-        }
-
-        if (auto* sd = dynamic_cast<StructDefinition*>(stmt)) {
-            for (auto& member : sd->members) {
-                rewrite_type(member.type);
-                if (member.array_size_expr) { rewrite_expression(member.array_size_expr); }
-                if (member.function_pointer_type) { rewrite_type(*member.function_pointer_type); }
-                rewrite_initializer(member.initializer.get());
-            }
-
-            for (auto& smf : sd->special_members) {
-                for (Type& p : smf->parameters) { rewrite_type(p); }
-                rewrite_type(smf->parameter_type);
-                for (auto& d : smf->parameter_defaults) { rewrite_expression(d); }
-                push_scope();
-
-                if (!smf->parameter_name.empty()) {
-                    declare_name(smf->parameter_name, "object*");
-                }
-
-                for (const std::string& pname : smf->parameter_names) {
-                    if (!pname.empty()) { declare_name(pname, "object"); }
-                }
-
-                rewrite_statement(smf->body.get());
-                pop_scope();
-            }
-            return;
-        }
-
-        if (auto* fd = dynamic_cast<FunctionDefinition*>(stmt)) {
-            rewrite_type(fd->return_type);
-            for (Type& p : fd->parameters) { rewrite_type(p); }
-            for (auto& d : fd->param_defaults) { rewrite_expression(d); }
-            push_scope();
-
-            for (std::size_t i = 0; i < fd->param_names.size(); ++i) {
-                if (fd->param_names[i].empty()) { continue; }
-                std::string type_text = i < fd->parameters.size()
-                    ? fd->parameters[i].to_string() : std::string("object");
-                declare_name(fd->param_names[i], type_text);
-            }
-
-            rewrite_statement(fd->body.get());
-            pop_scope();
-            return;
-        }
-
-        if (auto* is = dynamic_cast<IfStatement*>(stmt)) {
-            rewrite_expression(is->condition);
-            rewrite_statement(is->then_block.get());
-            rewrite_statement(is->else_block.get());
-            return;
-        }
-
-        if (auto* fs = dynamic_cast<ForStatement*>(stmt)) {
-            push_scope();
-
-            if (fs->init) {
-                if (auto* vd = dynamic_cast<VariableDeclaration*>(fs->init.get())) {
-                    declare_name(vd->name, vd->type.to_string());
-                }
-
-                rewrite_statement(fs->init.get());
-            }
-
-            rewrite_expression(fs->condition);
-            rewrite_expression(fs->step);
-            rewrite_statement(fs->body.get());
-            pop_scope();
-            return;
-        }
-
-        if (auto* ws = dynamic_cast<WhileStatement*>(stmt)) {
-            rewrite_expression(ws->condition);
-            rewrite_statement(ws->body.get());
-            return;
-        }
-
-        if (auto* rs = dynamic_cast<ReturnStatement*>(stmt)) {
-            rewrite_expression(rs->value);
-            return;
-        }
-
-        if (auto* es = dynamic_cast<ExpressionStatement*>(stmt)) {
-            rewrite_expression(es->expr);
-            return;
-        }
-
-        if (auto* ds = dynamic_cast<DestructStatement*>(stmt)) {
-            rewrite_expression(ds->target);
-            return;
-        }
-
-        if (auto* ac = dynamic_cast<AccessNamespaceStatement*>(stmt)) {
-            handle_access_namespace(ac);
-            return;
-        }
-
-        if (auto* inst = dynamic_cast<InstantiationStatement*>(stmt)) {
-            rewrite_generic_ref(inst->reference);
-            return;
-        }
-
-        if (auto* emit = dynamic_cast<EmitStatement*>(stmt)) {
-            for (auto& piece : emit->pieces) { rewrite_expression(piece); }
-
-            for (auto& item : emit->block_items) {
-                if (auto* tl = dynamic_cast<TopLevel*>(item.get())) {
-                    rewrite_top_level(tl);
-                } else if (auto* inner = dynamic_cast<Statement*>(item.get())) {
-                    rewrite_statement(inner);
-                }
-            }
-            return;
-        }
+        std::unique_ptr<Statement> holder(stmt);
+        StatementRewriter rewriter(*this);
+        rewriter.rewrite_statement(holder);
+        holder.release();
     }
 
     void NamespaceLowering::rewrite_top_level(TopLevel* node) {
@@ -822,68 +1003,10 @@ namespace gallt {
         PoisonGuard guard(*this, node);
         type_location_hint_ = node->location;
 
-        if (auto* sd = dynamic_cast<StructDefinition*>(node)) {
-            rewrite_statement(sd);
-            return;
-        }
-
-        if (auto* fd = dynamic_cast<FunctionDefinition*>(node)) {
-            rewrite_type(fd->return_type);
-            for (Type& p : fd->parameters) { rewrite_type(p); }
-            for (auto& d : fd->param_defaults) { rewrite_expression(d); }
-            push_scope();
-
-            for (std::size_t i = 0; i < fd->param_names.size(); ++i) {
-                if (fd->param_names[i].empty()) { continue; }
-                std::string type_text = i < fd->parameters.size()
-                    ? fd->parameters[i].to_string() : std::string("object");
-                declare_name(fd->param_names[i], type_text);
-            }
-
-            rewrite_statement(fd->body.get());
-            pop_scope();
-            return;
-        }
-
-        if (auto* vd = dynamic_cast<VariableDeclaration*>(node)) {
-            rewrite_type(vd->type);
-            if (vd->array_size_expr) { rewrite_expression(vd->array_size_expr); }
-            if (vd->function_pointer_type) { rewrite_type(*vd->function_pointer_type); }
-            rewrite_initializer(vd->initializer.get());
-            return;
-        }
-
-        if (auto* gd = dynamic_cast<GenericDefinition*>(node)) {
-            push_scope();
-
-            for (const GenericParameter& param : gd->parameters) {
-                declare_name(param.name, "generic parameter");
-            }
-
-            for (auto& member : gd->members) {
-                if (member == nullptr) { continue; }
-                if (std::string(declaration_kind(member.get())) == "unknown") { continue; }
-                std::string member_name = declaration_name(member.get());
-                if (member_name.empty()) { continue; }
-                declare_name(member_name, declaration_type_text(member.get()));
-            }
-
-            for (auto& member : gd->members) { rewrite_top_level(member.get()); }
-            for (auto& item : gd->compile_time_items) { rewrite_statement(item.get()); }
-            pop_scope();
-            return;
-        }
-
-        if (auto* ed = dynamic_cast<ExternDeclaration*>(node)) {
-            rewrite_type(ed->return_type);
-            for (Type& p : ed->parameters) { rewrite_type(p); }
-            return;
-        }
-
-        if (auto* inst = dynamic_cast<InstantiationStatement*>(node)) {
-            rewrite_generic_ref(inst->reference);
-            return;
-        }
+        std::unique_ptr<TopLevel> holder(node);
+        StatementRewriter rewriter(*this);
+        rewriter.rewrite_top_level(holder);
+        holder.release();
     }
 
     void NamespaceLowering::handle_access_namespace(AccessNamespaceStatement* node) {
@@ -1051,9 +1174,30 @@ namespace gallt {
         std::vector<std::unique_ptr<TopLevel>> out;
         out.reserve(program->top_levels.size());
         lower_top_levels(program->top_levels, out, false);
-        pop_scope();
         program->top_levels = std::move(out);
         return !had_error_;
+    }
+
+    bool NamespaceLowering::lower_new_top_levels(
+        std::vector<std::unique_ptr<AST::TopLevel>>& nodes) {
+        if (nodes.empty()) { return true; }
+        if (scopes_.empty()) { push_scope(); }
+
+        const std::size_t errors_before = diag_.error_count();
+
+        for (auto& node : nodes) {
+            std::string name = declaration_name(node.get());
+
+            if (name.empty()) { continue; }
+
+            declare_name(name, declaration_type_text(node.get()));
+        }
+
+        std::vector<std::unique_ptr<TopLevel>> out;
+        out.reserve(nodes.size());
+        lower_top_levels(nodes, out, false);
+        nodes = std::move(out);
+        return diag_.error_count() == errors_before;
     }
 
 }

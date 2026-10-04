@@ -2,6 +2,8 @@
 #define GALLT_PAL_PLATFORM_HPP
 
 #include <cstdint>
+#include <cstddef>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -42,6 +44,22 @@ namespace pal {
     const char* preferred_library_extension() noexcept;
     const char* static_library_extension() noexcept;
     std::vector<std::string> library_probe_extensions();
+    const char* default_executable_extension() noexcept;
+    const char* object_file_extension() noexcept;
+
+    std::string find_llvm_clang();
+    std::string find_llvm_librarian();
+    std::vector<std::string> llvm_librarian_arguments(
+        const std::string& output, const std::vector<std::string>& members);
+    std::vector<std::string> linker_selection_arguments();
+    std::vector<std::string> stack_arguments(
+        const std::optional<std::uint64_t>& stack_size,
+        const std::optional<std::uint64_t>& commit_size);
+    std::vector<std::string> linker_mode_arguments(bool static_link);
+    std::vector<std::string> dynamic_library_export_arguments(
+        const std::vector<std::string>& symbols);
+    std::vector<std::string> compile_debug_arguments(int debug_symbols_level);
+    std::vector<std::string> link_debug_arguments(int debug_symbols_level);
 
     std::string to_utf8(const std::wstring& text);
     std::wstring to_wide(const std::string& text);
@@ -55,6 +73,14 @@ namespace pal {
     bool enable_utf8_console() noexcept;
     bool standard_input_is_interactive() noexcept;
     bool standard_input_is_readable() noexcept;
+    constexpr std::size_t kStackHeadroomUnknown =
+        static_cast<std::size_t>(-1);
+    std::size_t stack_headroom_bytes() noexcept;
+    bool stack_headroom_available(std::size_t required_bytes) noexcept;
+    std::size_t stack_total_bytes() noexcept;
+    constexpr char kStackOverflowMessage[] =
+        "sgc: stack overflow, compilation stopped";
+    bool install_stack_guard() noexcept;
     int exit_success_code() noexcept;
     int exit_failure_code() noexcept;
 

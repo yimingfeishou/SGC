@@ -9,7 +9,18 @@ guide "sl.glt"
 
 addition namespace sl {
 
-    extern int system from libucrt (string command)
+    @if (is_defined("WINDOWS_PLATFORM")) {
+        extern int system from libucrt (string command)
+    } @else {
+        @if (is_defined("LINUX_PLATFORM")) {
+            extern int system from libc (string command)
+        } @else {
+            int system(string command) {
+                output("your environment is currently not supported")
+                return -1
+            }
+        }
+    }
 
     bool is_digit(char c) {
         if (c < '0') {
@@ -361,6 +372,824 @@ addition namespace sl {
         string left = strconcat(a, sep)
         string result = strconcat(left, b)
         return result
+    }
+
+    bool __parse_is_space(char c) {
+        if (c == ' ') {
+            return true
+        }
+        if (c == '\t') {
+            return true
+        }
+        if (c == '\n') {
+            return true
+        }
+        if (c == '\r') {
+            return true
+        }
+        if (c == '\v') {
+            return true
+        }
+        if (c == '\f') {
+            return true
+        }
+        return false
+    }
+
+    string luint_to_string(luint value) {
+        if (value == 0lu) {
+            return "0"
+        }
+        string digits = ""
+        luint current = value
+        while (current > 0lu) {
+            int digit = cast<int>(current % 10lu)
+            char symbol = cast<char>(digit + 48)
+            digits = strconcat(char_to_string(symbol), digits)
+            current = current / 10lu
+        }
+        return digits
+    }
+
+    string uint_to_string(uint value) {
+        return luint_to_string(cast<luint>(value))
+    }
+
+    string int_to_string(int value) {
+        lint wide = cast<lint>(value)
+        if (wide < 0l) {
+            luint magnitude = 0lu - cast<luint>(wide)
+            return strconcat("-", luint_to_string(magnitude))
+        }
+        return luint_to_string(cast<luint>(wide))
+    }
+
+    string lint_to_string(lint value) {
+        if (value < 0l) {
+            luint magnitude = 0lu - cast<luint>(value)
+            return strconcat("-", luint_to_string(magnitude))
+        }
+        return luint_to_string(cast<luint>(value))
+    }
+
+    string __double_integer_digits(double value, bool negative) {
+        if (value != 0.0 && value / 2.0 == value) {
+            if (negative) {
+                return "-inf"
+            }
+            return "inf"
+        }
+        int dropped = 0
+        double current = value
+        while (current >= 1000000000000000000.0 && dropped < 320) {
+            current = current / 10.0
+            dropped = dropped + 1
+        }
+        string digits = lint_to_string(cast<lint>(current + 0.5))
+        for (int i = 0; i < dropped; i++) {
+            digits = strconcat(digits, "0")
+        }
+        if (negative) {
+            return strconcat("-", digits)
+        }
+        return digits
+    }
+
+    string double_to_string(double value, int precision = 6) {
+        if (precision < 0) {
+            precision = 0
+        }
+        if (precision > 17) {
+            precision = 17
+        }
+        if (value != value) {
+            return "nan"
+        }
+        bool negative = false
+        if (value < 0.0) {
+            negative = true
+            value = 0.0 - value
+        }
+        lint scale = 1l
+        for (int i = 0; i < precision; i++) {
+            scale = scale * 10l
+        }
+        int effective = precision
+        while (effective > 0) {
+            double probe = value * cast<double>(scale)
+            if (probe < 9223372036854775807.0) {
+                break
+            }
+            scale = scale / 10l
+            effective = effective - 1
+        }
+        double top = value * cast<double>(scale)
+        if (top >= 9223372036854775807.0) {
+            return __double_integer_digits(value, negative)
+        }
+        double rounded = top + 0.5
+        if (rounded >= 9223372036854775807.0) {
+            return __double_integer_digits(value, negative)
+        }
+        lint scaled = cast<lint>(rounded)
+        lint int_part = scaled / scale
+        lint frac_part = scaled % scale
+        string result = lint_to_string(int_part)
+        if (effective > 0) {
+            string frac = luint_to_string(cast<luint>(frac_part))
+            frac = string_pad_left(frac, effective, '0')
+            result = strconcat(result, ".")
+            result = strconcat(result, frac)
+        }
+        if (negative) {
+            return strconcat("-", result)
+        }
+        return result
+    }
+
+    string bool_to_string(bool value) {
+        if (value) {
+            return "true"
+        }
+        return "false"
+    }
+
+    bool parse_int(string s, int* out) {
+        if (out == null) {
+            return false
+        }
+        int n = strlen(s)
+        int i = 0
+        while (i < n) {
+            char skip = strcharat(s, i)
+            if (!__parse_is_space(skip)) {
+                break
+            }
+            i = i + 1
+        }
+        bool negative = false
+        if (i < n) {
+            char sign = strcharat(s, i)
+            if (sign == '-') {
+                negative = true
+                i = i + 1
+            } else {
+                if (sign == '+') {
+                    i = i + 1
+                }
+            }
+        }
+        int start = i
+        lint limit = 2147483647l
+        if (negative) {
+            limit = 2147483648l
+        }
+        lint magnitude = 0l
+        bool overflow = false
+        while (i < n) {
+            char c = strcharat(s, i)
+            if (!is_digit(c)) {
+                break
+            }
+            int digit = cast<int>(c) - 48
+            if (magnitude > limit / 10l) {
+                overflow = true
+                break
+            }
+            magnitude = magnitude * 10l
+            if (cast<lint>(digit) > limit - magnitude) {
+                overflow = true
+                break
+            }
+            magnitude = magnitude + cast<lint>(digit)
+            i = i + 1
+        }
+        if (overflow) {
+            return false
+        }
+        if (i == start) {
+            return false
+        }
+        while (i < n) {
+            char tail = strcharat(s, i)
+            if (!__parse_is_space(tail)) {
+                return false
+            }
+            i = i + 1
+        }
+        if (negative) {
+            *out = cast<int>(0l - magnitude)
+        } else {
+            *out = cast<int>(magnitude)
+        }
+        return true
+    }
+
+    bool parse_lint(string s, lint* out) {
+        if (out == null) {
+            return false
+        }
+        int n = strlen(s)
+        int i = 0
+        while (i < n) {
+            char skip = strcharat(s, i)
+            if (!__parse_is_space(skip)) {
+                break
+            }
+            i = i + 1
+        }
+        bool negative = false
+        if (i < n) {
+            char sign = strcharat(s, i)
+            if (sign == '-') {
+                negative = true
+                i = i + 1
+            } else {
+                if (sign == '+') {
+                    i = i + 1
+                }
+            }
+        }
+        int start = i
+        luint limit = 9223372036854775807lu
+        if (negative) {
+            limit = 9223372036854775808lu
+        }
+        luint magnitude = 0lu
+        bool overflow = false
+        while (i < n) {
+            char c = strcharat(s, i)
+            if (!is_digit(c)) {
+                break
+            }
+            luint digit = cast<luint>(cast<int>(c) - 48)
+            if (magnitude > limit / 10lu) {
+                overflow = true
+                break
+            }
+            luint widened = magnitude * 10lu
+            if (widened > limit - digit) {
+                overflow = true
+                break
+            }
+            magnitude = widened + digit
+            i = i + 1
+        }
+        if (overflow) {
+            return false
+        }
+        if (i == start) {
+            return false
+        }
+        while (i < n) {
+            char tail = strcharat(s, i)
+            if (!__parse_is_space(tail)) {
+                return false
+            }
+            i = i + 1
+        }
+        if (negative) {
+            *out = cast<lint>(0lu - magnitude)
+        } else {
+            *out = cast<lint>(magnitude)
+        }
+        return true
+    }
+
+    bool parse_uint(string s, uint* out) {
+        if (out == null) {
+            return false
+        }
+        int n = strlen(s)
+        int i = 0
+        while (i < n) {
+            char skip = strcharat(s, i)
+            if (!__parse_is_space(skip)) {
+                break
+            }
+            i = i + 1
+        }
+        if (i < n) {
+            char sign = strcharat(s, i)
+            if (sign == '-') {
+                return false
+            }
+            if (sign == '+') {
+                i = i + 1
+            }
+        }
+        int start = i
+        luint limit = 4294967295lu
+        luint magnitude = 0lu
+        bool overflow = false
+        while (i < n) {
+            char c = strcharat(s, i)
+            if (!is_digit(c)) {
+                break
+            }
+            luint digit = cast<luint>(cast<int>(c) - 48)
+            if (magnitude > limit / 10lu) {
+                overflow = true
+                break
+            }
+            luint widened = magnitude * 10lu
+            if (widened > limit - digit) {
+                overflow = true
+                break
+            }
+            magnitude = widened + digit
+            i = i + 1
+        }
+        if (overflow) {
+            return false
+        }
+        if (i == start) {
+            return false
+        }
+        while (i < n) {
+            char tail = strcharat(s, i)
+            if (!__parse_is_space(tail)) {
+                return false
+            }
+            i = i + 1
+        }
+        *out = cast<uint>(magnitude)
+        return true
+    }
+
+    bool parse_luint(string s, luint* out) {
+        if (out == null) {
+            return false
+        }
+        int n = strlen(s)
+        int i = 0
+        while (i < n) {
+            char skip = strcharat(s, i)
+            if (!__parse_is_space(skip)) {
+                break
+            }
+            i = i + 1
+        }
+        if (i < n) {
+            char sign = strcharat(s, i)
+            if (sign == '-') {
+                return false
+            }
+            if (sign == '+') {
+                i = i + 1
+            }
+        }
+        int start = i
+        luint limit = 18446744073709551615lu
+        luint magnitude = 0lu
+        bool overflow = false
+        while (i < n) {
+            char c = strcharat(s, i)
+            if (!is_digit(c)) {
+                break
+            }
+            luint digit = cast<luint>(cast<int>(c) - 48)
+            if (magnitude > limit / 10lu) {
+                overflow = true
+                break
+            }
+            luint widened = magnitude * 10lu
+            if (widened > limit - digit) {
+                overflow = true
+                break
+            }
+            magnitude = widened + digit
+            i = i + 1
+        }
+        if (overflow) {
+            return false
+        }
+        if (i == start) {
+            return false
+        }
+        while (i < n) {
+            char tail = strcharat(s, i)
+            if (!__parse_is_space(tail)) {
+                return false
+            }
+            i = i + 1
+        }
+        *out = magnitude
+        return true
+    }
+
+    bool parse_double(string s, double* out) {
+        if (out == null) {
+            return false
+        }
+        int n = strlen(s)
+        int i = 0
+        while (i < n) {
+            char skip = strcharat(s, i)
+            if (!__parse_is_space(skip)) {
+                break
+            }
+            i = i + 1
+        }
+        bool negative = false
+        if (i < n) {
+            char sign = strcharat(s, i)
+            if (sign == '-') {
+                negative = true
+                i = i + 1
+            } else {
+                if (sign == '+') {
+                    i = i + 1
+                }
+            }
+        }
+        double value = 0.0
+        bool any_digit = false
+        while (i < n) {
+            char c = strcharat(s, i)
+            if (!is_digit(c)) {
+                break
+            }
+            int digit = cast<int>(c) - 48
+            value = value * 10.0 + cast<double>(digit)
+            any_digit = true
+            i = i + 1
+        }
+        if (i < n) {
+            if (strcharat(s, i) == '.') {
+                i = i + 1
+                double place = 0.1
+                while (i < n) {
+                    char c = strcharat(s, i)
+                    if (!is_digit(c)) {
+                        break
+                    }
+                    int digit = cast<int>(c) - 48
+                    value = value + cast<double>(digit) * place
+                    place = place * 0.1
+                    any_digit = true
+                    i = i + 1
+                }
+            }
+        }
+        if (!any_digit) {
+            return false
+        }
+        int exponent = 0
+        if (i < n) {
+            char marker = strcharat(s, i)
+            if (marker == 'e' || marker == 'E') {
+                i = i + 1
+                bool exp_negative = false
+                if (i < n) {
+                    char exp_sign = strcharat(s, i)
+                    if (exp_sign == '-') {
+                        exp_negative = true
+                        i = i + 1
+                    } else {
+                        if (exp_sign == '+') {
+                            i = i + 1
+                        }
+                    }
+                }
+                int exp_start = i
+                while (i < n) {
+                    char c = strcharat(s, i)
+                    if (!is_digit(c)) {
+                        break
+                    }
+                    if (exponent < 400) {
+                        exponent = exponent * 10 + (cast<int>(c) - 48)
+                        if (exponent > 400) {
+                            exponent = 400
+                        }
+                    }
+                    i = i + 1
+                }
+                if (i == exp_start) {
+                    return false
+                }
+                if (exp_negative) {
+                    exponent = 0 - exponent
+                }
+            }
+        }
+        while (i < n) {
+            char tail = strcharat(s, i)
+            if (!__parse_is_space(tail)) {
+                return false
+            }
+            i = i + 1
+        }
+        int steps = exponent
+        if (steps < 0) {
+            steps = 0 - steps
+        }
+        for (int k = 0; k < steps; k++) {
+            if (exponent >= 0) {
+                value = value * 10.0
+            } else {
+                value = value / 10.0
+            }
+        }
+        if (negative) {
+            value = 0.0 - value
+        }
+        *out = value
+        return true
+    }
+
+    string char_ptr_to_string(char* p) {
+        if (p == null) {
+            return ""
+        }
+        int n = 0
+        while (p[n] != '\0') {
+            n = n + 1
+        }
+        if (n == 0) {
+            return ""
+        }
+        string result = string_repeat(" ", n)
+        int i = 0
+        while (i < n) {
+            strsetchar(result, i, p[i])
+            i = i + 1
+        }
+        return result
+    }
+
+    char* string_to_char_ptr(string s) {
+        int n = strlen(s)
+        char* buffer = heap(char, n + 1)
+        if (buffer == null) {
+            return null
+        }
+        int i = 0
+        while (i < n) {
+            buffer[i] = strcharat(s, i)
+            i = i + 1
+        }
+        buffer[n] = '\0'
+        return buffer
+    }
+
+    bool string_to_char_buffer(string s, char* buffer, int capacity) {
+        if (buffer == null) {
+            return false
+        }
+        if (capacity <= 0) {
+            return false
+        }
+        int n = strlen(s)
+        if (n + 1 > capacity) {
+            return false
+        }
+        int i = 0
+        while (i < n) {
+            buffer[i] = strcharat(s, i)
+            i = i + 1
+        }
+        buffer[n] = '\0'
+        return true
+    }
+
+    bool string_equals_ignore_case(string a, string b) {
+        string left = strlower(a)
+        string right = strlower(b)
+        if (strcompare(left, right) == 0) {
+            return true
+        }
+        return false
+    }
+
+    int string_rfind(string s, string needle) {
+        int n = strlen(s)
+        int m = strlen(needle)
+        if (m == 0) {
+            return n
+        }
+        if (m > n) {
+            return -1
+        }
+        int i = n - m
+        while (i >= 0) {
+            string window = strsubstr(s, i, m)
+            if (strcompare(window, needle) == 0) {
+                return i
+            }
+            i = i - 1
+        }
+        return -1
+    }
+
+    bool string_contains_ignore_case(string s, string needle) {
+        if (strlen(needle) == 0) {
+            return true
+        }
+        string haystack = strlower(s)
+        string pattern = strlower(needle)
+        return strcontains(haystack, pattern)
+    }
+
+    int string_count_substring(string s, string needle) {
+        int n = strlen(s)
+        int m = strlen(needle)
+        if (m == 0) {
+            return 0
+        }
+        int count = 0
+        int i = 0
+        while (i + m <= n) {
+            string window = strsubstr(s, i, m)
+            if (strcompare(window, needle) == 0) {
+                count = count + 1
+                i = i + m
+            } else {
+                i = i + 1
+            }
+        }
+        return count
+    }
+
+    string path_join(string a, string b) {
+        int na = strlen(a)
+        int nb = strlen(b)
+        if (na == 0) {
+            return strcopy(b)
+        }
+        if (nb == 0) {
+            return strcopy(a)
+        }
+        char last = strcharat(a, na - 1)
+        char first = strcharat(b, 0)
+        bool last_sep = last == '/' || last == '\\'
+        bool first_sep = first == '/' || first == '\\'
+        if (last_sep && first_sep) {
+            string tail = strsubstr(b, 1, nb - 1)
+            return strconcat(a, tail)
+        }
+        if (last_sep || first_sep) {
+            return strconcat(a, b)
+        }
+        string head = strconcat(a, "/")
+        return strconcat(head, b)
+    }
+
+    string path_basename(string p) {
+        int n = strlen(p)
+        if (n == 0) {
+            return ""
+        }
+        int end = n
+        while (end > 1) {
+            char tail = strcharat(p, end - 1)
+            if (tail != '/' && tail != '\\') {
+                break
+            }
+            end = end - 1
+        }
+        int i = end - 1
+        while (i >= 0) {
+            char current = strcharat(p, i)
+            if (current == '/' || current == '\\') {
+                break
+            }
+            i = i - 1
+        }
+        int start = i + 1
+        return strsubstr(p, start, end - start)
+    }
+
+    string path_dirname(string p) {
+        int n = strlen(p)
+        if (n == 0) {
+            return ""
+        }
+        int end = n
+        while (end > 1) {
+            char tail = strcharat(p, end - 1)
+            if (tail != '/' && tail != '\\') {
+                break
+            }
+            end = end - 1
+        }
+        int i = end - 1
+        while (i >= 0) {
+            char current = strcharat(p, i)
+            if (current == '/' || current == '\\') {
+                break
+            }
+            i = i - 1
+        }
+        if (i < 0) {
+            return ""
+        }
+        int cut = i
+        while (cut > 0) {
+            char before = strcharat(p, cut - 1)
+            if (before != '/' && before != '\\') {
+                break
+            }
+            cut = cut - 1
+        }
+        if (cut == 0) {
+            char first = strcharat(p, 0)
+            if (first == '/' || first == '\\') {
+                return "/"
+            }
+            return ""
+        }
+        return strsubstr(p, 0, cut)
+    }
+
+    string path_extension(string p) {
+        int n = strlen(p)
+        if (n == 0) {
+            return ""
+        }
+        int separator = -1
+        int i = n - 1
+        while (i >= 0) {
+            char current = strcharat(p, i)
+            if (current == '/' || current == '\\') {
+                separator = i
+                break
+            }
+            i = i - 1
+        }
+        int dot = -1
+        i = n - 1
+        while (i > separator) {
+            if (strcharat(p, i) == '.') {
+                dot = i
+                break
+            }
+            i = i - 1
+        }
+        if (dot < 0) {
+            return ""
+        }
+        if (dot == separator + 1) {
+            return ""
+        }
+        return strsubstr(p, dot, n - dot)
+    }
+
+    void mem_fill(char* p, int value, int count) {
+        if (p == null) {
+            return
+        }
+        if (count <= 0) {
+            return
+        }
+        int i = 0
+        while (i < count) {
+            p[i] = cast<char>(value)
+            i = i + 1
+        }
+    }
+
+    void mem_copy(char* dst, char* src, int count) {
+        if (dst == null || src == null) {
+            return
+        }
+        if (count <= 0) {
+            return
+        }
+        int i = 0
+        while (i < count) {
+            dst[i] = src[i]
+            i = i + 1
+        }
+    }
+
+    int mem_compare(char* a, char* b, int count) {
+        if (count <= 0) {
+            return 0
+        }
+        if (a == null && b == null) {
+            return 0
+        }
+        if (a == null) {
+            return -1
+        }
+        if (b == null) {
+            return 1
+        }
+        int i = 0
+        while (i < count) {
+            int left = cast<int>(cast<uchar>(a[i]))
+            int right = cast<int>(cast<uchar>(b[i]))
+            if (left < right) {
+                return -1
+            }
+            if (left > right) {
+                return 1
+            }
+            i = i + 1
+        }
+        return 0
     }
 
 } // namespace sl

@@ -351,7 +351,7 @@ namespace gallt {
                 auto found = sub.types.find(e->identifier);
                 if (found != sub.types.end()) {
                     return std::make_unique<PrimaryExpression>(e->location,
-                        found->second.to_string());
+                        found->second.to_source_string());
                 }
                 auto constant = sub.constants.find(e->identifier);
                 if (constant != sub.constants.end()) {
@@ -404,24 +404,8 @@ namespace gallt {
             case PrimaryExpression::Kind::QualifiedName: {
                 GenericRef ref = *e->generic_ref;
                 for (GenericArgument& arg : ref.arguments) {
-                    if (arg.is_type) {
-                        Type substituted = Type::make_void();
-                        substitute_type(arg.type, sub, substituted);
-                        arg.type = std::move(substituted);
-                        arg.text = arg.type.to_string();
-                    } else {
-                        auto found = sub.constants.find(arg.text);
-                        if (found != sub.constants.end()) {
-                            if (found->second.is_float) {
-                                arg.float_constant = true;
-                                arg.float_value = found->second.float_value;
-                            } else {
-                                arg.int_value = found->second.int_value;
-                            }
-                        arg.text = arg.normalize();
-                    }
+                    substitute_generic_argument(arg, sub);
                 }
-            }
                 expand_pack_arguments(ref.arguments, sub, e->location);
                 auto mangled = ensure_instantiation(ref, false);
                 if (mangled.has_value()) {
@@ -782,24 +766,7 @@ namespace gallt {
             GenericRef reference = s->reference;
 
             for (GenericArgument& arg : reference.arguments) {
-                if (arg.is_type) {
-                    Type substituted = Type::make_void();
-                    if (substitute_type(arg.type, sub, substituted)) {
-                        arg.type = std::move(substituted);
-                        arg.text = arg.type.to_string();
-                    }
-                } else {
-                    auto found = sub.constants.find(arg.text);
-                    if (found != sub.constants.end()) {
-                        if (found->second.is_float) {
-                            arg.float_constant = true;
-                            arg.float_value = found->second.float_value;
-                        } else {
-                            arg.int_value = found->second.int_value;
-                        }
-                        arg.text = arg.normalize();
-                    }
-                }
+                substitute_generic_argument(arg, sub);
             }
 
             expand_pack_arguments(reference.arguments, sub, s->location);
@@ -903,6 +870,7 @@ namespace gallt {
         clone->is_operator = func->is_operator;
         clone->overloaded_operator = func->overloaded_operator;
         clone->is_conversion_operator = func->is_conversion_operator;
+        clone->is_constexpr_function = func->is_constexpr_function;
 
         if (func->is_conversion_operator) {
             Type target = Type::make_void();

@@ -1,4 +1,5 @@
 #include "../lexer/lexer.hpp"
+#include <algorithm>
 #include <cctype>
 #include <unordered_map>
 #include <optional>
@@ -97,10 +98,61 @@ namespace gallt {
         }
     }
 
-    Lexer::Lexer(std::string_view source, std::string_view filename, DiagnosticEngine& diag)
+    std::string splice_line_continuations(std::string_view source,
+        std::vector<LineSplice>& splices) {
+        splices.clear();
+
+        std::string spliced;
+        spliced.reserve(source.size());
+
+        std::size_t logical_line = 1;
+        std::size_t logical_column = 1;
+        std::size_t original_line = 1;
+        std::size_t original_column = 1;
+
+        for (std::size_t i = 0; i < source.size(); ++i) {
+            const char c = source[i];
+
+            if (c == '\\' && i + 1 < source.size() && source[i + 1] == '\n') {
+                LineSplice splice;
+                splice.offset = spliced.size();
+                splice.logical_line = logical_line;
+                splice.logical_column = logical_column;
+                splice.original_line = original_line + 1;
+                splice.original_column = 1;
+                splices.push_back(splice);
+
+                ++i;
+                ++original_line;
+                original_column = 1;
+                continue;
+            }
+
+            spliced.push_back(c);
+
+            if (c == '\n') {
+                ++logical_line;
+                logical_column = 1;
+                ++original_line;
+                original_column = 1;
+            } else if (c == '\t') {
+                logical_column = column_after_tab(logical_column);
+                original_column = column_after_tab(original_column);
+            } else {
+                ++logical_column;
+                ++original_column;
+            }
+        }
+
+        return spliced;
+    }
+
+    Lexer::Lexer(std::string_view source, std::string_view filename,
+        DiagnosticEngine& diag, const std::vector<LineSplice>* splices)
         : source_(source)
         , filename_(filename)
-        , diag_(diag) {
+        , diag_(diag)
+        , splices_(splices) {
         if (source_.size() >= 3 &&
             static_cast<unsigned char>(source_[0]) == 0xEF &&
             static_cast<unsigned char>(source_[1]) == 0xBB &&
@@ -138,7 +190,29 @@ namespace gallt {
     }
 
     SourceLocation Lexer::current_location() const {
-        return SourceLocation{ filename_, line_, column_ };
+        if (splices_ == nullptr || splices_->empty()) {
+            return SourceLocation{ filename_, line_, column_ };
+        }
+
+        auto it = std::upper_bound(splices_->begin(), splices_->end(), position_,
+            [](std::size_t cursor, const LineSplice& splice) {
+                return cursor < splice.offset;
+            });
+
+        if (it == splices_->begin()) {
+            return SourceLocation{ filename_, line_, column_ };
+        }
+
+        --it;
+
+        const std::size_t physical_line =
+            it->original_line + (line_ - it->logical_line);
+
+        const std::size_t physical_column = line_ == it->logical_line
+            ? it->original_column + (column_ - it->logical_column)
+            : column_;
+
+        return SourceLocation{ filename_, physical_line, physical_column };
     }
 
     std::string_view Lexer::remaining_source() const {
@@ -154,18 +228,44 @@ namespace gallt {
     }
 
     void Lexer::validate_file() {
-        bool line_ending_ok = validate_line_endings();
+        const bool line_ending_ok = validate_line_endings();
 
-        bool encoding_ok = validate_utf8();
+        const bool encoding_ok = validate_utf8();
 
-        if (!line_ending_ok || !encoding_ok) {
-            std::string msg = "input file does not meet requirements: ";
-            if (!encoding_ok) { msg += "invalid UTF-8 encoding; "; }
-            if (!line_ending_ok) { msg += "line endings must be LF (found CRLF or standalone CR); "; }
-            report_error(ErrorCode::InvalidInputFile, msg);
-            has_error_ = true;
-            fatal_error_ = true;
+        if (line_ending_ok && encoding_ok) {
+            return;
         }
+
+        std::string linebreak = "lf";
+
+        if (!line_ending_ok) {
+            bool has_crlf = false;
+            bool has_lone_cr = false;
+
+            for (std::size_t i = 0; i < source_.size(); ++i) {
+                if (source_[i] != '\r') { continue; }
+
+                if (i + 1 < source_.size() && source_[i + 1] == '\n') {
+                    has_crlf = true;
+                } else {
+                    has_lone_cr = true;
+                }
+            }
+
+            if (has_crlf && has_lone_cr) {
+                linebreak = "crlf and cr";
+            } else if (has_crlf) {
+                linebreak = "crlf";
+            } else if (has_lone_cr) {
+                linebreak = "cr";
+            }
+        }
+
+        diag_.report_error_template(current_location(), ErrorCode::InvalidInputFile,
+            { encoding_ok ? std::string("utf-8") : std::string("invalid utf-8"),
+              linebreak });
+        has_error_ = true;
+        fatal_error_ = true;
     }
 
     bool Lexer::validate_line_endings() {
@@ -275,6 +375,10 @@ namespace gallt {
         }
 
         if (is_identifier_start(c)) {
+            if (at_literal_string_prefix()) {
+                return read_literal_string();
+            }
+
             return read_identifier();
         }
 
@@ -512,6 +616,34 @@ namespace gallt {
         return Token{ TokenType::StringLiteral, start_loc, lexeme };
     }
 
+    Token Lexer::read_literal_string() {
+        SourceLocation start_loc = current_location();
+        std::size_t start_pos = position_;
+
+        for (std::size_t i = 0; i < literal_string_prefix.size(); ++i) {
+            advance();
+        }
+
+        bool is_closed = false;
+
+        while (!is_at_end()) {
+            if (peek() == '"') {
+                advance();
+                is_closed = true;
+                break;
+            }
+
+            advance();
+        }
+
+        if (!is_closed) {
+            report_error(ErrorCode::UnclosedStringLiteral, "unclosed string literal");
+        }
+
+        std::string_view lexeme = source_.substr(start_pos, position_ - start_pos);
+        return Token{ TokenType::StringLiteral, start_loc, lexeme };
+    }
+
     Token Lexer::read_comment() {
         SourceLocation start_loc = current_location();
         std::size_t start_pos = position_;
@@ -708,6 +840,13 @@ namespace gallt {
         case '@':
             return Token{ TokenType::At, start_loc, "@" };
 
+        case '\\':
+            diag_.report_error_template(start_loc, ErrorCode::UndefinedIdentifier,
+                { std::string(source_.substr(position_ - 1, 1)) });
+            has_error_ = true;
+            return Token{ TokenType::Identifier, start_loc,
+                source_.substr(position_ - 1, 1) };
+
         default: {
             std::string msg = "unexpected character '";
             msg.push_back(c);
@@ -849,6 +988,12 @@ namespace gallt {
 
     bool Lexer::is_at_end() const {
         return position_ >= source_.size();
+    }
+
+    bool Lexer::at_literal_string_prefix() const noexcept {
+        return position_ + literal_string_prefix.size() <= source_.size() &&
+            source_.compare(position_, literal_string_prefix.size(),
+                literal_string_prefix) == 0;
     }
 
     bool Lexer::match(char expected) {

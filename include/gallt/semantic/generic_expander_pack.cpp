@@ -96,13 +96,13 @@ namespace gallt {
         }
         if (type_pack != sub.type_packs.end()) {
             if (resolved && index < type_pack->second.size()) {
-                out = type_pack->second[index].to_string();
+                out = type_pack->second[index].to_source_string();
                 return true;
             }
         } else {
             auto declared = sub.const_pack_element.find(pack_name);
             if (resolved && declared != sub.const_pack_element.end()) {
-                out = declared->second.to_string();
+                out = declared->second.to_source_string();
                 return true;
             }
         }
@@ -215,12 +215,12 @@ namespace gallt {
                 if (type_pack != sub.type_packs.end()) {
                     for (std::size_t i = 0; i < type_pack->second.size(); ++i) {
                         if (i != 0) { value.string_value += ", "; }
-                        value.string_value += type_pack->second[i].to_string();
+                        value.string_value += type_pack->second[i].to_source_string();
                     }
                 } else {
                     auto element = sub.const_pack_element.find(name);
                     if (element != sub.const_pack_element.end()) {
-                        value.string_value = element->second.to_string();
+                        value.string_value = element->second.to_source_string();
                     }
                 }
                 return make_constant_literal(expr->location, value);

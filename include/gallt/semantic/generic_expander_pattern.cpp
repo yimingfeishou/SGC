@@ -145,6 +145,76 @@ namespace gallt {
         return node;
     }
 
+    bool GenericExpander::name_is_known_type(const std::string& name,
+        const Substitution& sub) const {
+        return is_builtin_type_name(name) ||
+            struct_defs_.find(name) != struct_defs_.end() ||
+            sub.types.find(name) != sub.types.end();
+    }
+
+    bool GenericExpander::substitute_generic_argument(GenericArgument& arg,
+        const Substitution& sub) {
+        if (arg.is_ambiguous_name) {
+            const std::string name = arg.type.kind == TypeKind::Struct
+                ? arg.type.struct_name : arg.text;
+
+            if (!name_is_known_type(name, sub)) {
+                auto constant = sub.constants.find(name);
+
+                if (constant != sub.constants.end()) {
+                    arg.is_type = false;
+                    arg.is_ambiguous_name = false;
+
+                    if (constant->second.is_string) {
+                        arg.is_string_constant = true;
+                        arg.constant_actual_type = AST::Type::make_string();
+                        arg.string_constant = constant->second.string_value;
+                    } else if (constant->second.is_float) {
+                        arg.float_constant = true;
+                        arg.float_value = constant->second.float_value;
+                    } else {
+                        arg.int_value = constant->second.int_value;
+                    }
+
+                    arg.text = arg.normalize();
+                    return true;
+                }
+            }
+
+            arg.is_ambiguous_name = false;
+        }
+
+        if (arg.is_type) {
+            Type substituted = Type::make_void();
+
+            if (substitute_type(arg.type, sub, substituted)) {
+                arg.type = std::move(substituted);
+                arg.text = arg.type.to_string();
+                return true;
+            }
+
+            return false;
+        }
+
+        auto found = sub.constants.find(arg.text);
+
+        if (found == sub.constants.end()) { return true; }
+
+        if (found->second.is_string) {
+            arg.is_string_constant = true;
+            arg.constant_actual_type = AST::Type::make_string();
+            arg.string_constant = found->second.string_value;
+        } else if (found->second.is_float) {
+            arg.float_constant = true;
+            arg.float_value = found->second.float_value;
+        } else {
+            arg.int_value = found->second.int_value;
+        }
+
+        arg.text = arg.normalize();
+        return true;
+    }
+
     bool GenericExpander::substitute_type(const Type& in, const Substitution& sub, Type& out) {
         switch (in.kind) {
         case TypeKind::Array: {
@@ -196,12 +266,7 @@ namespace gallt {
                 GenericRef ref = *in.generic_ref;
 
                 for (GenericArgument& arg : ref.arguments) {
-                    if (arg.is_type) {
-                        Type substituted = Type::make_void();
-                        if (!substitute_type(arg.type, sub, substituted)) { return false; }
-                        arg.type = std::move(substituted);
-                        arg.text = arg.type.to_string();
-                    }
+                    if (!substitute_generic_argument(arg, sub)) { return false; }
                 }
 
                 expand_pack_arguments(ref.arguments, sub, in.generic_ref->location);
@@ -310,6 +375,17 @@ namespace gallt {
                         return true;
                     }
                 }
+
+                Substitution empty;
+                const Substitution& string_env = sub != nullptr ? *sub : empty;
+                ConstexprValue value;
+                if (evaluate_constexpr_with_substitution(arg.expression.get(),
+                    string_env, value) && value.type.kind == TypeKind::String) {
+                    out.is_string = true;
+                    out.is_float = false;
+                    out.string_value = value.string_value;
+                    return true;
+                }
             }
             return false;
         }
@@ -319,6 +395,22 @@ namespace gallt {
             const Substitution& env = sub != nullptr ? *sub : empty;
 
             if (evaluate_with_substitution(arg.expression.get(), env, out)) {
+                return true;
+            }
+
+            ConstexprValue value;
+            if (evaluate_constexpr_with_substitution(arg.expression.get(), env,
+                value)) {
+                if (!value.type.is_arithmetic() &&
+                    value.type.kind != TypeKind::String) {
+                    return false;
+                }
+
+                out.is_string = value.type.kind == TypeKind::String;
+                out.is_float = value.type.is_floating();
+                out.string_value = value.string_value;
+                out.float_value = value.as_floating();
+                out.int_value = value.as_integer();
                 return true;
             }
 

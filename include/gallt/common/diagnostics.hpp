@@ -190,6 +190,12 @@ namespace gallt {
         VariadicFunctionPointerSignatureMismatch = 168,
         VariadicDefaultArgumentAmbiguous = 169,
         CompileTimeConditionOutsideGenericBlock = 170,
+        ConstexprArgumentNotConstant = 171,
+        ConstexprDisallowedOperation = 172,
+        ConstexprNonCompilableType = 173,
+        ConstexprStructMemberNotCompilable = 174,
+        ConstexprSideEffectStatement = 175,
+        InstantiationDepthTooDeep = 176,
     };
 
     struct Diagnostic {
@@ -211,11 +217,7 @@ namespace gallt {
 
         DiagnosticEngine() = default;
 
-        // Compiler-internal bookkeeping (not part of the Gallt language surface):
-        // the earliest compiler stage that already diagnosed a source location.
-        // A later stage consults it so that a construct diagnosed upstream is not
-        // diagnosed again; see semantic/diagnosed_registry.hpp.
-        std::map<std::tuple<std::string_view, std::size_t, std::size_t>, int>
+        std::map<std::tuple<std::string, std::size_t, std::size_t>, int>
             diagnosed_stages;
 
         void report_error(SourceLocation loc, ErrorCode code, std::string_view message);

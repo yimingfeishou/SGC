@@ -94,6 +94,40 @@ addition namespace sl {
         return x
     }
 
+    int gcd(int a, int b) {
+        lint x = cast<lint>(a)
+        lint y = cast<lint>(b)
+        if (x < 0l) {
+            x = 0l - x
+        }
+        if (y < 0l) {
+            y = 0l - y
+        }
+        while (y != 0l) {
+            lint remainder = x % y
+            x = y
+            y = remainder
+        }
+        return cast<int>(x)
+    }
+
+    int lcm(int a, int b) {
+        if (a == 0 || b == 0) {
+            return 0
+        }
+        int divisor = gcd(a, b)
+        if (divisor == 0) {
+            return 0
+        }
+        lint left = cast<lint>(a) / cast<lint>(divisor)
+        lint right = cast<lint>(b)
+        lint product = left * right
+        if (product < 0l) {
+            product = 0l - product
+        }
+        return cast<int>(product)
+    }
+
     void srand(luint seed) {
         rand_state = seed % 2147483647lu
         if (rand_state == 0lu) {
@@ -125,6 +159,14 @@ addition namespace sl {
 
     double random_double_range(double min_val, double max_val) {
         return min_val + random_double() * (max_val - min_val)
+    }
+
+    bool random_bool() {
+        return rand() % 2 == 0
+    }
+
+    char random_char() {
+        return cast<char>(32 + rand() % 95)
     }
 
     double sqrt(double x) {
@@ -456,6 +498,71 @@ addition namespace sl {
             return 0.0
         }
         return s / c
+    }
+
+    generics math_ops_generic<T: int | lint | uint | luint | float | double> {
+        T __math_zero() {
+            T dummy
+            const if (T.is_float == true) {
+                dummy = 0.0
+            } const else {
+                const if (T.is_double == true) {
+                    dummy = 0.0
+                } const else {
+                    dummy = 0
+                }
+            }
+            return dummy
+        }
+
+        T abs(T x) {
+            T zero = __math_zero()
+            if (x < zero) {
+                return zero - x
+            }
+            return x
+        }
+
+        T min(T a, T b) {
+            if (a < b) {
+                return a
+            }
+            return b
+        }
+
+        T max(T a, T b) {
+            if (a > b) {
+                return a
+            }
+            return b
+        }
+
+        T clamp(T x, T min_val, T max_val) {
+            if (x < min_val) {
+                return min_val
+            }
+            if (x > max_val) {
+                return max_val
+            }
+            return x
+        }
+    }
+
+    generics shuffle_generic<T> {
+        void shuffle(T* data, int size) {
+            if (data == null) {
+                return
+            }
+            if (size <= 1) {
+                return
+            }
+            for (int i = size - 1; i > 0; i--) {
+                int j = rand() % (i + 1)
+                T temp = data[i]
+                data[i] = data[j]
+                data[j] = temp
+            }
+        }
     }
 
 } // namespace sl

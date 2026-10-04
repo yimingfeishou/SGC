@@ -19,6 +19,8 @@ namespace gallt {
 
         bool run(AST::Program* program);
 
+        bool lower_new_top_levels(std::vector<std::unique_ptr<AST::TopLevel>>& nodes);
+
     private:
         struct NamespaceInfo {
             std::unordered_map<std::string, std::string> members;
@@ -101,6 +103,11 @@ namespace gallt {
         void rewrite_type(AST::Type& type);
         void rewrite_expression(std::unique_ptr<AST::Expression>& expr);
         void rewrite_shared_expression(std::shared_ptr<AST::Expression>& expr);
+
+        class ExpressionRewriter;
+        class InitializerRewriter;
+        class StatementRewriter;
+
         void rewrite_expression_nested(AST::Expression* expr);
         std::optional<std::string> expression_replacement(AST::Expression* expr,
             SourceLocation& loc);

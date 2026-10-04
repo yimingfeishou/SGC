@@ -50,7 +50,8 @@ namespace gallt {
 
         const std::string& op = node->overloaded_operator;
         if (op == "." || op == "::" || op == "=" || op.empty()) {
-            report_error(node->location, ErrorCode::OperatorCannotBeOverloaded, op);
+            report_error_template(node->location, ErrorCode::OperatorCannotBeOverloaded,
+                { op });
             return false;
         }
         bool binary_operator = (op == "/" || op == "%" || op == "**" || op == "==" ||
@@ -94,7 +95,8 @@ namespace gallt {
         }
 
         if (!has_custom) {
-            report_error(node->location, ErrorCode::OperatorOverloadRequiresCustomType, op);
+            report_error_template(node->location,
+                ErrorCode::OperatorOverloadRequiresCustomType, { op });
             return false;
         }
 
@@ -103,8 +105,8 @@ namespace gallt {
             if (node->parameters[0].kind != TypeKind::Pointer ||
                 node->parameters[0].pointee_type == nullptr ||
                 !is_custom_type(*node->parameters[0].pointee_type)) {
-                report_error(node->location,
-                    ErrorCode::ModifyingOperatorFirstParameterNotPointer, op);
+                report_error_template(node->location,
+                    ErrorCode::ModifyingOperatorFirstParameterNotPointer, { op });
                 return false;
             }
         }
@@ -113,8 +115,8 @@ namespace gallt {
             if (node->parameters[0].kind != TypeKind::Pointer ||
                 node->parameters[0].pointee_type == nullptr ||
                 !is_custom_type(*node->parameters[0].pointee_type)) {
-                report_error(node->location,
-                    ErrorCode::ModifyingOperatorFirstParameterNotPointer, op);
+                report_error_template(node->location,
+                    ErrorCode::ModifyingOperatorFirstParameterNotPointer, { op });
                 return false;
             }
 
@@ -128,28 +130,32 @@ namespace gallt {
 
         if (op == "[]") {
             if (node->return_type.kind != TypeKind::Pointer) {
-                report_error(node->location, ErrorCode::SubscriptOperatorMustReturnPointer, op);
+                report_error_template(node->location,
+                    ErrorCode::SubscriptOperatorMustReturnPointer,
+                    std::vector<std::string>{});
                 return false;
             }
 
             if (node->parameters.size() == 2 && !node->parameters[1].is_integer()) {
-                report_error(node->location, ErrorCode::OperatorOverloadParameterMismatch,
-                    op);
+                report_error_template(node->location,
+                    ErrorCode::OperatorOverloadParameterMismatch, { op });
                 return false;
             }
         }
 
         if (op == "->") {
             if (node->return_type.kind != TypeKind::Pointer) {
-                report_error(node->location, ErrorCode::ArrowOperatorMustReturnPointer, op);
+                report_error_template(node->location,
+                    ErrorCode::ArrowOperatorMustReturnPointer,
+                    std::vector<std::string>{});
                 return false;
             }
         }
 
         for (const std::unique_ptr<AST::Expression>& def : node->param_defaults) {
             if (def != nullptr) {
-                report_error(node->location,
-                    ErrorCode::OperatorOverloadDefaultArgumentNotAllowed, op);
+                report_error_template(node->location,
+                    ErrorCode::OperatorOverloadDefaultArgumentNotAllowed, { op });
                 return false;
             }
         }
@@ -187,8 +193,10 @@ namespace gallt {
                 }
 
                 if (same) {
-                    report_error(func->location, ErrorCode::OperatorOverloadRedefined,
-                        func->overloaded_operator);
+                    report_error_template(func->location,
+                        ErrorCode::OperatorOverloadRedefined,
+                        { func->overloaded_operator });
+                    redefined_operators_.insert(func);
                     break;
                 }
             }
@@ -291,7 +299,7 @@ namespace gallt {
         }
 
         if (maximal.size() > 1) {
-            report_error(loc, ErrorCode::OperatorOverloadAmbiguous, op);
+            report_error_template(loc, ErrorCode::OperatorOverloadAmbiguous, { op });
             return nullptr;
         }
 
@@ -534,8 +542,8 @@ namespace gallt {
                     }
 
                     if (ambiguous) {
-                        report_error(expr->location,
-                            ErrorCode::OperatorOverloadAmbiguous, symbol);
+                        report_error_template(expr->location,
+                            ErrorCode::OperatorOverloadAmbiguous, { symbol });
                     } else {
                         post_fix = best;
                     }
@@ -666,7 +674,7 @@ namespace gallt {
             }
 
             if (best != nullptr) {
-                report_error(loc, ErrorCode::OverloadAmbiguous, { name });
+                report_error_template(loc, ErrorCode::OverloadAmbiguous, { name });
                 return nullptr;
             }
 
@@ -821,7 +829,8 @@ namespace gallt {
         }
 
         if (ambiguous || best < 0) {
-            report_error(loc, ErrorCode::SpecialMemberAmbiguous, { struct_name });
+            report_error_template(loc, ErrorCode::SpecialMemberAmbiguous,
+                { struct_name });
             return nullptr;
         }
 
@@ -1086,7 +1095,8 @@ namespace gallt {
                 return nullptr;
             }
 
-            report_error(call->location, ErrorCode::OverloadAmbiguous, { name });
+            report_error_template(call->location, ErrorCode::OverloadAmbiguous,
+                { name });
             return nullptr;
         }
 

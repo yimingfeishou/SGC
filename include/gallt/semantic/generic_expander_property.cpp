@@ -1,5 +1,6 @@
 #include "generic_expander.hpp"
 #include "generic_expander_detail.hpp"
+#include "../parser/ast_visitor.hpp"
 #include "constant_folding.hpp"
 #include "../lexer/lexer.hpp"
 #include "../parser/parser.hpp"
@@ -414,6 +415,11 @@ namespace gallt {
 
     bool GenericExpander::decode_string_literal(std::string_view lexeme,
         std::string& out) const {
+        if (is_literal_string_lexeme(lexeme)) {
+            out.assign(literal_string_content(lexeme));
+            return true;
+        }
+
         std::string_view content = lexeme;
         if (content.size() >= 2 && content.front() == '"' && content.back() == '"') {
             content = content.substr(1, content.size() - 2);
@@ -600,7 +606,7 @@ namespace gallt {
 
             ConstantValue value;
             value.is_string = true;
-            value.string_value = sub.types.at(parameter).to_string();
+            value.string_value = sub.types.at(parameter).to_source_string();
             return make_constant_literal(expr->location, value);
         }
 
@@ -1092,7 +1098,7 @@ namespace gallt {
                 }
 
                 if (sub.types.find(prim->identifier) == sub.types.end()) { return false; }
-                value = sub.types.at(prim->identifier).to_string();
+                value = sub.types.at(prim->identifier).to_source_string();
                 return true;
             };
 
@@ -1186,6 +1192,17 @@ namespace gallt {
             out = value;
             return true;
         }
+
+        if (auto* post = dynamic_cast<const PostfixExpression*>(expr)) {
+            if (post->op == PostfixExpression::Operator::FunctionCall) {
+                ConstexprValue result;
+                if (evaluate_constexpr_call(post, sub, result)) {
+                    out = result.as_bool();
+                    return true;
+                }
+            }
+        }
+
         return false;
     }
 
@@ -1255,6 +1272,9 @@ namespace gallt {
             return false;
         }
         if (auto* e = dynamic_cast<const PostfixExpression*>(expr)) {
+            if (e->op == PostfixExpression::Operator::FunctionCall) {
+                return eval_constexpr_call(e, sub, out);
+            }
             if (e->op != PostfixExpression::Operator::Dot) { return false; }
             if (e->member_name == "typename") {
                 if (auto* access = dynamic_cast<const PostfixExpression*>(
@@ -1278,12 +1298,12 @@ namespace gallt {
                     if (type_pack != sub.type_packs.end()) {
                         for (std::size_t i = 0; i < type_pack->second.size(); ++i) {
                             if (i != 0) { out += ", "; }
-                            out += type_pack->second[i].to_string();
+                            out += type_pack->second[i].to_source_string();
                         }
                     } else if (const_pack != sub.const_packs.end()) {
                         auto element = sub.const_pack_element.find(parameter);
                         if (element != sub.const_pack_element.end()) {
-                            out += element->second.to_string();
+                            out += element->second.to_source_string();
                         }
                     }
                     return true;
@@ -1314,7 +1334,7 @@ namespace gallt {
                     return false;
                 }
 
-                out += sub.types.at(parameter).to_string();
+                out += sub.types.at(parameter).to_source_string();
                 return true;
             }
 
@@ -1340,24 +1360,31 @@ namespace gallt {
         std::vector<std::unique_ptr<AST::TopLevel>>& owner) {
         if (text.empty()) { return true; }
 
-        if (text_contains_compile_time_condition(text)) {
+        std::vector<LineSplice> splices;
+        emit_source_pool_.push_back(splice_line_continuations(text, splices));
+        std::string& buffer = emit_source_pool_.back();
+
+        if (text_contains_compile_time_condition(buffer)) {
             report(loc, ErrorCode::CompileTimeConditionOutsideGenericBlock,
                 std::vector<std::string>());
             return false;
         }
 
-        emit_source_pool_.push_back(text);
-        std::string& buffer = emit_source_pool_.back();
         std::string name = "<emit>";
         std::string_view source_view(buffer);
         std::string_view name_view(name);
         DiagnosticEngine emit_diag;
-        Lexer lexer(source_view, name_view, emit_diag);
+        Lexer lexer(source_view, name_view, emit_diag,
+            splices.empty() ? nullptr : &splices);
         Parser parser(lexer, emit_diag);
         auto program = parser.parse();
 
         if (program == nullptr || emit_diag.has_errors()) {
             report(loc, ErrorCode::EmitBlockNotExpandable, std::vector<std::string>());
+            return false;
+        }
+
+        if (!namespaces_.lower_new_top_levels(program->top_levels)) {
             return false;
         }
 
@@ -1386,109 +1413,187 @@ namespace gallt {
         }
     }
 
-    void GenericExpander::expand_expression_impl(std::unique_ptr<Expression>& expr_holder) {
-        Expression* expr = expr_holder.get();
-        if (expr == nullptr) { return; }
-        if (auto* e = dynamic_cast<AssignmentExpression*>(expr)) {
-            expand_expression(e->left);
-            expand_expression(e->right);
-        } else if (auto* e = dynamic_cast<LogicalOrExpression*>(expr)) {
-            expand_expression(e->left);
-            expand_expression(e->right);
-        } else if (auto* e = dynamic_cast<LogicalAndExpression*>(expr)) {
-            expand_expression(e->left);
-            expand_expression(e->right);
-        } else if (auto* e = dynamic_cast<ComparisonExpression*>(expr)) {
-            expand_expression(e->left);
-            expand_expression(e->right);
-        } else if (auto* e = dynamic_cast<AdditiveExpression*>(expr)) {
-            expand_expression(e->left);
-            expand_expression(e->right);
-        } else if (auto* e = dynamic_cast<MultiplicativeExpression*>(expr)) {
-            expand_expression(e->left);
-            expand_expression(e->right);
-        } else if (auto* e = dynamic_cast<PowerExpression*>(expr)) {
-            expand_expression(e->left);
-            expand_expression(e->right);
-        } else if (auto* e = dynamic_cast<BitwiseExpression*>(expr)) {
-            expand_expression(e->left);
-            expand_expression(e->right);
-        } else if (auto* e = dynamic_cast<ShiftExpression*>(expr)) {
-            expand_expression(e->left);
-            expand_expression(e->right);
-        } else if (auto* e = dynamic_cast<ConditionalExpression*>(expr)) {
-            expand_expression(e->condition);
-            expand_expression(e->then_expr);
-            expand_expression(e->else_expr);
-        } else if (auto* e = dynamic_cast<UnaryExpression*>(expr)) {
-            expand_expression(e->operand);
-        } else if (auto* e = dynamic_cast<PostfixExpression*>(expr)) {
-            expand_expression(e->base);
-            expand_expression(e->subscript_expr);
+    class GenericExpander::ExpressionExpander : public AST::AstRewriter {
+    public:
+        explicit ExpressionExpander(GenericExpander& owner) : owner_(owner) {
+        }
 
-            for (auto& arg : e->arguments) { expand_expression(arg); }
+    protected:
+        bool EnterExpression(std::unique_ptr<Expression>& node) override {
+            auto* prim = dynamic_cast<PrimaryExpression*>(node.get());
 
-            resolve_type(e->cast_type);
-        } else if (auto* e = dynamic_cast<PrimaryExpression*>(expr)) {
-            switch (e->kind) {
+            if (prim == nullptr) {
+                return true;
+            }
+
+            switch (prim->kind) {
             case PrimaryExpression::Kind::Parens:
-                expand_expression(e->paren_expr);
-                break;
+                owner_.expand_expression(prim->paren_expr);
+                return false;
             case PrimaryExpression::Kind::Heap:
-                resolve_type(e->heap_type);
-                expand_expression(e->heap_size);
-                break;
+                owner_.resolve_type(prim->heap_type);
+                owner_.expand_expression(prim->heap_size);
+                return false;
             case PrimaryExpression::Kind::QualifiedName: {
-                auto mangled = ensure_instantiation(*e->generic_ref, false);
-                std::string name = mangled.has_value() ? *mangled : e->generic_ref->to_string();
-                expr_holder = std::make_unique<PrimaryExpression>(e->location, name);
-                break;
+                auto mangled = owner_.ensure_instantiation(*prim->generic_ref, false);
+                std::string name = mangled.has_value() ? *mangled
+                    : prim->generic_ref->to_string();
+                node = std::make_unique<PrimaryExpression>(prim->location, name);
+                return false;
             }
             case PrimaryExpression::Kind::Construct:
-            case PrimaryExpression::Kind::PlacementConstruct: {
-                resolve_type(e->construct_type);
-                for (auto& arg : e->construct_args) { expand_expression(arg); }
-                expand_expression(e->placement_target);
-                break;
-            }
+            case PrimaryExpression::Kind::PlacementConstruct:
+                owner_.resolve_type(prim->construct_type);
+
+                for (std::unique_ptr<Expression>& arg : prim->construct_args) {
+                    owner_.expand_expression(arg);
+                }
+
+                owner_.expand_expression(prim->placement_target);
+                return false;
             case PrimaryExpression::Kind::CopyMove:
-                expand_expression(e->paren_expr);
-                break;
+                owner_.expand_expression(prim->paren_expr);
+                return false;
             case PrimaryExpression::Kind::Identifier: {
-                std::string name = e->identifier;
+                std::string name = prim->identifier;
                 bool resolved_short_name = false;
-                for (std::size_t depth = short_scopes_.size(); depth > 0; --depth) {
-                    const auto& shorts = short_scopes_[depth - 1];
+
+                for (std::size_t depth = owner_.short_scopes_.size(); depth > 0; --depth) {
+                    const auto& shorts = owner_.short_scopes_[depth - 1];
                     auto found = shorts.find(name);
+
                     if (found != shorts.end()) {
-                        expr_holder = std::make_unique<PrimaryExpression>(e->location,
+                        node = std::make_unique<PrimaryExpression>(prim->location,
                             found->second.target);
                         resolved_short_name = true;
                         break;
                     }
-                    const auto& declared = declared_scopes_[depth - 1];
+
+                    const auto& declared = owner_.declared_scopes_[depth - 1];
+
                     if (declared.count(name) != 0) {
                         break;
                     }
                 }
+
                 if (!resolved_short_name) {
-                    for (std::size_t depth = instance_scopes_.size(); depth > 0; --depth) {
-                        for (const std::string& instance : instance_scopes_[depth - 1]) {
-                            auto missing = missing_members_.find(instance);
-                            if (missing != missing_members_.end() &&
+                    for (std::size_t depth = owner_.instance_scopes_.size(); depth > 0;
+                        --depth) {
+                        for (const std::string& instance :
+                            owner_.instance_scopes_[depth - 1]) {
+                            auto missing = owner_.missing_members_.find(instance);
+
+                            if (missing != owner_.missing_members_.end() &&
                                 missing->second.count(name) != 0) {
-                                report(e->location, ErrorCode::GenericSpecializationMissingMember, std::vector<std::string>{ instance, name });
-                                return;
+                                owner_.report(prim->location,
+                                    ErrorCode::GenericSpecializationMissingMember,
+                                    std::vector<std::string>{ instance, name });
+                                return false;
                             }
                         }
                     }
                 }
-                break;
+
+                return false;
             }
             default:
-                break;
+                return false;
             }
         }
+
+        bool EnterAssignmentExpression(AssignmentExpression* node) override {
+            owner_.expand_expression(node->left);
+            owner_.expand_expression(node->right);
+            return false;
+        }
+
+        bool EnterLogicalOrExpression(LogicalOrExpression* node) override {
+            owner_.expand_expression(node->left);
+            owner_.expand_expression(node->right);
+            return false;
+        }
+
+        bool EnterLogicalAndExpression(LogicalAndExpression* node) override {
+            owner_.expand_expression(node->left);
+            owner_.expand_expression(node->right);
+            return false;
+        }
+
+        bool EnterComparisonExpression(ComparisonExpression* node) override {
+            owner_.expand_expression(node->left);
+            owner_.expand_expression(node->right);
+            return false;
+        }
+
+        bool EnterAdditiveExpression(AdditiveExpression* node) override {
+            owner_.expand_expression(node->left);
+            owner_.expand_expression(node->right);
+            return false;
+        }
+
+        bool EnterMultiplicativeExpression(MultiplicativeExpression* node) override {
+            owner_.expand_expression(node->left);
+            owner_.expand_expression(node->right);
+            return false;
+        }
+
+        bool EnterPowerExpression(PowerExpression* node) override {
+            owner_.expand_expression(node->left);
+            owner_.expand_expression(node->right);
+            return false;
+        }
+
+        bool EnterBitwiseExpression(BitwiseExpression* node) override {
+            owner_.expand_expression(node->left);
+            owner_.expand_expression(node->right);
+            return false;
+        }
+
+        bool EnterShiftExpression(ShiftExpression* node) override {
+            owner_.expand_expression(node->left);
+            owner_.expand_expression(node->right);
+            return false;
+        }
+
+        bool EnterConditionalExpression(ConditionalExpression* node) override {
+            owner_.expand_expression(node->condition);
+            owner_.expand_expression(node->then_expr);
+            owner_.expand_expression(node->else_expr);
+            return false;
+        }
+
+        bool EnterUnaryExpression(UnaryExpression* node) override {
+            owner_.expand_expression(node->operand);
+            return false;
+        }
+
+        bool EnterPostfixExpression(PostfixExpression* node) override {
+            owner_.expand_expression(node->base);
+            owner_.expand_expression(node->subscript_expr);
+
+            for (std::unique_ptr<Expression>& arg : node->arguments) {
+                owner_.expand_expression(arg);
+            }
+
+            owner_.resolve_type(node->cast_type);
+            return false;
+        }
+
+        bool EnterCompileTimePropertyExpression(
+            CompileTimePropertyExpression*) override {
+            return false;
+        }
+
+    private:
+        GenericExpander& owner_;
+    };
+
+    void GenericExpander::expand_expression_impl(
+        std::unique_ptr<Expression>& expr_holder) {
+        if (expr_holder == nullptr) { return; }
+
+        ExpressionExpander rewriter(*this);
+        rewriter.rewrite_expression(expr_holder);
     }
 
 }

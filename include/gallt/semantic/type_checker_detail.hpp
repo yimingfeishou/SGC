@@ -33,9 +33,6 @@ namespace gallt {
             return true;
         }
 
-        // Gallt source identifiers are the only names the parser can produce for a
-        // call target. A callee name that is not shaped like one can only be the
-        // residue of a generic instantiation the generic layer already diagnosed.
         inline bool is_source_identifier_text(std::string_view name) {
             if (name.empty()) { return false; }
 
@@ -176,6 +173,11 @@ namespace gallt {
         }
 
         inline bool string_literal_content(std::string_view lexeme, std::string& out) {
+            if (is_literal_string_lexeme(lexeme)) {
+                out.assign(literal_string_content(lexeme));
+                return true;
+            }
+
             if (lexeme.size() < 2 || lexeme.front() != '"' || lexeme.back() != '"') {
                 return false;
             }

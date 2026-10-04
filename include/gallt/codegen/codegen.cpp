@@ -1,4 +1,6 @@
 #include "codegen.hpp"
+#include "../pal/platform.hpp"
+#include "../parser/ast_visitor.hpp"
 #include "codegen_detail.hpp"
 #include "../runtime/crt_embedded.hpp"
 #include "../semantic/constant_folding.hpp"
@@ -134,34 +136,66 @@ namespace gallt {
         return "void";
     }
 
+    class CodeGenerator::StructCollectRewriter : public AST::AstRewriter {
+    public:
+        explicit StructCollectRewriter(CodeGenerator& owner) : owner_(owner) {
+        }
+
+    protected:
+        bool EnterStructDefinition(StructDefinition* node) override {
+            owner_.collect_structs_in_statement(node);
+            return false;
+        }
+
+        bool EnterFunctionDefinition(FunctionDefinition* node) override {
+            rewrite_statement(node->body);
+            return false;
+        }
+
+        bool EnterType(AST::Type&) override { return false; }
+
+        bool EnterExpression(std::unique_ptr<Expression>&) override {
+            return false;
+        }
+
+        bool EnterVariableDeclaration(VariableDeclaration*) override {
+            return false;
+        }
+
+        bool EnterGenericDefinition(GenericDefinition*) override { return false; }
+
+        bool EnterInstantiationStatement(InstantiationStatement*) override {
+            return false;
+        }
+
+        bool EnterNamespaceDefinition(NamespaceDefinition*) override {
+            return false;
+        }
+
+        bool EnterAdditionNamespaceStatement(AdditionNamespaceStatement*) override {
+            return false;
+        }
+
+        bool EnterCondDefinition(CondDefinition*) override { return false; }
+
+        bool EnterConditionalBlock(ConditionalBlock*) override { return false; }
+
+        bool EnterTopLevelBlock(TopLevelBlock*) override { return false; }
+
+        bool EnterEmitStatement(EmitStatement*) override { return false; }
+
+    private:
+        CodeGenerator& owner_;
+    };
+
     void CodeGenerator::collect_structs() {
         struct_by_name_.clear();
         struct_defs_.clear();
 
-        std::function<void(AST::Statement*)> walk = [&](AST::Statement* stmt) {
-            collect_structs_in_statement(stmt);
-            if (auto* block = dynamic_cast<AST::Block*>(stmt)) {
-                for (auto& s : block->statements) { walk(s.get()); }
-            } else if (auto* ifs = dynamic_cast<AST::IfStatement*>(stmt)) {
-                walk(ifs->then_block.get());
-                if (ifs->else_block) { walk(ifs->else_block.get()); }
-            } else if (auto* for_ = dynamic_cast<AST::ForStatement*>(stmt)) {
-                if (for_->init) { walk(for_->init.get()); }
-                if (for_->body) { walk(for_->body.get()); }
-            } else if (auto* while_ = dynamic_cast<AST::WhileStatement*>(stmt)) {
-                if (while_->body) { walk(while_->body.get()); }
-            }
-        };
+        StructCollectRewriter visitor(*this);
 
-        for (auto& top : program_->top_levels) {
-            if (auto* st = dynamic_cast<AST::StructDefinition*>(top.get())) {
-                if (!struct_by_name_.count(st->name)) {
-                    struct_by_name_[st->name] = st;
-                    struct_defs_.push_back(st);
-                }
-            } else if (auto* func = dynamic_cast<AST::FunctionDefinition*>(top.get())) {
-                if (func->body) { walk(func->body.get()); }
-            }
+        for (std::unique_ptr<AST::TopLevel>& top : program_->top_levels) {
+            visitor.rewrite_top_level(top);
         }
     }
 
@@ -249,7 +283,8 @@ namespace gallt {
 
     void CodeGenerator::emit_preamble() {
         emit_line("source_filename = \"gallt\"");
-        emit_line("target triple = \"x86_64-pc-windows-msvc\"");
+        emit_line("target triple = \"" +
+            std::string(pal::target_triple()) + "\"");
         emit_line("%struct.gallt.string = type { i64, i64, [16 x i8] }");
     }
 
@@ -1232,202 +1267,304 @@ namespace gallt {
         pop_scope();
     }
 
-    void CodeGenerator::emit_block(AST::Block* block, bool new_scope) {
-        if (block == nullptr) { return; }
-        if (new_scope) {
-            push_scope();
+    class CodeGenerator::StatementEmitter : public AST::AstRewriter {
+    public:
+        StatementEmitter(CodeGenerator& owner, bool new_scope)
+            : owner_(owner), new_scope_(new_scope) {
         }
 
-        for (const auto& stmt : block->statements) {
-            std::size_t temp_mark = statement_temporaries_.size();
-            emit_statement(stmt.get());
-            if (!current_block_terminated_) {
-                while (statement_temporaries_.size() > temp_mark) {
-                    CleanupRecord record = statement_temporaries_.back();
-                    statement_temporaries_.pop_back();
-                    emit_destroy_string_at(record.type, record.address);
-                }
-            } else {
-                statement_temporaries_.resize(temp_mark);
+    protected:
+        bool EnterBlock(Block* node) override {
+            if (new_scope_) {
+                owner_.push_scope();
             }
+
+            for (std::unique_ptr<Statement>& stmt : node->statements) {
+                std::size_t temp_mark = owner_.statement_temporaries_.size();
+                owner_.emit_statement(stmt.get());
+
+                if (!owner_.current_block_terminated_) {
+                    while (owner_.statement_temporaries_.size() > temp_mark) {
+                        CleanupRecord record = owner_.statement_temporaries_.back();
+                        owner_.statement_temporaries_.pop_back();
+                        owner_.emit_destroy_string_at(record.type, record.address);
+                    }
+                } else {
+                    owner_.statement_temporaries_.resize(temp_mark);
+                }
+            }
+
+            if (new_scope_) {
+                owner_.pop_scope();
+            }
+
+            return false;
         }
 
-        if (new_scope) {
-            pop_scope();
-        }
-    }
-
-    void CodeGenerator::emit_statement(AST::Statement* stmt) {
-        if (stmt == nullptr) { return; }
-        if (debug_level_ >= 1 && debug_location_valid_) {
-            debug_location_ = stmt->location;
+        bool EnterVariableDeclaration(VariableDeclaration* node) override {
+            owner_.emit_variable_declaration(node);
+            return false;
         }
 
-        if (auto* block = dynamic_cast<AST::Block*>(stmt)) {
-            emit_block(block, true);
-        } else if (auto* decl = dynamic_cast<AST::VariableDeclaration*>(stmt)) {
-            emit_variable_declaration(decl);
-        } else if (auto* destruct_stmt = dynamic_cast<AST::DestructStatement*>(stmt)) {
-            ExprValue target = gen_expr(destruct_stmt->target.get());
+        bool EnterDestructStatement(DestructStatement* node) override {
+            ExprValue target = owner_.gen_expr(node->target.get());
             std::string pointer = !target.value.empty() ? target.value
                 : (!target.address.empty() ? target.address : std::string());
 
             if (!pointer.empty() && target.type.kind == TypeKind::Pointer &&
                 target.type.pointee_type) {
-                std::string body_label = new_label("destruct");
-                std::string end_label = new_label("destruct_end");
-                std::string is_null = new_temp("destruct_isnull");
-                emit_line(is_null + " = icmp eq ptr " + pointer + ", null");
-                emit_line("br i1 " + is_null + ", label %" + end_label +
+                std::string body_label = owner_.new_label("destruct");
+                std::string end_label = owner_.new_label("destruct_end");
+                std::string is_null = owner_.new_temp("destruct_isnull");
+                owner_.emit_line(is_null + " = icmp eq ptr " + pointer + ", null");
+                owner_.emit_line("br i1 " + is_null + ", label %" + end_label +
                     ", label %" + body_label);
-                start_block(body_label);
-                emit_destroy_string_at(*target.type.pointee_type, pointer);
-                emit_line("call void @gallt_free_ptr(ptr " + pointer + ")");
-                emit_line("br label %" + end_label);
-                start_block(end_label);
+                owner_.start_block(body_label);
+                owner_.emit_destroy_string_at(*target.type.pointee_type, pointer);
+                owner_.emit_line("call void @gallt_free_ptr(ptr " + pointer + ")");
+                owner_.emit_line("br label %" + end_label);
+                owner_.start_block(end_label);
             }
-        } else if (auto* if_stmt = dynamic_cast<AST::IfStatement*>(stmt)) {
-            ExprValue cond = gen_expr(if_stmt->condition.get());
-            std::string cond_i1 = truth_condition(cond.value, cond.type);
-            std::string then_label = new_label("then");
-            std::string else_label = new_label("else");
-            std::string end_label = new_label("endif");
-            std::string has_else = if_stmt->else_block ? "1" : "0";
-            emit_line("br i1 " + cond_i1 + ", label %" + then_label +
+
+            return false;
+        }
+
+        bool EnterIfStatement(IfStatement* node) override {
+            ExprValue cond = owner_.gen_expr(node->condition.get());
+            std::string cond_i1 = owner_.truth_condition(cond.value, cond.type);
+            std::string then_label = owner_.new_label("then");
+            std::string else_label = owner_.new_label("else");
+            std::string end_label = owner_.new_label("endif");
+            owner_.emit_line("br i1 " + cond_i1 + ", label %" + then_label +
                 ", label %" + else_label);
-            start_block(then_label);
-            emit_block(static_cast<AST::Block*>(if_stmt->then_block.get()), true);
-            emit_line("br label %" + end_label);
-            start_block(else_label);
-            if (if_stmt->else_block) {
-                emit_block(static_cast<AST::Block*>(if_stmt->else_block.get()), true);
-            }
-            emit_line("br label %" + end_label);
-            start_block(end_label);
-        } else if (auto* for_stmt = dynamic_cast<AST::ForStatement*>(stmt)) {
-            std::size_t break_depth = cleanup_scopes_.size();
-            push_scope();
-            if (for_stmt->init) { emit_statement(for_stmt->init.get()); }
+            owner_.start_block(then_label);
+            owner_.emit_block(static_cast<Block*>(node->then_block.get()), true);
+            owner_.emit_line("br label %" + end_label);
+            owner_.start_block(else_label);
 
-            std::string cond_label = new_label("forcond");
-            std::string body_label = new_label("forbody");
-            std::string step_label = new_label("forstep");
-            std::string end_label = new_label("forend");
-            emit_line("br label %" + cond_label);
-            start_block(cond_label);
-            if (for_stmt->condition) {
-                ExprValue cond = gen_expr(for_stmt->condition.get());
-                emit_line("br i1 " + truth_condition(cond.value, cond.type) +
-                    ", label %" + body_label + ", label %" + end_label);
+            if (node->else_block) {
+                owner_.emit_block(static_cast<Block*>(node->else_block.get()),
+                    true);
+            }
+
+            owner_.emit_line("br label %" + end_label);
+            owner_.start_block(end_label);
+            return false;
+        }
+
+        bool EnterForStatement(ForStatement* node) override {
+            std::size_t break_depth = owner_.cleanup_scopes_.size();
+            owner_.push_scope();
+
+            if (node->init) {
+                owner_.emit_statement(node->init.get());
+            }
+
+            std::string cond_label = owner_.new_label("forcond");
+            std::string body_label = owner_.new_label("forbody");
+            std::string step_label = owner_.new_label("forstep");
+            std::string end_label = owner_.new_label("forend");
+            owner_.emit_line("br label %" + cond_label);
+            owner_.start_block(cond_label);
+
+            if (node->condition) {
+                ExprValue cond = owner_.gen_expr(node->condition.get());
+                owner_.emit_line("br i1 " +
+                    owner_.truth_condition(cond.value, cond.type) + ", label %" +
+                    body_label + ", label %" + end_label);
             } else {
-                emit_line("br label %" + body_label);
+                owner_.emit_line("br label %" + body_label);
             }
 
-            start_block(body_label);
-            break_labels_.push_back(end_label);
-            break_cleanup_depths_.push_back(break_depth);
-            if (for_stmt->body) {
-                emit_block(static_cast<AST::Block*>(for_stmt->body.get()), true);
+            owner_.start_block(body_label);
+            owner_.break_labels_.push_back(end_label);
+            owner_.break_cleanup_depths_.push_back(break_depth);
+
+            if (node->body) {
+                owner_.emit_block(static_cast<Block*>(node->body.get()), true);
             }
 
-            break_labels_.pop_back();
-            break_cleanup_depths_.pop_back();
-            emit_line("br label %" + step_label);
+            owner_.break_labels_.pop_back();
+            owner_.break_cleanup_depths_.pop_back();
+            owner_.emit_line("br label %" + step_label);
 
-            start_block(step_label);
-            if (for_stmt->step) {
-                (void)gen_expr(for_stmt->step.get());
+            owner_.start_block(step_label);
+
+            if (node->step) {
+                (void)owner_.gen_expr(node->step.get());
             }
-            emit_line("br label %" + cond_label);
 
-            start_block(end_label);
-            pop_scope();
-        } else if (auto* while_stmt = dynamic_cast<AST::WhileStatement*>(stmt)) {
-            std::string cond_label = new_label("whilecond");
-            std::string body_label = new_label("whilebody");
-            std::string end_label = new_label("whileend");
-            emit_line("br label %" + cond_label);
-            start_block(cond_label);
-            ExprValue cond = gen_expr(while_stmt->condition.get());
-            emit_line("br i1 " + truth_condition(cond.value, cond.type) +
+            owner_.emit_line("br label %" + cond_label);
+
+            owner_.start_block(end_label);
+            owner_.pop_scope();
+            return false;
+        }
+
+        bool EnterWhileStatement(WhileStatement* node) override {
+            std::string cond_label = owner_.new_label("whilecond");
+            std::string body_label = owner_.new_label("whilebody");
+            std::string end_label = owner_.new_label("whileend");
+            owner_.emit_line("br label %" + cond_label);
+            owner_.start_block(cond_label);
+            ExprValue cond = owner_.gen_expr(node->condition.get());
+            owner_.emit_line("br i1 " + owner_.truth_condition(cond.value, cond.type) +
                 ", label %" + body_label + ", label %" + end_label);
-            start_block(body_label);
-            break_labels_.push_back(end_label);
-            break_cleanup_depths_.push_back(cleanup_scopes_.size());
-            if (while_stmt->body) {
-                emit_block(static_cast<AST::Block*>(while_stmt->body.get()), true);
-            }
-            break_labels_.pop_back();
-            break_cleanup_depths_.pop_back();
-            emit_line("br label %" + cond_label);
-            start_block(end_label);
-        } else if (auto* break_stmt = dynamic_cast<AST::BreakStatement*>(stmt)) {
-            if (!break_labels_.empty()) {
-                if (!break_cleanup_depths_.empty()) {
-                    destroy_active_cleanup_scopes(break_cleanup_depths_.back());
-                }
-                emit_line("br label %" + break_labels_.back());
-                current_label_ = new_label("afterbreak");
-            }
-        } else if (auto* ret = dynamic_cast<AST::ReturnStatement*>(stmt)) {
-            AST::Type ret_type = current_function_
-                ? current_function_->return_type
-                : AST::Type::make_void();
-            if (ret->value && returns_via_sret(ret_type) && !current_sret_pointer_.empty()) {
-                emit_struct_return(ret->value.get(), ret_type, current_sret_pointer_);
-                destroy_statement_temporaries();
-                destroy_active_cleanup_scopes(0);
-                emit_line("ret void");
-                current_label_ = new_label("afterret");
-                return;
+            owner_.start_block(body_label);
+            owner_.break_labels_.push_back(end_label);
+            owner_.break_cleanup_depths_.push_back(owner_.cleanup_scopes_.size());
+
+            if (node->body) {
+                owner_.emit_block(static_cast<Block*>(node->body.get()), true);
             }
 
-            if (ret->value) {
-                ExprValue value = gen_expr(ret->value.get());
+            owner_.break_labels_.pop_back();
+            owner_.break_cleanup_depths_.pop_back();
+            owner_.emit_line("br label %" + cond_label);
+            owner_.start_block(end_label);
+            return false;
+        }
+
+        bool EnterBreakStatement(BreakStatement*) override {
+            if (!owner_.break_labels_.empty()) {
+                if (!owner_.break_cleanup_depths_.empty()) {
+                    owner_.destroy_active_cleanup_scopes(
+                        owner_.break_cleanup_depths_.back());
+                }
+
+                owner_.emit_line("br label %" + owner_.break_labels_.back());
+                owner_.current_label_ = owner_.new_label("afterbreak");
+            }
+
+            return false;
+        }
+
+        bool EnterReturnStatement(ReturnStatement* node) override {
+            AST::Type ret_type = owner_.current_function_
+                ? owner_.current_function_->return_type
+                : AST::Type::make_void();
+
+            if (node->value && owner_.returns_via_sret(ret_type) &&
+                !owner_.current_sret_pointer_.empty()) {
+                owner_.emit_struct_return(node->value.get(), ret_type,
+                    owner_.current_sret_pointer_);
+                owner_.destroy_statement_temporaries();
+                owner_.destroy_active_cleanup_scopes(0);
+                owner_.emit_line("ret void");
+                owner_.current_label_ = owner_.new_label("afterret");
+                return false;
+            }
+
+            if (node->value) {
+                ExprValue value = owner_.gen_expr(node->value.get());
                 std::string string_ret_storage;
+
                 if (ret_type.kind == TypeKind::String &&
                     value.type.kind == TypeKind::String) {
                     if (!value.owned_string.empty()) {
                         string_ret_storage = value.owned_string;
                         value.owned_string.clear();
                     } else if (!value.address.empty()) {
-                        string_ret_storage =
-                            emit_alloca("%struct.gallt.string", "retstring");
-                        emit_line("store %struct.gallt.string zeroinitializer, ptr " +
+                        string_ret_storage = owner_.emit_alloca(
+                            "%struct.gallt.string", "retstring");
+                        owner_.emit_line(
+                            "store %struct.gallt.string zeroinitializer, ptr " +
                             string_ret_storage);
                         ExprValue copy_source;
                         copy_source.type = value.type;
                         copy_source.address = value.address;
-                        emit_string_assign(string_ret_storage, copy_source);
+                        owner_.emit_string_assign(string_ret_storage, copy_source);
                     }
 
-                    std::string agg = new_temp("retstringval");
-                    emit_line(agg + " = load %struct.gallt.string, ptr " + string_ret_storage);
+                    std::string agg = owner_.new_temp("retstringval");
+                    owner_.emit_line(agg + " = load %struct.gallt.string, ptr " +
+                        string_ret_storage);
                     value.value = agg;
                 }
 
-                std::string converted = convert_value(value.value, value.type, ret_type);
-                std::string type_text = llvm_type(ret_type);
+                std::string converted = owner_.convert_value(value.value,
+                    value.type, ret_type);
+                std::string type_text = owner_.llvm_type(ret_type);
+
                 if (ret_type.kind == TypeKind::Function) {
                     type_text = "ptr";
                 }
-                destroy_statement_temporaries();
-                destroy_active_cleanup_scopes(0);
-                emit_line("ret " + type_text + " " + converted);
+
+                owner_.destroy_statement_temporaries();
+                owner_.destroy_active_cleanup_scopes(0);
+                owner_.emit_line("ret " + type_text + " " + converted);
             } else {
-                destroy_statement_temporaries();
-                destroy_active_cleanup_scopes(0);
-                emit_line("ret void");
+                owner_.destroy_statement_temporaries();
+                owner_.destroy_active_cleanup_scopes(0);
+                owner_.emit_line("ret void");
             }
 
-            current_label_ = new_label("afterret");
-        } else if (auto* expr_stmt = dynamic_cast<AST::ExpressionStatement*>(stmt)) {
-            emit_expression_statement(expr_stmt);
-        } else if (auto* empty = dynamic_cast<AST::EmptyStatement*>(stmt)) {
-            (void)empty;
-        } else if (auto* struct_def = dynamic_cast<AST::StructDefinition*>(stmt)) {
-            (void)struct_def;
+            owner_.current_label_ = owner_.new_label("afterret");
+            return false;
         }
+
+        bool EnterExpressionStatement(ExpressionStatement* node) override {
+            owner_.emit_expression_statement(node);
+            return false;
+        }
+
+        bool EnterEmptyStatement(EmptyStatement*) override { return false; }
+
+        bool EnterStructDefinition(StructDefinition*) override { return false; }
+
+        bool EnterGenericDefinition(GenericDefinition*) override { return false; }
+
+        bool EnterInstantiationStatement(InstantiationStatement*) override {
+            return false;
+        }
+
+        bool EnterNamespaceDefinition(NamespaceDefinition*) override {
+            return false;
+        }
+
+        bool EnterAdditionNamespaceStatement(AdditionNamespaceStatement*) override {
+            return false;
+        }
+
+        bool EnterAccessNamespaceStatement(AccessNamespaceStatement*) override {
+            return false;
+        }
+
+        bool EnterCondDefinition(CondDefinition*) override { return false; }
+
+        bool EnterUncondDefinition(UncondDefinition*) override { return false; }
+
+        bool EnterConditionalBlock(ConditionalBlock*) override { return false; }
+
+        bool EnterTopLevelBlock(TopLevelBlock*) override { return false; }
+
+        bool EnterEmitStatement(EmitStatement*) override { return false; }
+
+    private:
+        CodeGenerator& owner_;
+        bool new_scope_ = false;
+    };
+
+    void CodeGenerator::emit_block(AST::Block* block, bool new_scope) {
+        if (block == nullptr) { return; }
+
+        std::unique_ptr<AST::Statement> holder(block);
+        StatementEmitter emitter(*this, new_scope);
+        emitter.rewrite_statement(holder);
+        holder.release();
+    }
+
+    void CodeGenerator::emit_statement(AST::Statement* stmt) {
+        if (stmt == nullptr) { return; }
+
+        if (debug_level_ >= 1 && debug_location_valid_) {
+            debug_location_ = stmt->location;
+        }
+
+        std::unique_ptr<AST::Statement> holder(stmt);
+        StatementEmitter emitter(*this, true);
+        emitter.rewrite_statement(holder);
+        holder.release();
     }
 
     void CodeGenerator::emit_expression_statement(AST::ExpressionStatement* stmt) {

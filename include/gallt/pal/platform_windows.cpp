@@ -2,6 +2,8 @@
 
 #if SGC_PLATFORM_WINDOWS
 
+#include "../driver/entry.hpp"
+
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
@@ -12,6 +14,7 @@
 #include <windows.h>
 #include <cerrno>
 #include <fstream>
+#include <malloc.h>
 #include <sstream>
 #include <system_error>
 
@@ -23,6 +26,56 @@ namespace pal {
 
         void set_last_file_error(int code) noexcept {
             g_last_file_error = code;
+        }
+
+        std::string find_program_in_path(const std::string& name) {
+            std::string path = environment_variable("PATH");
+            if (path.empty()) { return std::string(); }
+
+            std::size_t begin = 0;
+            while (begin <= path.size()) {
+                std::size_t end = path.find(';', begin);
+                if (end == std::string::npos) { end = path.size(); }
+
+                std::string directory = path.substr(begin, end - begin);
+                if (!directory.empty()) {
+                    if (directory.size() >= 2 &&
+                        directory.front() == '"' && directory.back() == '"') {
+                        directory = directory.substr(1, directory.size() - 2);
+                    }
+
+                    std::string candidate = join_path(directory, name);
+                    if (file_exists(candidate)) {
+                        return candidate;
+                    }
+                }
+
+                begin = end + 1;
+            }
+
+            return std::string();
+        }
+
+        std::string find_tool(const std::string& tool_name) {
+            for (const char* env : { "SGC_LLVM_BIN", "LLVM_BIN" }) {
+                std::string dir = environment_variable(env);
+                if (dir.empty()) { continue; }
+                std::string candidate = join_path(dir, tool_name);
+                if (file_exists(candidate)) { return candidate; }
+            }
+
+            std::string module_path = executable_path();
+
+            if (!module_path.empty()) {
+                std::string candidate = join_path(parent_path(module_path),
+                    tool_name);
+                if (file_exists(candidate)) { return candidate; }
+            }
+
+            std::string on_path = find_program_in_path(tool_name);
+            if (!on_path.empty()) { return on_path; }
+
+            return tool_name;
         }
     }
 
@@ -89,6 +142,61 @@ namespace pal {
         }
 
         return to_utf8(buffer);
+    }
+
+    std::string find_llvm_clang() {
+        return find_tool("clang.exe");
+    }
+
+    std::string find_llvm_librarian() {
+        return find_tool("llvm-lib.exe");
+    }
+
+    std::vector<std::string> llvm_librarian_arguments(
+        const std::string& output, const std::vector<std::string>& members) {
+        std::vector<std::string> out;
+        out.push_back("/nologo");
+        out.push_back("/out:" + output);
+        out.insert(out.end(), members.begin(), members.end());
+        return out;
+    }
+
+    std::vector<std::string> linker_selection_arguments() {
+        return { "-fuse-ld=lld" };
+    }
+
+    std::vector<std::string> stack_arguments(
+        const std::optional<std::uint64_t>& stack_size,
+        const std::optional<std::uint64_t>& commit_size) {
+        if (!stack_size.has_value() && !commit_size.has_value()) {
+            return std::vector<std::string>();
+        }
+
+        std::string value = "/STACK:";
+        value += std::to_string(stack_size.has_value() ? *stack_size : 1048576ull);
+
+        if (commit_size.has_value()) {
+            value += ",";
+            value += std::to_string(*commit_size);
+        }
+
+        return { "-Xlinker", value };
+    }
+
+    std::vector<std::string> linker_mode_arguments(bool static_link) {
+        if (!static_link) { return std::vector<std::string>(); }
+        return { "-static" };
+    }
+
+    std::vector<std::string> dynamic_library_export_arguments(
+        const std::vector<std::string>& symbols) {
+        std::vector<std::string> out;
+
+        for (const std::string& symbol : symbols) {
+            out.push_back("-Wl,/EXPORT:" + symbol);
+        }
+
+        return out;
     }
 
     std::string environment_variable(const std::string& name) {
@@ -186,6 +294,71 @@ namespace pal {
         default:
             return false;
         }
+    }
+
+    std::size_t stack_headroom_bytes() noexcept {
+        ULONG_PTR low = 0;
+        ULONG_PTR high = 0;
+        ::GetCurrentThreadStackLimits(&low, &high);
+
+        if (low == 0 || high == 0 || high <= low) {
+            return kStackHeadroomUnknown;
+        }
+
+        char marker = 0;
+        const ULONG_PTR current = reinterpret_cast<ULONG_PTR>(&marker);
+
+        if (current <= low || current >= high) {
+            return 0;
+        }
+
+        return static_cast<std::size_t>(current - low);
+    }
+
+    bool stack_headroom_available(std::size_t required_bytes) noexcept {
+        return stack_headroom_bytes() >= required_bytes;
+    }
+
+    std::size_t stack_total_bytes() noexcept {
+        ULONG_PTR low = 0;
+        ULONG_PTR high = 0;
+        ::GetCurrentThreadStackLimits(&low, &high);
+
+        if (low == 0 || high == 0 || high <= low) {
+            return kStackHeadroomUnknown;
+        }
+
+        return static_cast<std::size_t>(high - low);
+    }
+
+    namespace {
+        LONG WINAPI stack_guard_handler(EXCEPTION_POINTERS* info) {
+            if (info == nullptr || info->ExceptionRecord == nullptr ||
+                info->ExceptionRecord->ExceptionCode != EXCEPTION_STACK_OVERFLOW) {
+                return EXCEPTION_CONTINUE_SEARCH;
+            }
+
+            ::_resetstkoflw();
+
+            HANDLE handle = ::GetStdHandle(STD_ERROR_HANDLE);
+
+            if (handle != nullptr && handle != INVALID_HANDLE_VALUE) {
+                DWORD written = 0;
+                ::WriteFile(handle, kStackOverflowMessage,
+                    static_cast<DWORD>(sizeof(kStackOverflowMessage) - 1), &written,
+                    nullptr);
+                ::WriteFile(handle, "\n", 1, &written, nullptr);
+            }
+
+            ::ExitProcess(static_cast<UINT>(exit_failure_code()));
+            return EXCEPTION_CONTINUE_SEARCH;
+        }
+    }
+
+    bool install_stack_guard() noexcept {
+        static void* registered =
+            ::AddVectoredExceptionHandler(1, stack_guard_handler);
+        return registered != nullptr;
     }
 
     int exit_success_code() noexcept { return 0; }

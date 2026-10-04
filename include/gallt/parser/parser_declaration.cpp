@@ -17,6 +17,7 @@ namespace gallt {
     std::unique_ptr<TopLevel> Parser::parse_function_definition(
         bool exported, SourceLocation export_location) {
         SourceLocation loc = current_location();
+        const bool const_qualified = current_.type == TokenType::Keyword_Const;
         Type ret_type = parse_type(true);
 
         std::string func_name;
@@ -124,6 +125,7 @@ namespace gallt {
         func->param_defaults = std::move(param_defaults);
         func->is_export = exported;
         func->is_variadic = variadic;
+        func->is_constexpr_function = const_qualified;
         return func;
     }
 

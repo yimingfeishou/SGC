@@ -3,6 +3,9 @@
 
 #include "../common/diagnostics.hpp"
 #include "../parser/ast.hpp"
+#include "namespace_lowering.hpp"
+#include "constexpr_function.hpp"
+#include <cstdint>
 #include <optional>
 #include <deque>
 #include <string>
@@ -22,9 +25,14 @@ namespace gallt {
             int depth = 0;
         };
 
-        explicit GenericExpander(DiagnosticEngine& diag);
+        static constexpr std::size_t kDefaultInstantiationDepth = 2048;
+
+        GenericExpander(DiagnosticEngine& diag, NamespaceLowering& namespaces,
+            std::optional<std::uint64_t> instantiation_depth = std::nullopt);
 
         bool expand(AST::Program* program);
+
+        bool stack_probe_triggered() const { return stack_probe_triggered_; }
 
         const std::unordered_map<std::string, AST::StructDefinition*>& instantiated_structs() const {
             return instantiated_structs_;
@@ -92,6 +100,7 @@ namespace gallt {
         };
 
         DiagnosticEngine& diag_;
+        NamespaceLowering& namespaces_;
         AST::Program* program_ = nullptr;
 
         std::unordered_map<std::string, GenericEntry> generics_;
@@ -101,6 +110,10 @@ namespace gallt {
         std::unordered_map<std::string, AST::StructDefinition*> instantiated_structs_;
         std::unordered_map<const AST::Expression*, ExpressionCallSite> expression_call_sites_;
         int expression_expansion_depth_ = 0;
+        std::size_t instantiation_depth_limit_ = kDefaultInstantiationDepth;
+        std::size_t instantiation_depth_ = 0;
+        bool instantiation_depth_reported_ = false;
+        bool stack_probe_triggered_ = false;
         const AST::FunctionDefinition* current_function_ = nullptr;
         std::vector<std::unique_ptr<AST::Statement>>* pending_hoisted_ = nullptr;
         std::vector<std::unique_ptr<AST::Expression>> expr_argument_storage_;
@@ -153,7 +166,35 @@ namespace gallt {
             std::size_t errors_;
         };
 
+        class InstantiationDepthGuard {
+        public:
+            InstantiationDepthGuard(GenericExpander& pass, SourceLocation loc);
+            ~InstantiationDepthGuard();
+
+            InstantiationDepthGuard(const InstantiationDepthGuard&) = delete;
+            InstantiationDepthGuard& operator=(const InstantiationDepthGuard&) = delete;
+
+            bool ok() const { return ok_; }
+
+        private:
+            GenericExpander& pass_;
+            bool ok_;
+        };
+
+        static constexpr std::size_t kInstantiationStackReserveDivisor = 8;
+        static constexpr std::size_t kInstantiationStackMinimumReserve =
+            64 * 1024;
+        static constexpr std::size_t kInstantiationStackDefaultReserve =
+            1024 * 1024;
+
+        bool enter_instantiation(SourceLocation loc);
+        std::size_t instantiation_stack_reserve() const;
+        void leave_instantiation();
+
         void expand_expression_impl(std::unique_ptr<AST::Expression>& expr);
+
+        class ExpressionExpander;
+        class ExpansionRewriter;
 
         void collect_generics();
         void collect_declarations();
@@ -218,6 +259,9 @@ namespace gallt {
 
         bool resolve_constant_argument(const AST::GenericArgument& arg,
             const Substitution* sub, ConstantValue& out);
+        bool name_is_known_type(const std::string& name, const Substitution& sub) const;
+        bool substitute_generic_argument(AST::GenericArgument& arg,
+            const Substitution& sub);
         bool is_pack_name(const Substitution& sub, const std::string& name) const;
         static bool pack_identifier_name(const AST::Expression* expr,
             std::string& out);
@@ -259,6 +303,23 @@ namespace gallt {
             std::vector<std::unique_ptr<AST::TopLevel>>& owner);
         bool eval_emit_piece(const AST::Expression* expr, const Substitution& sub,
             std::string& out);
+        bool eval_constexpr_call(const AST::PostfixExpression* call,
+            const Substitution& sub, std::string& out);
+        bool evaluate_constexpr_call(const AST::PostfixExpression* call,
+            const Substitution& sub, ConstexprValue& out);
+        bool evaluate_constexpr_with_substitution(const AST::Expression* expr,
+            const Substitution& sub, ConstexprValue& out);
+        bool constexpr_argument_value(const AST::Expression* expr,
+            const Substitution& sub, const AST::Type& parameter_type,
+            ConstexprValue& out);
+        bool constexpr_string_value(const AST::Expression* expr,
+            const Substitution& sub, std::string& out);
+        bool constexpr_numeric_value(const AST::Expression* expr,
+            const Substitution& sub, ConstantValue& out);
+        const AST::FunctionDefinition* find_constexpr_function(
+            const std::string& name, std::size_t arity) const;
+        ConstexprInterpreter make_constexpr_interpreter(
+            const Substitution& sub) const;
         bool eval_compile_time_condition(const AST::Expression* expr, const Substitution& sub,
             bool& out);
         bool eval_integer_condition_value(const AST::Expression* expr,

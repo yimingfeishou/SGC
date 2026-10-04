@@ -132,6 +132,24 @@ namespace gallt {
 
     TokenType keyword_to_token_type(std::string_view lexeme) noexcept;
 
+    inline constexpr std::string_view literal_string_prefix = "literal\"";
+
+    inline bool is_literal_string_lexeme(std::string_view lexeme) noexcept {
+        return lexeme.size() > literal_string_prefix.size() &&
+            lexeme.compare(0, literal_string_prefix.size(),
+                literal_string_prefix) == 0 &&
+            lexeme.back() == '"';
+    }
+
+    inline std::string_view literal_string_content(std::string_view lexeme) noexcept {
+        if (!is_literal_string_lexeme(lexeme)) {
+            return std::string_view();
+        }
+
+        return lexeme.substr(literal_string_prefix.size(),
+            lexeme.size() - literal_string_prefix.size() - 1);
+    }
+
 }
 
 #endif

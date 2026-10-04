@@ -1,9 +1,12 @@
 #include "generic_expander.hpp"
+#include "../parser/ast_visitor.hpp"
 #include "diagnosed_registry.hpp"
 #include "generic_expander_detail.hpp"
 #include "constant_folding.hpp"
 #include "../lexer/lexer.hpp"
+#include "../pal/platform.hpp"
 #include "../parser/parser.hpp"
+#include <iostream>
 #include <algorithm>
 #include <cstdlib>
 #include <cstdio>
@@ -16,7 +19,68 @@ using namespace gallt::AST;
 namespace gallt {
     using namespace generic_expander_detail;
 
-    GenericExpander::GenericExpander(DiagnosticEngine& diag) : diag_(diag) {}
+    GenericExpander::GenericExpander(DiagnosticEngine& diag, NamespaceLowering& namespaces,
+        std::optional<std::uint64_t> instantiation_depth)
+        : diag_(diag)
+        , namespaces_(namespaces) {
+        if (instantiation_depth.has_value() && *instantiation_depth > 0) {
+            instantiation_depth_limit_ =
+                static_cast<std::size_t>(*instantiation_depth);
+        }
+    }
+
+    GenericExpander::InstantiationDepthGuard::InstantiationDepthGuard(
+        GenericExpander& pass, SourceLocation loc)
+        : pass_(pass), ok_(pass.enter_instantiation(loc)) {}
+
+    GenericExpander::InstantiationDepthGuard::~InstantiationDepthGuard() {
+        pass_.leave_instantiation();
+    }
+
+    bool GenericExpander::enter_instantiation(SourceLocation loc) {
+        ++instantiation_depth_;
+
+        if (stack_probe_triggered_) { return false; }
+
+        if (instantiation_depth_ > instantiation_depth_limit_) {
+            if (!instantiation_depth_reported_) {
+                instantiation_depth_reported_ = true;
+                report(loc, ErrorCode::InstantiationDepthTooDeep,
+                    std::vector<std::string>{
+                        std::to_string(instantiation_depth_limit_),
+                        std::to_string(instantiation_depth_) });
+            }
+
+            return false;
+        }
+
+        if (!pal::stack_headroom_available(instantiation_stack_reserve())) {
+            stack_probe_triggered_ = true;
+            std::cerr
+                << "sgc: generics instantiation depth is too deep, total recursion depth '"
+                << instantiation_depth_ << "'\n";
+            return false;
+        }
+
+        return true;
+    }
+
+    std::size_t GenericExpander::instantiation_stack_reserve() const {
+        const std::size_t total = pal::stack_total_bytes();
+
+        if (total == pal::kStackHeadroomUnknown) {
+            return kInstantiationStackDefaultReserve;
+        }
+
+        const std::size_t scaled = total / kInstantiationStackReserveDivisor;
+
+        return scaled < kInstantiationStackMinimumReserve
+            ? kInstantiationStackMinimumReserve : scaled;
+    }
+
+    void GenericExpander::leave_instantiation() {
+        if (instantiation_depth_ > 0) { --instantiation_depth_; }
+    }
 
     GenericExpander::PoisonGuard::PoisonGuard(GenericExpander& pass,
         const AST::Node* node)
@@ -422,6 +486,10 @@ namespace gallt {
 
     std::optional<std::string> GenericExpander::ensure_instantiation(const GenericRef& ref,
         bool whole_block) {
+        InstantiationDepthGuard depth_guard(*this, ref.location);
+
+        if (!depth_guard.ok()) { return std::nullopt; }
+
         auto entry_it = generics_.find(ref.generic_name);
         if (entry_it == generics_.end()) {
             report(ref.location, ErrorCode::GenericUndefined, std::vector<std::string>{ ref.generic_name });
@@ -1157,16 +1225,251 @@ namespace gallt {
         return true;
     }
 
+    class GenericExpander::ExpansionRewriter : public AST::AstRewriter {
+    public:
+        explicit ExpansionRewriter(GenericExpander& owner) : owner_(owner) {
+        }
+
+    protected:
+        bool EnterTopLevel(std::unique_ptr<TopLevel>&) override {
+            ++top_level_entry_;
+            return true;
+        }
+
+        void LeaveTopLevel(std::unique_ptr<TopLevel>&) override {
+            --top_level_entry_;
+        }
+
+        bool EnterExpressionInitializer(ExpressionInitializer* node) override {
+            owner_.expand_expression(node->expr);
+            return false;
+        }
+
+        bool EnterArrayInitializer(ArrayInitializer* node) override {
+            for (std::unique_ptr<Initializer>& element : node->elements) {
+                owner_.expand_initializer(element.get());
+            }
+
+            return false;
+        }
+
+        bool EnterBlock(Block* node) override {
+            owner_.push_scope();
+
+            for (std::unique_ptr<Statement>& child : node->statements) {
+                if (auto* vd = dynamic_cast<VariableDeclaration*>(child.get())) {
+                    owner_.declare_name(vd->name);
+                } else if (auto* sd = dynamic_cast<StructDefinition*>(child.get())) {
+                    owner_.declare_name(sd->name);
+                } else if (auto* def = dynamic_cast<FunctionDefinition*>(child.get())) {
+                    owner_.declare_name(def->name);
+                }
+            }
+
+            for (std::unique_ptr<Statement>& child : node->statements) {
+                owner_.expand_statement(child.get());
+            }
+
+            std::vector<std::unique_ptr<Statement>> kept;
+            kept.reserve(node->statements.size());
+
+            for (std::unique_ptr<Statement>& child : node->statements) {
+                if (dynamic_cast<InstantiationStatement*>(child.get()) != nullptr) {
+                    continue;
+                }
+
+                kept.push_back(std::move(child));
+            }
+
+            node->statements = std::move(kept);
+            owner_.pop_scope();
+            return false;
+        }
+
+        bool EnterVariableDeclaration(VariableDeclaration* node) override {
+            owner_.resolve_type(node->type);
+
+            if (top_level_entry_ > 0 && node->array_size_expr) {
+                owner_.expand_expression(node->array_size_expr);
+            }
+
+            owner_.expand_initializer(node->initializer.get());
+            return false;
+        }
+
+        bool EnterStructDefinition(StructDefinition* node) override {
+            owner_.struct_defs_[node->name] = node;
+
+            for (StructDefinition::Member& member : node->members) {
+                owner_.resolve_type(member.type);
+
+                if (member.array_size_expr) {
+                    owner_.expand_expression(member.array_size_expr);
+                }
+
+                if (member.function_pointer_type.has_value()) {
+                    owner_.resolve_type(*member.function_pointer_type);
+                }
+
+                owner_.expand_initializer(member.initializer.get());
+            }
+
+            for (std::unique_ptr<SpecialMemberFunction>& smf : node->special_members) {
+                for (Type& parameter : smf->parameters) {
+                    owner_.resolve_type(parameter);
+                }
+
+                owner_.resolve_type(smf->parameter_type);
+
+                if (top_level_entry_ > 0) {
+                    for (std::unique_ptr<Expression>& value : smf->parameter_defaults) {
+                        owner_.expand_expression(value);
+                    }
+
+                    owner_.push_scope();
+
+                    if (!smf->parameter_name.empty()) {
+                        owner_.declare_name(smf->parameter_name);
+                    }
+
+                    for (const std::string& name : smf->parameter_names) {
+                        owner_.declare_name(name);
+                    }
+                }
+
+                owner_.expand_statement(smf->body.get());
+
+                if (top_level_entry_ > 0) {
+                    owner_.pop_scope();
+                }
+            }
+
+            return false;
+        }
+
+        bool EnterFunctionDefinition(FunctionDefinition* node) override {
+            if (top_level_entry_ == 0) {
+                return false;
+            }
+
+            owner_.func_defs_[node->name] = node;
+            owner_.resolve_type(node->return_type);
+
+            for (Type& parameter : node->parameters) {
+                owner_.resolve_type(parameter);
+            }
+
+            for (std::unique_ptr<Expression>& value : node->param_defaults) {
+                owner_.expand_expression(value);
+            }
+
+            owner_.push_scope();
+
+            for (const std::string& name : node->param_names) {
+                if (!name.empty()) {
+                    owner_.declare_name(name);
+                }
+            }
+
+            owner_.expand_statement(node->body.get());
+            owner_.pop_scope();
+            return false;
+        }
+
+        bool EnterIfStatement(IfStatement* node) override {
+            owner_.expand_expression(node->condition);
+            owner_.expand_statement(node->then_block.get());
+            owner_.expand_statement(node->else_block.get());
+            return false;
+        }
+
+        bool EnterForStatement(ForStatement* node) override {
+            owner_.push_scope();
+
+            if (node->init) {
+                if (auto* vd = dynamic_cast<VariableDeclaration*>(node->init.get())) {
+                    owner_.declare_name(vd->name);
+                }
+
+                owner_.expand_statement(node->init.get());
+            }
+
+            owner_.expand_expression(node->condition);
+            owner_.expand_expression(node->step);
+            owner_.expand_statement(node->body.get());
+            owner_.pop_scope();
+            return false;
+        }
+
+        bool EnterWhileStatement(WhileStatement* node) override {
+            owner_.expand_expression(node->condition);
+            owner_.expand_statement(node->body.get());
+            return false;
+        }
+
+        bool EnterReturnStatement(ReturnStatement* node) override {
+            owner_.expand_expression(node->value);
+            return false;
+        }
+
+        bool EnterExpressionStatement(ExpressionStatement* node) override {
+            owner_.expand_expression(node->expr);
+            return false;
+        }
+
+        bool EnterDestructStatement(DestructStatement* node) override {
+            owner_.expand_expression(node->target);
+            return false;
+        }
+
+        bool EnterInstantiationStatement(InstantiationStatement* node) override {
+            owner_.ensure_instantiation(node->reference,
+                node->reference.member.empty());
+            return false;
+        }
+
+        bool EnterExternDeclaration(ExternDeclaration* node) override {
+            owner_.resolve_type(node->return_type);
+
+            for (Type& parameter : node->parameters) {
+                owner_.resolve_type(parameter);
+            }
+
+            return false;
+        }
+
+        bool EnterGenericDefinition(GenericDefinition*) override { return false; }
+
+        bool EnterNamespaceDefinition(NamespaceDefinition*) override {
+            return false;
+        }
+
+        bool EnterAdditionNamespaceStatement(AdditionNamespaceStatement*) override {
+            return false;
+        }
+
+        bool EnterCondDefinition(CondDefinition*) override { return false; }
+
+        bool EnterConditionalBlock(ConditionalBlock*) override { return false; }
+
+        bool EnterTopLevelBlock(TopLevelBlock*) override { return false; }
+
+        bool EnterEmitStatement(EmitStatement*) override { return false; }
+
+    private:
+        GenericExpander& owner_;
+        int top_level_entry_ = 0;
+    };
+
     void GenericExpander::expand_initializer(Initializer* init) {
         if (init == nullptr) { return; }
         if (poisoned_node(init)) { return; }
         PoisonGuard guard(*this, init);
 
-        if (auto* e = dynamic_cast<ExpressionInitializer*>(init)) {
-            expand_expression(e->expr);
-        } else if (auto* a = dynamic_cast<ArrayInitializer*>(init)) {
-            for (auto& element : a->elements) { expand_initializer(element.get()); }
-        }
+        std::unique_ptr<Initializer> holder(init);
+        ExpansionRewriter rewriter(*this);
+        rewriter.rewrite_initializer(holder);
+        holder.release();
     }
 
     void GenericExpander::expand_statement(Statement* stmt) {
@@ -1174,111 +1477,10 @@ namespace gallt {
         if (poisoned_node(stmt)) { return; }
         PoisonGuard guard(*this, stmt);
 
-        if (auto* block = dynamic_cast<Block*>(stmt)) {
-            push_scope();
-
-            for (auto& child : block->statements) {
-                if (auto* vd = dynamic_cast<VariableDeclaration*>(child.get())) {
-                    declare_name(vd->name);
-                } else if (auto* sd = dynamic_cast<StructDefinition*>(child.get())) {
-                    declare_name(sd->name);
-                } else if (auto* def = dynamic_cast<FunctionDefinition*>(child.get())) {
-                    declare_name(def->name);
-                }
-            }
-
-            for (auto& child : block->statements) { expand_statement(child.get()); }
-            std::vector<std::unique_ptr<Statement>> kept;
-            kept.reserve(block->statements.size());
-
-            for (auto& child : block->statements) {
-                if (dynamic_cast<InstantiationStatement*>(child.get()) != nullptr) { continue; }
-                kept.push_back(std::move(child));
-            }
-
-            block->statements = std::move(kept);
-            pop_scope();
-            return;
-        }
-
-        if (auto* vd = dynamic_cast<VariableDeclaration*>(stmt)) {
-            resolve_type(vd->type);
-            expand_initializer(vd->initializer.get());
-            return;
-        }
-
-        if (auto* sd = dynamic_cast<StructDefinition*>(stmt)) {
-            struct_defs_[sd->name] = sd;
-
-            for (auto& member : sd->members) {
-                resolve_type(member.type);
-
-                if (member.array_size_expr) {
-                    expand_expression(member.array_size_expr);
-                }
-
-                if (member.function_pointer_type.has_value()) {
-                    resolve_type(*member.function_pointer_type);
-                }
-
-                expand_initializer(member.initializer.get());
-            }
-
-            for (auto& smf : sd->special_members) {
-                for (Type& p : smf->parameters) { resolve_type(p); }
-                resolve_type(smf->parameter_type);
-                expand_statement(smf->body.get());
-            }
-            return;
-        }
-
-        if (auto* is = dynamic_cast<IfStatement*>(stmt)) {
-            expand_expression(is->condition);
-            expand_statement(is->then_block.get());
-            expand_statement(is->else_block.get());
-            return;
-        }
-
-        if (auto* fs = dynamic_cast<ForStatement*>(stmt)) {
-            push_scope();
-
-            if (fs->init) {
-                if (auto* vd = dynamic_cast<VariableDeclaration*>(fs->init.get())) { declare_name(vd->name); }
-                expand_statement(fs->init.get());
-            }
-
-            expand_expression(fs->condition);
-            expand_expression(fs->step);
-            expand_statement(fs->body.get());
-            pop_scope();
-            return;
-        }
-
-        if (auto* ws = dynamic_cast<WhileStatement*>(stmt)) {
-            expand_expression(ws->condition);
-            expand_statement(ws->body.get());
-            return;
-        }
-
-        if (auto* rs = dynamic_cast<ReturnStatement*>(stmt)) {
-            expand_expression(rs->value);
-            return;
-        }
-
-        if (auto* es = dynamic_cast<ExpressionStatement*>(stmt)) {
-            expand_expression(es->expr);
-            return;
-        }
-
-        if (auto* ds = dynamic_cast<DestructStatement*>(stmt)) {
-            expand_expression(ds->target);
-            return;
-        }
-
-        if (auto* inst = dynamic_cast<InstantiationStatement*>(stmt)) {
-            ensure_instantiation(inst->reference, inst->reference.member.empty());
-            return;
-        }
+        std::unique_ptr<Statement> holder(stmt);
+        ExpansionRewriter rewriter(*this);
+        rewriter.rewrite_statement(holder);
+        holder.release();
     }
 
     void GenericExpander::expand_top_level(TopLevel* node) {
@@ -1286,74 +1488,10 @@ namespace gallt {
         if (poisoned_node(node)) { return; }
         PoisonGuard guard(*this, node);
 
-        if (dynamic_cast<GenericDefinition*>(node) != nullptr) {
-            return;
-        }
-
-        if (auto* inst = dynamic_cast<InstantiationStatement*>(node)) {
-            ensure_instantiation(inst->reference, inst->reference.member.empty());
-            return;
-        }
-
-        if (auto* sd = dynamic_cast<StructDefinition*>(node)) {
-            struct_defs_[sd->name] = sd;
-
-            for (auto& member : sd->members) {
-                resolve_type(member.type);
-                if (member.array_size_expr) { expand_expression(member.array_size_expr); }
-
-                if (member.function_pointer_type.has_value()) {
-                    resolve_type(*member.function_pointer_type);
-                }
-
-                expand_initializer(member.initializer.get());
-            }
-
-            for (auto& smf : sd->special_members) {
-                for (Type& p : smf->parameters) { resolve_type(p); }
-                resolve_type(smf->parameter_type);
-                for (auto& d : smf->parameter_defaults) {
-                    expand_expression(d);
-                }
-                push_scope();
-                if (!smf->parameter_name.empty()) { declare_name(smf->parameter_name); }
-                for (const std::string& pname : smf->parameter_names) { declare_name(pname); }
-
-                expand_statement(smf->body.get());
-                pop_scope();
-            }
-            return;
-        }
-
-        if (auto* fd = dynamic_cast<FunctionDefinition*>(node)) {
-            func_defs_[fd->name] = fd;
-            resolve_type(fd->return_type);
-            for (Type& p : fd->parameters) { resolve_type(p); }
-            for (auto& d : fd->param_defaults) {
-                expand_expression(d);
-            }
-            push_scope();
-
-            for (const std::string& pname : fd->param_names) {
-                if (!pname.empty()) { declare_name(pname); }
-            }
-
-            expand_statement(fd->body.get());
-            pop_scope();
-            return;
-        }
-
-        if (auto* vd = dynamic_cast<VariableDeclaration*>(node)) {
-            resolve_type(vd->type);
-            if (vd->array_size_expr) { expand_expression(vd->array_size_expr); }
-            expand_initializer(vd->initializer.get());
-            return;
-        }
-        if (auto* ed = dynamic_cast<ExternDeclaration*>(node)) {
-            resolve_type(ed->return_type);
-            for (Type& p : ed->parameters) { resolve_type(p); }
-            return;
-        }
+        std::unique_ptr<TopLevel> holder(node);
+        ExpansionRewriter rewriter(*this);
+        rewriter.rewrite_top_level(holder);
+        holder.release();
     }
 
     bool GenericExpander::expand(AST::Program* program) {

@@ -974,10 +974,14 @@ namespace gallt {
             return nullptr;
         }
 
+        if (current_.type != TokenType::LeftBrace) {
+            report_error(ErrorCode::MissingBraces, "if statement must be followed by a block");
+            return nullptr;
+        }
+
         auto then_block = parse_block();
 
         if (then_block == nullptr) {
-            report_error(ErrorCode::MissingBraces, "if statement must be followed by a block");
             return nullptr;
         }
 
@@ -994,10 +998,15 @@ namespace gallt {
 
         if (match(TokenType::Keyword_Else)) {
             skip_newlines();
+
+            if (current_.type != TokenType::LeftBrace) {
+                report_error(ErrorCode::MissingBraces, "else statement must be followed by a block");
+                return nullptr;
+            }
+
             else_block = parse_block();
 
             if (else_block == nullptr) {
-                report_error(ErrorCode::MissingBraces, "else statement must be followed by a block");
                 return nullptr;
             }
 
@@ -1070,10 +1079,14 @@ namespace gallt {
             return nullptr;
         }
 
+        if (current_.type != TokenType::LeftBrace) {
+            report_error(ErrorCode::MissingBraces, "for loop body must be a block");
+            return nullptr;
+        }
+
         auto body = parse_block();
 
         if (body == nullptr) {
-            report_error(ErrorCode::MissingBraces, "for loop body must be a block");
             return nullptr;
         }
 
@@ -1102,10 +1115,14 @@ namespace gallt {
             return nullptr;
         }
 
+        if (current_.type != TokenType::LeftBrace) {
+            report_error(ErrorCode::MissingBraces, "while loop body must be a block");
+            return nullptr;
+        }
+
         auto body = parse_block();
 
         if (body == nullptr) {
-            report_error(ErrorCode::MissingBraces, "while loop body must be a block");
             return nullptr;
         }
 

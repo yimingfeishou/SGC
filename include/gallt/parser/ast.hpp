@@ -192,12 +192,14 @@ namespace gallt {
                     kind != TypeKind::Error;
             }
             std::string to_string() const;
+            std::string to_source_string() const;
         };
 
         struct ExpressionParameterBody;
 
         struct GenericArgument {
             bool is_type = true;
+            bool is_ambiguous_name = false;
             bool is_pack_expansion = false;
             std::string pack_name;
             Type type;
@@ -209,6 +211,7 @@ namespace gallt {
             std::string text;
             Type constant_actual_type;
             std::shared_ptr<Expression> expression;
+            bool expression_constant = false;
             bool is_expr = false;
             std::string expr_name;
             std::vector<Type> expr_param_types;
@@ -256,6 +259,10 @@ namespace gallt {
 
             if (is_type) {
                 return type.to_string();
+            }
+
+            if (expression_constant && !text.empty()) {
+                return text;
             }
 
             if (is_string_constant) {
@@ -445,6 +452,7 @@ namespace gallt {
             bool operator_postfix_dummy = false;
             bool is_export = false;
             bool is_variadic = false;
+            bool is_constexpr_function = false;
 
             FunctionDefinition(SourceLocation loc, Type ret, std::string_view n,
                 std::vector<Type> params, std::vector<std::string> pnames,
@@ -1180,6 +1188,83 @@ namespace gallt {
                 return kind == Kind::Identifier;
             }
         };
+
+        inline bool contains_call_expression(const Expression* expr) {
+            if (expr == nullptr) { return false; }
+
+            if (auto* primary = dynamic_cast<const PrimaryExpression*>(expr)) {
+                return contains_call_expression(primary->paren_expr.get());
+            }
+
+            if (auto* postfix = dynamic_cast<const PostfixExpression*>(expr)) {
+                if (postfix->op == PostfixExpression::Operator::FunctionCall) {
+                    return true;
+                }
+
+                if (contains_call_expression(postfix->base.get()) ||
+                    contains_call_expression(postfix->subscript_expr.get())) {
+                    return true;
+                }
+
+                for (const auto& argument : postfix->arguments) {
+                    if (contains_call_expression(argument.get())) { return true; }
+                }
+
+                return false;
+            }
+
+            if (auto* expression = dynamic_cast<const UnaryExpression*>(expr)) {
+                return contains_call_expression(expression->operand.get());
+            }
+
+            if (auto* expression = dynamic_cast<const AdditiveExpression*>(expr)) {
+                return contains_call_expression(expression->left.get()) ||
+                    contains_call_expression(expression->right.get());
+            }
+
+            if (auto* expression = dynamic_cast<const MultiplicativeExpression*>(expr)) {
+                return contains_call_expression(expression->left.get()) ||
+                    contains_call_expression(expression->right.get());
+            }
+
+            if (auto* expression = dynamic_cast<const PowerExpression*>(expr)) {
+                return contains_call_expression(expression->left.get()) ||
+                    contains_call_expression(expression->right.get());
+            }
+
+            if (auto* expression = dynamic_cast<const ComparisonExpression*>(expr)) {
+                return contains_call_expression(expression->left.get()) ||
+                    contains_call_expression(expression->right.get());
+            }
+
+            if (auto* expression = dynamic_cast<const LogicalAndExpression*>(expr)) {
+                return contains_call_expression(expression->left.get()) ||
+                    contains_call_expression(expression->right.get());
+            }
+
+            if (auto* expression = dynamic_cast<const LogicalOrExpression*>(expr)) {
+                return contains_call_expression(expression->left.get()) ||
+                    contains_call_expression(expression->right.get());
+            }
+
+            if (auto* expression = dynamic_cast<const BitwiseExpression*>(expr)) {
+                return contains_call_expression(expression->left.get()) ||
+                    contains_call_expression(expression->right.get());
+            }
+
+            if (auto* expression = dynamic_cast<const ShiftExpression*>(expr)) {
+                return contains_call_expression(expression->left.get()) ||
+                    contains_call_expression(expression->right.get());
+            }
+
+            if (auto* expression = dynamic_cast<const ConditionalExpression*>(expr)) {
+                return contains_call_expression(expression->condition.get()) ||
+                    contains_call_expression(expression->then_expr.get()) ||
+                    contains_call_expression(expression->else_expr.get());
+            }
+
+            return false;
+        }
 
     }
 }

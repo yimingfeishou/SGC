@@ -1,4 +1,6 @@
 #include "condition_compiler.hpp"
+#include "../pal/platform.hpp"
+#include "../parser/ast_visitor.hpp"
 #include "diagnosed_registry.hpp"
 #include <cctype>
 #include <cstdlib>
@@ -56,6 +58,10 @@ namespace {
     }
 
     std::string unquote_literal(std::string_view lexeme) {
+        if (is_literal_string_lexeme(lexeme)) {
+            return std::string(literal_string_content(lexeme));
+        }
+
         if (lexeme.size() >= 2 && lexeme.front() == '"' && lexeme.back() == '"') {
             return std::string(lexeme.substr(1, lexeme.size() - 2));
         }
@@ -137,6 +143,15 @@ namespace {
 }
 
     ConditionCompiler::ConditionCompiler(DiagnosticEngine& diag) : diag_(diag) {
+        register_platform_conditions();
+    }
+
+    void ConditionCompiler::register_platform_conditions() {
+        if (pal::is_windows()) {
+            conditions_["WINDOWS_PLATFORM"] = ConditionValue{ true, 1 };
+        } else if (pal::is_linux()) {
+            conditions_["LINUX_PLATFORM"] = ConditionValue{ true, 1 };
+        }
     }
 
     bool ConditionCompiler::run(AST::Program* program) {
@@ -293,7 +308,7 @@ namespace {
             process_top_level_list(generic->members);
         } else if (auto* func = dynamic_cast<AST::FunctionDefinition*>(node)) {
             for (std::unique_ptr<AST::Expression>& def : func->param_defaults) {
-                transform_expression(def.get());
+                transform_expression(def);
             }
 
             if (func->body != nullptr) {
@@ -306,8 +321,8 @@ namespace {
                 }
             }
         } else if (auto* decl = dynamic_cast<AST::VariableDeclaration*>(node)) {
-            transform_initializer(decl->initializer.get());
-            transform_expression(decl->array_size_expr.get());
+            transform_initializer(decl->initializer);
+            transform_expression(decl->array_size_expr);
         }
     }
 
@@ -392,29 +407,29 @@ namespace {
         }
 
         if (auto* decl = dynamic_cast<AST::VariableDeclaration*>(stmt.get())) {
-            transform_initializer(decl->initializer.get());
-            transform_expression(decl->array_size_expr.get());
+            transform_initializer(decl->initializer);
+            transform_expression(decl->array_size_expr);
             return;
         }
 
         if (auto* ret = dynamic_cast<AST::ReturnStatement*>(stmt.get())) {
-            transform_expression(ret->value.get());
+            transform_expression(ret->value);
             return;
         }
 
         if (auto* expr_stmt = dynamic_cast<AST::ExpressionStatement*>(stmt.get())) {
-            transform_expression(expr_stmt->expr.get());
+            transform_expression(expr_stmt->expr);
             return;
         }
 
         if (auto* destruct = dynamic_cast<AST::DestructStatement*>(stmt.get())) {
-            transform_expression(destruct->target.get());
+            transform_expression(destruct->target);
             return;
         }
 
         if (auto* emit = dynamic_cast<AST::EmitStatement*>(stmt.get())) {
             for (std::unique_ptr<AST::Expression>& piece : emit->pieces) {
-                transform_expression(piece.get());
+                transform_expression(piece);
             }
             return;
         }
@@ -584,8 +599,8 @@ namespace {
                 !evaluate_condition(cmp->right.get(), right)) {
                 return false;
             }
-            sanitize_condition_references(cmp->left.get());
-            sanitize_condition_references(cmp->right.get());
+            sanitize_condition_references(cmp->left);
+            sanitize_condition_references(cmp->right);
             bool result = false;
 
             switch (cmp->op) {
@@ -620,7 +635,7 @@ namespace {
                 return false;
             }
 
-            sanitize_condition_references(land->left.get());
+            sanitize_condition_references(land->left);
 
             if (left.value == 0) {
                 out.defined = true;
@@ -632,7 +647,7 @@ namespace {
             if (!evaluate_condition(land->right.get(), right)) {
                 return false;
             }
-            sanitize_condition_references(land->right.get());
+            sanitize_condition_references(land->right);
             out.defined = true;
             out.value = right.value != 0 ? 1 : 0;
             return true;
@@ -645,7 +660,7 @@ namespace {
                 return false;
             }
 
-            sanitize_condition_references(lor->left.get());
+            sanitize_condition_references(lor->left);
 
             if (left.value != 0) {
                 out.defined = true;
@@ -657,7 +672,7 @@ namespace {
             if (!evaluate_condition(lor->right.get(), right)) {
                 return false;
             }
-            sanitize_condition_references(lor->right.get());
+            sanitize_condition_references(lor->right);
             out.defined = true;
             out.value = right.value != 0 ? 1 : 0;
             return true;
@@ -719,8 +734,8 @@ namespace {
                 !evaluate_condition(bit->right.get(), right)) {
                 return false;
             }
-            sanitize_condition_references(bit->left.get());
-            sanitize_condition_references(bit->right.get());
+            sanitize_condition_references(bit->left);
+            sanitize_condition_references(bit->right);
             out.defined = true;
 
             switch (bit->op) {
@@ -745,8 +760,8 @@ namespace {
                 !evaluate_condition(shift->right.get(), right)) {
                 return false;
             }
-            sanitize_condition_references(shift->left.get());
-            sanitize_condition_references(shift->right.get());
+            sanitize_condition_references(shift->left);
+            sanitize_condition_references(shift->right);
 
             if (right.value < 0 || right.value >= 64) {
                 report(expr->location, ErrorCode::ExpressionSyntaxError,
@@ -768,7 +783,7 @@ namespace {
                 return false;
             }
 
-            sanitize_condition_references(cond->condition.get());
+            sanitize_condition_references(cond->condition);
             return evaluate_condition(
                 condition.value != 0 ? cond->then_expr.get() : cond->else_expr.get(),
                 out);
@@ -846,122 +861,64 @@ namespace {
             prim->identifier == "true" || prim->identifier == "false";
     }
 
-    void ConditionCompiler::sanitize_condition_references(AST::Expression* expr) {
-        if (expr == nullptr) {
-            return;
-        }
+    void ConditionCompiler::sanitize_condition_references(
+        std::unique_ptr<AST::Expression>& expr) {
+        class Sanitizer : public AST::AstRewriter {
+        public:
+            explicit Sanitizer(ConditionCompiler& owner) : owner_(owner) {
+            }
 
-        if (auto* prim = dynamic_cast<AST::PrimaryExpression*>(expr)) {
-            if (prim->kind == AST::PrimaryExpression::Kind::Identifier) {
-                auto it = conditions_.find(prim->identifier);
+        protected:
+            bool EnterPrimaryExpression(AST::PrimaryExpression* node) override {
+                switch (node->kind) {
+                case AST::PrimaryExpression::Kind::Identifier: {
+                    auto found = owner_.conditions_.find(node->identifier);
 
-                if (it != conditions_.end()) {
-                    std::unique_ptr<AST::Expression> replacement =
-                        make_integer_literal(expr->location, it->second.value);
-
-                    if (auto* repl =
-                        dynamic_cast<AST::PrimaryExpression*>(replacement.get())) {
-                        prim->kind = AST::PrimaryExpression::Kind::Literal;
-                        prim->literal_token = repl->literal_token;
+                    if (found == owner_.conditions_.end()) {
+                        return false;
                     }
-                    return;
+
+                    auto replacement = owner_.make_integer_literal(
+                        node->location, found->second.value);
+                    auto* prim = dynamic_cast<AST::PrimaryExpression*>(
+                        replacement.get());
+
+                    if (prim != nullptr) {
+                        node->kind = AST::PrimaryExpression::Kind::Literal;
+                        node->literal_token = prim->literal_token;
+                    }
+
+                    return false;
+                }
+                case AST::PrimaryExpression::Kind::Parens:
+                    owner_.sanitize_condition_references(node->paren_expr);
+                    return false;
+                case AST::PrimaryExpression::Kind::Construct:
+                case AST::PrimaryExpression::Kind::PlacementConstruct:
+                    for (std::unique_ptr<AST::Expression>& arg :
+                        node->construct_args) {
+                        owner_.sanitize_condition_references(arg);
+                    }
+
+                    return false;
+                default:
+                    return false;
                 }
             }
 
-            sanitize_condition_references(prim->paren_expr.get());
+            bool EnterType(AST::Type&) override { return false; }
 
-            for (std::unique_ptr<AST::Expression>& arg : prim->construct_args) {
-                sanitize_condition_references(arg.get());
+            bool EnterSharedExpression(
+                std::shared_ptr<AST::Expression>&) override {
+                return false;
             }
 
-            return;
-        }
+        private:
+            ConditionCompiler& owner_;
+        };
 
-        if (auto* postfix = dynamic_cast<AST::PostfixExpression*>(expr)) {
-            sanitize_condition_references(postfix->base.get());
-            sanitize_condition_references(postfix->subscript_expr.get());
-
-            for (std::unique_ptr<AST::Expression>& arg : postfix->arguments) {
-                sanitize_condition_references(arg.get());
-            }
-
-            return;
-        }
-
-        if (auto* assign = dynamic_cast<AST::AssignmentExpression*>(expr)) {
-            sanitize_condition_references(assign->left.get());
-            sanitize_condition_references(assign->right.get());
-            return;
-        }
-
-        if (auto* lor = dynamic_cast<AST::LogicalOrExpression*>(expr)) {
-            sanitize_condition_references(lor->left.get());
-            sanitize_condition_references(lor->right.get());
-            return;
-        }
-
-        if (auto* land = dynamic_cast<AST::LogicalAndExpression*>(expr)) {
-            sanitize_condition_references(land->left.get());
-            sanitize_condition_references(land->right.get());
-            return;
-        }
-
-        if (auto* cmp = dynamic_cast<AST::ComparisonExpression*>(expr)) {
-            sanitize_condition_references(cmp->left.get());
-            sanitize_condition_references(cmp->right.get());
-            return;
-        }
-
-        if (auto* add = dynamic_cast<AST::AdditiveExpression*>(expr)) {
-            sanitize_condition_references(add->left.get());
-            sanitize_condition_references(add->right.get());
-            return;
-        }
-
-        if (auto* mul = dynamic_cast<AST::MultiplicativeExpression*>(expr)) {
-            sanitize_condition_references(mul->left.get());
-            sanitize_condition_references(mul->right.get());
-            return;
-        }
-
-        if (auto* power = dynamic_cast<AST::PowerExpression*>(expr)) {
-            sanitize_condition_references(power->left.get());
-            sanitize_condition_references(power->right.get());
-            return;
-        }
-
-        if (auto* bit = dynamic_cast<AST::BitwiseExpression*>(expr)) {
-            sanitize_condition_references(bit->left.get());
-            sanitize_condition_references(bit->right.get());
-            return;
-        }
-
-        if (auto* shift = dynamic_cast<AST::ShiftExpression*>(expr)) {
-            sanitize_condition_references(shift->left.get());
-            sanitize_condition_references(shift->right.get());
-            return;
-        }
-
-        if (auto* cond = dynamic_cast<AST::ConditionalExpression*>(expr)) {
-            sanitize_condition_references(cond->condition.get());
-            sanitize_condition_references(cond->then_expr.get());
-            sanitize_condition_references(cond->else_expr.get());
-            return;
-        }
-
-        if (auto* unary = dynamic_cast<AST::UnaryExpression*>(expr)) {
-            sanitize_condition_references(unary->operand.get());
-            return;
-        }
-
-        if (auto* prop = dynamic_cast<AST::CompileTimePropertyExpression*>(expr)) {
-            sanitize_condition_references(prop->receiver.get());
-
-            for (std::unique_ptr<AST::Expression>& arg : prop->arguments) {
-                sanitize_condition_references(arg.get());
-            }
-            return;
-        }
+        Sanitizer sanitizer(*this);
+        sanitizer.rewrite_expression(expr);
     }
 
     void ConditionCompiler::resolve_condition_references(AST::Expression* expr) {
@@ -982,166 +939,102 @@ namespace {
         report(expr->location, ErrorCode::ConditionUsedAsValue,
             std::string(prim->identifier));
     }
-
-    void ConditionCompiler::transform_expression(AST::Expression* expr) {
-        if (expr == nullptr) {
-            return;
-        }
-        if (auto* postfix = dynamic_cast<AST::PostfixExpression*>(expr)) {
-            transform_expression(postfix->base.get());
-            transform_expression(postfix->subscript_expr.get());
-
-            for (std::unique_ptr<AST::Expression>& arg : postfix->arguments) {
-                transform_expression(arg.get());
-            }
-
-            if (postfix->op == AST::PostfixExpression::Operator::FunctionCall) {
-                auto* callee = dynamic_cast<AST::PrimaryExpression*>(postfix->base.get());
-
-                if (callee != nullptr &&
-                    callee->kind == AST::PrimaryExpression::Kind::Identifier &&
-                    callee->identifier == "is_defined") {
-                    if (postfix->arguments.size() != 1) {
-                        report(expr->location, ErrorCode::ExpressionSyntaxError,
-                            "is_defined requires exactly one string argument");
-                        return;
-                    }
-
-                    auto* arg = dynamic_cast<AST::PrimaryExpression*>(
-                        postfix->arguments[0].get());
-
-                    if (arg == nullptr ||
-                        arg->kind != AST::PrimaryExpression::Kind::Literal ||
-                        arg->literal_token.type != TokenType::StringLiteral) {
-                        report(expr->location, ErrorCode::ConditionUsedAsValue,
-                            std::string("<non-literal>"));
-                        return;
-                    }
-
-                    std::string name = unquote_literal(arg->literal_token.lexeme);
-                    bool defined = conditions_.count(name) != 0;
-                    callee->kind = AST::PrimaryExpression::Kind::Literal;
-                    callee->literal_token = make_bool_token(expr->location, defined);
-                    postfix->subscript_expr = nullptr;
-                    postfix->arguments.clear();
-                    return;
-                }
-            }
-
-            resolve_condition_references(expr);
+    void ConditionCompiler::transform_is_defined_call(
+        AST::PostfixExpression* postfix) {
+        if (postfix->op != AST::PostfixExpression::Operator::FunctionCall) {
             return;
         }
 
-        if (auto* assign = dynamic_cast<AST::AssignmentExpression*>(expr)) {
-            transform_expression(assign->left.get());
-            transform_expression(assign->right.get());
-            resolve_condition_references(expr);
+        auto* callee = dynamic_cast<AST::PrimaryExpression*>(postfix->base.get());
+
+        if (callee == nullptr ||
+            callee->kind != AST::PrimaryExpression::Kind::Identifier ||
+            callee->identifier != "is_defined") {
             return;
         }
 
-        if (auto* prim = dynamic_cast<AST::PrimaryExpression*>(expr)) {
-            if (prim->kind == AST::PrimaryExpression::Kind::Identifier) {
-                resolve_condition_references(expr);
-                return;
-            }
-
-            transform_expression(prim->paren_expr.get());
-            transform_expression(prim->heap_size.get());
-            transform_expression(prim->placement_target.get());
-
-            for (std::unique_ptr<AST::Expression>& arg : prim->construct_args) {
-                transform_expression(arg.get());
-            }
-
+        if (postfix->arguments.size() != 1) {
+            report(postfix->location, ErrorCode::ExpressionSyntaxError,
+                "is_defined requires exactly one string argument");
             return;
         }
 
-        resolve_condition_references(expr);
+        auto* arg = dynamic_cast<AST::PrimaryExpression*>(
+            postfix->arguments[0].get());
 
-        if (auto* lor = dynamic_cast<AST::LogicalOrExpression*>(expr)) {
-            transform_expression(lor->left.get());
-            transform_expression(lor->right.get());
+        if (arg == nullptr ||
+            arg->kind != AST::PrimaryExpression::Kind::Literal ||
+            arg->literal_token.type != TokenType::StringLiteral) {
+            report(postfix->location, ErrorCode::ConditionUsedAsValue,
+                std::string("<non-literal>"));
             return;
         }
 
-        if (auto* land = dynamic_cast<AST::LogicalAndExpression*>(expr)) {
-            transform_expression(land->left.get());
-            transform_expression(land->right.get());
-            return;
-        }
-
-        if (auto* cmp = dynamic_cast<AST::ComparisonExpression*>(expr)) {
-            transform_expression(cmp->left.get());
-            transform_expression(cmp->right.get());
-            return;
-        }
-
-        if (auto* add = dynamic_cast<AST::AdditiveExpression*>(expr)) {
-            transform_expression(add->left.get());
-            transform_expression(add->right.get());
-            return;
-        }
-
-        if (auto* mul = dynamic_cast<AST::MultiplicativeExpression*>(expr)) {
-            transform_expression(mul->left.get());
-            transform_expression(mul->right.get());
-            return;
-        }
-
-        if (auto* power = dynamic_cast<AST::PowerExpression*>(expr)) {
-            transform_expression(power->left.get());
-            transform_expression(power->right.get());
-            return;
-        }
-
-        if (auto* bit = dynamic_cast<AST::BitwiseExpression*>(expr)) {
-            transform_expression(bit->left.get());
-            transform_expression(bit->right.get());
-            return;
-        }
-
-        if (auto* shift = dynamic_cast<AST::ShiftExpression*>(expr)) {
-            transform_expression(shift->left.get());
-            transform_expression(shift->right.get());
-            return;
-        }
-
-        if (auto* cond = dynamic_cast<AST::ConditionalExpression*>(expr)) {
-            transform_expression(cond->condition.get());
-            transform_expression(cond->then_expr.get());
-            transform_expression(cond->else_expr.get());
-            return;
-        }
-
-        if (auto* unary = dynamic_cast<AST::UnaryExpression*>(expr)) {
-            transform_expression(unary->operand.get());
-            return;
-        }
-
-        if (auto* prop = dynamic_cast<AST::CompileTimePropertyExpression*>(expr)) {
-            transform_expression(prop->receiver.get());
-
-            for (std::unique_ptr<AST::Expression>& arg : prop->arguments) {
-                transform_expression(arg.get());
-            }
-            return;
-        }
+        std::string name = unquote_literal(arg->literal_token.lexeme);
+        bool defined = conditions_.count(name) != 0;
+        callee->kind = AST::PrimaryExpression::Kind::Literal;
+        callee->literal_token = make_bool_token(postfix->location, defined);
+        postfix->subscript_expr = nullptr;
+        postfix->arguments.clear();
     }
 
-    void ConditionCompiler::transform_initializer(AST::Initializer* init) {
-        if (init == nullptr) {
-            return;
-        }
-        if (auto* expr_init = dynamic_cast<AST::ExpressionInitializer*>(init)) {
-            transform_expression(expr_init->expr.get());
-            return;
-        }
-
-        if (auto* array_init = dynamic_cast<AST::ArrayInitializer*>(init)) {
-            for (std::unique_ptr<AST::Initializer>& element : array_init->elements) {
-                transform_initializer(element.get());
+    void ConditionCompiler::transform_expression(
+        std::unique_ptr<AST::Expression>& expr) {
+        class Transformer : public AST::AstRewriter {
+        public:
+            explicit Transformer(ConditionCompiler& owner) : owner_(owner) {
             }
-        }
+
+        protected:
+            bool EnterPrimaryExpression(AST::PrimaryExpression* node) override {
+                if (node->kind == AST::PrimaryExpression::Kind::Identifier) {
+                    owner_.resolve_condition_references(node);
+                    return false;
+                }
+
+                return true;
+            }
+
+            void LeavePostfixExpression(AST::PostfixExpression* node) override {
+                owner_.transform_is_defined_call(node);
+            }
+
+            bool EnterType(AST::Type&) override { return false; }
+
+            bool EnterSharedExpression(
+                std::shared_ptr<AST::Expression>&) override {
+                return false;
+            }
+
+        private:
+            ConditionCompiler& owner_;
+        };
+
+        Transformer transformer(*this);
+        transformer.rewrite_expression(expr);
+    }
+
+    void ConditionCompiler::transform_initializer(
+        std::unique_ptr<AST::Initializer>& init) {
+        class InitializerTransformer : public AST::AstRewriter {
+        public:
+            explicit InitializerTransformer(ConditionCompiler& owner)
+                : owner_(owner) {
+            }
+
+        protected:
+            bool EnterExpressionInitializer(
+                AST::ExpressionInitializer* node) override {
+                owner_.transform_expression(node->expr);
+                return false;
+            }
+
+        private:
+            ConditionCompiler& owner_;
+        };
+
+        InitializerTransformer transformer(*this);
+        transformer.rewrite_initializer(init);
     }
 
     std::unique_ptr<AST::Expression> ConditionCompiler::make_integer_literal(

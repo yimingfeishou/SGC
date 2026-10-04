@@ -431,9 +431,105 @@ addition namespace sl {
             arr->size = new_size
             return true
         }
+
+        bool __value_equals(T a, T b) {
+            const if (T.is_string == true) {
+                return strcompare(a, b) == 0
+            } const else {
+                return a == b
+            }
+        }
+
+        int index_of(dynamic_array* arr, T value) {
+            if (arr == null) {
+                return -1
+            }
+            for (int i = 0; i < arr->size; i++) {
+                if (__value_equals(arr->data[i], value)) {
+                    return i
+                }
+            }
+            return -1
+        }
+
+        bool contains(dynamic_array* arr, T value) {
+            int index = index_of(arr, value)
+            if (index >= 0) {
+                return true
+            }
+            return false
+        }
+
+        void reverse(dynamic_array* arr) {
+            if (arr == null) {
+                return
+            }
+            if (arr->size < 2) {
+                return
+            }
+            int left = 0
+            int right = arr->size - 1
+            while (left < right) {
+                T temp = arr->data[left]
+                arr->data[left] = arr->data[right]
+                arr->data[right] = temp
+                left = left + 1
+                right = right - 1
+            }
+        }
+
+        void fill(dynamic_array* arr, T value) {
+            if (arr == null) {
+                return
+            }
+            for (int i = 0; i < arr->size; i++) {
+                arr->data[i] = value
+            }
+        }
+
+        bool append_array(dynamic_array* arr, dynamic_array* other) {
+            if (arr == null || other == null) {
+                return false
+            }
+            int incoming = other->size
+            if (incoming == 0) {
+                return true
+            }
+            if (arr->size > 1073741823 - incoming) {
+                return false
+            }
+            int needed = arr->size + incoming
+            if (!reserve(arr, needed)) {
+                return false
+            }
+            for (int i = 0; i < incoming; i++) {
+                if (arr->size >= arr->capacity) {
+                    return false
+                }
+                arr->data[arr->size] = other->data[i]
+                arr->size = arr->size + 1
+            }
+            return true
+        }
+
+        bool copy_to(dynamic_array* dst, dynamic_array* src) {
+            if (dst == null || src == null) {
+                return false
+            }
+            if (dst == src) {
+                return true
+            }
+            if (!resize(dst, src->size)) {
+                return false
+            }
+            for (int i = 0; i < src->size; i++) {
+                dst->data[i] = src->data[i]
+            }
+            return true
+        }
     }
 
-    generics hash_table_generic<K: int | lint | uint | luint | char | uchar | bool, V: int | lint | uint | luint | float | double | char | uchar | bool | string> {
+    generics hash_table_generic<K: int | lint | uint | luint | char | uchar | bool | string, V: int | lint | uint | luint | float | double | char | uchar | bool | string> {
         struct hash_table {
             K* keys
             V* values
@@ -485,6 +581,13 @@ addition namespace sl {
                     }
                 }
                 if (keys != null) {
+                    if (states != null) {
+                        for (int i = 0; i < capacity; i++) {
+                            if (states[i] == 1) {
+                                K discarded_key = move(keys[i])
+                            }
+                        }
+                    }
                     free(keys)
                     keys = null
                 }
@@ -528,9 +631,9 @@ addition namespace sl {
                 }
 
                 for (int i = 0; i < other->capacity; i++) {
-                    new_keys[i] = other->keys[i]
                     new_states[i] = other->states[i]
                     if (other->states[i] == 1) {
+                        new_keys[i] = other->keys[i]
                         new_values[i] = other->values[i]
                     }
                 }
@@ -593,6 +696,13 @@ addition namespace sl {
                         values = null
                     }
                     if (keys != null) {
+                        if (states != null) {
+                            for (int i = 0; i < capacity; i++) {
+                                if (states[i] == 1) {
+                                    K discarded_key = move(keys[i])
+                                }
+                            }
+                        }
                         free(keys)
                         keys = null
                     }
@@ -617,9 +727,9 @@ addition namespace sl {
                 }
 
                 for (int i = 0; i < other->capacity; i++) {
-                    new_keys[i] = other->keys[i]
                     new_states[i] = other->states[i]
                     if (other->states[i] == 1) {
+                        new_keys[i] = other->keys[i]
                         new_values[i] = other->values[i]
                     }
                 }
@@ -633,6 +743,13 @@ addition namespace sl {
                     free(values)
                 }
                 if (keys != null) {
+                    if (states != null) {
+                        for (int i = 0; i < capacity; i++) {
+                            if (states[i] == 1) {
+                                K discarded_key = move(keys[i])
+                            }
+                        }
+                    }
                     free(keys)
                 }
                 if (states != null) {
@@ -666,6 +783,13 @@ addition namespace sl {
                     values = null
                 }
                 if (keys != null) {
+                    if (states != null) {
+                        for (int i = 0; i < capacity; i++) {
+                            if (states[i] == 1) {
+                                K discarded_key = move(keys[i])
+                            }
+                        }
+                    }
                     free(keys)
                     keys = null
                 }
@@ -693,6 +817,14 @@ addition namespace sl {
             }
         }
 
+        bool __key_equals(K a, K b) {
+            const if (K.is_string == true) {
+                return strcompare(a, b) == 0
+            } const else {
+                return a == b
+            }
+        }
+
         const if (V.is_string == true) {
             emit {
                 V zero_value() {
@@ -716,24 +848,37 @@ addition namespace sl {
             }
         }
 
-        luint hash_value(K key) {
-            luint mixed = cast<luint>(key)
-            mixed = mixed * 1099511628211lu
+        luint __hash_value(K key) {
+            luint mixed = 0lu
+
+            const if (K.is_string == true) {
+                mixed = 2166136261lu
+                int n = strlen(key)
+                for (int i = 0; i < n; i++) {
+                    luint code = cast<luint>(cast<uchar>(strcharat(key, i)))
+                    mixed = mixed ^ code
+                    mixed = mixed * 1099511628211lu
+                }
+            } const else {
+                mixed = cast<luint>(key)
+                mixed = mixed * 1099511628211lu
+            }
+
             mixed = mixed % 4294967291lu
             return mixed
         }
 
-        int hash_slot(hash_table* table, K key) {
+        int __hash_slot(hash_table* table, K key) {
             if (table == null || table->capacity <= 0) {
                 return 0
             }
-            return cast<int>(hash_value(key) % cast<luint>(table->capacity))
+            return cast<int>(__hash_value(key) % cast<luint>(table->capacity))
         }
 
-        int locate(hash_table* table, K key) {
+        int __locate(hash_table* table, K key) {
             int found = -1
             if (table != null && table->capacity > 0 && table->states != null) {
-                int start = hash_slot(table, key)
+                int start = __hash_slot(table, key)
                 int i = 0
                 bool stop = false
                 while (i < table->capacity && stop == false) {
@@ -745,7 +890,7 @@ addition namespace sl {
                     if (state == 0) {
                         stop = true
                     } else {
-                        if (state == 1 && table->keys[index] == key) {
+                        if (state == 1 && __key_equals(table->keys[index], key)) {
                             found = index
                             stop = true
                         }
@@ -756,10 +901,10 @@ addition namespace sl {
             return found
         }
 
-        int probe_slot(hash_table* table, K key) {
+        int __probe_slot(hash_table* table, K key) {
             int slot = -1
             if (table != null && table->capacity > 0 && table->states != null) {
-                int start = hash_slot(table, key)
+                int start = __hash_slot(table, key)
                 int i = 0
                 bool stop = false
                 while (i < table->capacity && stop == false) {
@@ -769,7 +914,7 @@ addition namespace sl {
                     }
                     int state = table->states[index]
                     if (state == 1) {
-                        if (table->keys[index] == key) {
+                        if (__key_equals(table->keys[index], key)) {
                             slot = index
                             stop = true
                         }
@@ -812,6 +957,7 @@ addition namespace sl {
             if (table != null && table->states != null) {
                 for (int i = 0; i < table->capacity; i++) {
                     if (table->states[i] == 1) {
+                        K discarded_key = move(table->keys[i])
                         table->values[i] = zero_value()
                     }
                     table->states[i] = 0
@@ -822,13 +968,13 @@ addition namespace sl {
         }
 
         bool contains(hash_table* table, K key) {
-            return locate(table, key) >= 0
+            return __locate(table, key) >= 0
         }
 
         bool get(hash_table* table, K key, V* out) {
             bool found = false
             if (out != null) {
-                int index = locate(table, key)
+                int index = __locate(table, key)
                 if (index >= 0) {
                     *out = table->values[index]
                     found = true
@@ -855,7 +1001,7 @@ addition namespace sl {
                         int moved = 0
                         for (int i = 0; i < table->capacity; i++) {
                             if (table->states[i] == 1) {
-                                int target = cast<int>(hash_value(table->keys[i]) % cast<luint>(new_capacity))
+                                int target = cast<int>(__hash_value(table->keys[i]) % cast<luint>(new_capacity))
                                 int guard = 0
                                 while (new_states[target] != 0 && guard < new_capacity) {
                                     target = target + 1
@@ -866,7 +1012,7 @@ addition namespace sl {
                                 }
 
                                 if (new_states[target] == 0) {
-                                    new_keys[target] = table->keys[i]
+                                    new_keys[target] = move(table->keys[i])
                                     new_values[target] = table->values[i]
                                     new_states[target] = 1
                                     table->values[i] = zero_value()
@@ -912,7 +1058,7 @@ addition namespace sl {
                 }
 
                 if (table->used < table->capacity) {
-                    int index = probe_slot(table, key)
+                    int index = __probe_slot(table, key)
                     if (index >= 0) {
                         int state = table->states[index]
                         table->keys[index] = key
@@ -934,13 +1080,72 @@ addition namespace sl {
         }
 
         bool erase(hash_table* table, K key) {
-            int index = locate(table, key)
+            int index = __locate(table, key)
             if (index >= 0) {
+                K discarded_key = move(table->keys[index])
                 table->values[index] = zero_value()
                 table->states[index] = 2
                 table->count = table->count - 1
             }
             return index >= 0
+        }
+
+        bool contains_key(hash_table* table, K key) {
+            if (table == null) {
+                return false
+            }
+            return __locate(table, key) >= 0
+        }
+
+        V get_or_default(hash_table* table, K key, V default_value) {
+            V result = default_value
+            if (table != null) {
+                int index = __locate(table, key)
+                if (index >= 0) {
+                    result = table->values[index]
+                }
+            }
+            return result
+        }
+
+        int keys_to_array(hash_table* table, K* out, int capacity) {
+            if (table == null || out == null || capacity <= 0) {
+                return 0
+            }
+            if (table->states == null) {
+                return 0
+            }
+            int copied = 0
+            for (int i = 0; i < table->capacity; i++) {
+                if (copied >= capacity) {
+                    break
+                }
+                if (table->states[i] == 1) {
+                    out[copied] = table->keys[i]
+                    copied = copied + 1
+                }
+            }
+            return copied
+        }
+
+        int values_to_array(hash_table* table, V* out, int capacity) {
+            if (table == null || out == null || capacity <= 0) {
+                return 0
+            }
+            if (table->states == null) {
+                return 0
+            }
+            int copied = 0
+            for (int i = 0; i < table->capacity; i++) {
+                if (copied >= capacity) {
+                    break
+                }
+                if (table->states[i] == 1) {
+                    out[copied] = table->values[i]
+                    copied = copied + 1
+                }
+            }
+            return copied
         }
     }
 
@@ -961,7 +1166,7 @@ addition namespace sl {
     }
 
     generics sort_generic<T> {
-        void insertion_sort_impl(T* data, int left, int right, int compare(T, T)*) {
+        void __insertion_sort_impl(T* data, int left, int right, int compare(T, T)*) {
             for (int i = left + 1; i <= right; i++) {
                 T key = data[i]
                 int j = i - 1
@@ -973,7 +1178,7 @@ addition namespace sl {
             }
         }
 
-        void heap_sift_down_impl(T* data, int base, int start, int end, int compare(T, T)*) {
+        void __heap_sift_down_impl(T* data, int base, int start, int end, int compare(T, T)*) {
             int root = start
             while (root * 2 + 1 <= end) {
                 int child = root * 2 + 1
@@ -991,22 +1196,22 @@ addition namespace sl {
             }
         }
 
-        void heap_sort_impl(T* data, int left, int right, int compare(T, T)*) {
+        void __heap_sort_impl(T* data, int left, int right, int compare(T, T)*) {
             int n = right - left + 1
 
             for (int i = (n - 2) / 2; i >= 0; i--) {
-                heap_sift_down_impl(data, left, i, n - 1, compare)
+                __heap_sift_down_impl(data, left, i, n - 1, compare)
             }
 
             for (int i = n - 1; i > 0; i--) {
                 T temp = data[left]
                 data[left] = data[left + i]
                 data[left + i] = temp
-                heap_sift_down_impl(data, left, 0, i - 1, compare)
+                __heap_sift_down_impl(data, left, 0, i - 1, compare)
             }
         }
 
-        int median_of_three_impl(T* data, int a, int b, int c, int compare(T, T)*) {
+        int __median_of_three_impl(T* data, int a, int b, int c, int compare(T, T)*) {
             if (compare(data[a], data[b]) < 0) {
                 if (compare(data[b], data[c]) < 0) {
                     return b
@@ -1026,9 +1231,9 @@ addition namespace sl {
             }
         }
 
-        int partition_impl(T* data, int left, int right, int compare(T, T)*) {
+        int __partition_impl(T* data, int left, int right, int compare(T, T)*) {
             int mid = left + (right - left) / 2
-            int pivot_index = median_of_three_impl(data, left, mid, right, compare)
+            int pivot_index = __median_of_three_impl(data, left, mid, right, compare)
 
             T temp = data[pivot_index]
             data[pivot_index] = data[right]
@@ -1050,20 +1255,20 @@ addition namespace sl {
             return store
         }
 
-        void intro_sort_impl(T* data, int left, int right, int depth_limit, int compare(T, T)*) {
+        void __intro_sort_impl(T* data, int left, int right, int depth_limit, int compare(T, T)*) {
             int n = right - left + 1
             if (n <= 16) {
-                insertion_sort_impl(data, left, right, compare)
+                __insertion_sort_impl(data, left, right, compare)
                 return
             }
             if (depth_limit <= 0) {
-                heap_sort_impl(data, left, right, compare)
+                __heap_sort_impl(data, left, right, compare)
                 return
             }
 
-            int pivot = partition_impl(data, left, right, compare)
-            intro_sort_impl(data, left, pivot - 1, depth_limit - 1, compare)
-            intro_sort_impl(data, pivot + 1, right, depth_limit - 1, compare)
+            int pivot = __partition_impl(data, left, right, compare)
+            __intro_sort_impl(data, left, pivot - 1, depth_limit - 1, compare)
+            __intro_sort_impl(data, pivot + 1, right, depth_limit - 1, compare)
         }
 
         bool sort(T* data, int size, int compare(T, T)*) {
@@ -1081,7 +1286,7 @@ addition namespace sl {
             }
             depth_limit = depth_limit * 2
 
-            intro_sort_impl(data, 0, size - 1, depth_limit, compare)
+            __intro_sort_impl(data, 0, size - 1, depth_limit, compare)
             return true
         }
     }
@@ -1090,6 +1295,14 @@ addition namespace sl {
         emit "luint array_length() {\n"
         emit "    " + T.typename + " first = " + array_name + "[0]\n"
         emit "    return size(" + array_name + ") / size(first)\n"
+        emit "}\n"
+    }
+
+    generics offset_generic<T: struct, string member> {
+        emit "luint offset(" + T.typename + "* ptr) {\n"
+        emit "    luint base = cast<luint>(ptr)\n"
+        emit "    luint mem = cast<luint>(&ptr->" + member + ")\n"
+        emit "    return mem - base\n"
         emit "}\n"
     }
 
