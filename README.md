@@ -4,9 +4,9 @@
 
 ### 简介
 
-SGC 是一个全新语言 Gallt 编译器前端。后端复用 LLVM 的 clang/lld，在 Windows 11 x64 上直接生成 PE 可执行文件，该版本是实验性的。
+SGC 是一个全新语言 Gallt 编译器前端。后端复用 LLVM 的 clang/lld，在 Windows 11 x64 / Linux x64 上直接生成 PE 可执行文件，该版本是实验性的。
 
-当前版本：`0.4.2-0926 Preview`。
+当前版本：`0.5.0-1004 Preview`。
 
 ### 目录结构
 
@@ -46,7 +46,6 @@ sgc --version
 - 当前为早期预览版本，部分语法和边缘情况可能仍有问题。
 - 临时后端文件默认写入 `%TEMP%`。设置 `SGC_KEEP_TEMP=1` 可保留生成的 `.ll` 与 `.c` 文件。
 - 输出文件未指定扩展名时，会自动追加 `.exe`。
-- SGC 预计将在 0.5.x-0.6.x 版本之后完成对 Linux 版本的基本适配。
 
 ---
 
@@ -54,9 +53,9 @@ sgc --version
 
 ### Overview
 
-SGC is a compiler front-end for a brand-new language called Gallt. Its backend reuses LLVM's clang/lld and emits PE executables directly on Windows 11 x64. This version is experimental.
+SGC is a compiler front-end for a brand-new language called Gallt. Its backend reuses LLVM's clang/lld and emits PE executables directly on Windows 11 x64 / Linux x64. This version is experimental.
 
-Current version: `0.4.2-0926 Preview`.
+Current version: `0.5.0-1004 Preview`.
 
 ### Layout
 
@@ -96,4 +95,3 @@ For more usage instructions, please enter `--help` within SGC to view them.
 - This is an early preview release. Some syntax and edge cases may still be incomplete or incorrect.
 - Temporary backend files are written to `%TEMP%` by default. Set `SGC_KEEP_TEMP=1` to keep the generated `.ll` and `.c` files.
 - If no extension is specified for the output file, `.exe` is appended automatically.
-- SGC is expected to complete the basic adaptation for the Linux version after versions 0.5.x-0.6.x.
