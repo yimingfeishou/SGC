@@ -248,18 +248,18 @@ void gallt_string_split_at(gallt_string* out, const gallt_string* s,
         const char* hit = (const char*)memchr(base + i, pat[0],
             (size_t)(last - i) + 1);
         if (hit == NULL) { break; }
-        const int64_t index = (int64_t)(hit - base);
-        if (memcmp(base + index, pat, (size_t)slen) == 0) {
+        const int64_t found = (int64_t)(hit - base);
+        if (memcmp(base + found, pat, (size_t)slen) == 0) {
             if (current == index) {
                 *out = gallt_string_from_bytes_impl(base + start,
-                    index - start);
+                    found - start);
                 return;
             }
             ++current;
-            i = index + slen;
+            i = found + slen;
             start = i;
         } else {
-            i = index + 1;
+            i = found + 1;
         }
     }
 

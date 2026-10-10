@@ -388,6 +388,26 @@ namespace gallt {
 
                 advance();
 
+                if (current_.type == TokenType::ColonColon) {
+                    std::vector<std::string> path;
+                    path.push_back(id);
+
+                    while (current_.type == TokenType::ColonColon) {
+                        advance();
+
+                        if (current_.type != TokenType::Identifier) {
+                            report_error(ErrorCode::ExpressionSyntaxError,
+                                "expected identifier after '::'");
+                            return nullptr;
+                        }
+
+                        path.push_back(std::string(current_.lexeme));
+                        advance();
+                    }
+
+                    return std::make_unique<PrimaryExpression>(loc, std::move(path));
+                }
+
                 if (current_.type == TokenType::LeftParen) {
                     advance();
                     std::vector<std::unique_ptr<Expression>> arguments;

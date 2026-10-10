@@ -1,6 +1,7 @@
 #include "../semantic/type_checker.hpp"
 #include "../semantic/diagnosed_registry.hpp"
 #include "type_checker_detail.hpp"
+#include "operator_resolution.hpp"
 #include "../parser/ast.hpp"
 #include "../semantic/constant_folding.hpp"
 #include <algorithm>
@@ -174,12 +175,17 @@ namespace gallt {
                 continue;
             }
 
+            operator_namespaces_[func] = name_namespace_prefix(func->name);
             std::string key = func->is_conversion_operator
                 ? std::string("operator") + func->conversion_target_type.to_string()
                 : std::string("operator") + func->overloaded_operator;
             std::vector<AST::FunctionDefinition*>& bucket = operator_overloads_[key];
             for (AST::FunctionDefinition* existing : bucket) {
                 if (existing->parameters.size() != func->parameters.size()) {
+                    continue;
+                }
+
+                if (operator_namespaces_[existing] != operator_namespaces_[func]) {
                     continue;
                 }
 
@@ -205,7 +211,51 @@ namespace gallt {
         }
     }
 
+    std::string TypeChecker::name_namespace_prefix(const std::string& name) {
+        const std::size_t separator = name.rfind('$');
+
+        if (separator == std::string::npos) {
+            return std::string();
+        }
+
+        return name.substr(0, separator);
+    }
+
+    bool TypeChecker::operator_associated_with_operands(
+        AST::FunctionDefinition* candidate,
+        const std::vector<AST::Type>& operand_types) const {
+        auto found = operator_namespaces_.find(candidate);
+
+        if (found == operator_namespaces_.end() || found->second.empty()) {
+            return true;
+        }
+
+        const std::string& candidate_namespace = found->second;
+        std::unordered_set<std::string> struct_names;
+
+        for (const AST::Type& type : operand_types) {
+            collect_struct_names_from_type(type, struct_names);
+        }
+
+        for (const std::string& name : struct_names) {
+            const std::string prefix = name_namespace_prefix(name);
+
+            if (prefix == candidate_namespace) {
+                return true;
+            }
+
+            if (prefix.size() > candidate_namespace.size() &&
+                prefix.compare(0, candidate_namespace.size(), candidate_namespace) == 0 &&
+                prefix[candidate_namespace.size()] == '$') {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     AST::FunctionDefinition* TypeChecker::resolve_user_operator(const std::string& op,
+        const std::vector<AST::Expression*>& operands,
         const std::vector<AST::Type>& operand_types, SourceLocation loc) {
         auto it = operator_overloads_.find("operator" + op);
         if (it == operator_overloads_.end()) {
@@ -225,6 +275,10 @@ namespace gallt {
 
         for (AST::FunctionDefinition* candidate : it->second) {
             if (candidate->parameters.size() != operand_types.size()) {
+                continue;
+            }
+
+            if (!operator_associated_with_operands(candidate, operand_types)) {
                 continue;
             }
 
@@ -252,7 +306,15 @@ namespace gallt {
             bool ok = true;
 
             for (std::size_t i = 0; i < operand_types.size(); ++i) {
-                int rank = conversion_rank(operand_types[i], candidate->parameters[i]);
+                AST::Type effective = operand_types[i];
+
+                if (i < operands.size() && operands[i] != nullptr) {
+                    effective = operator_resolution::effective_operand_type(
+                        operand_types[i], operands[i]->is_lvalue(),
+                        candidate->parameters[i]);
+                }
+
+                int rank = conversion_rank(effective, candidate->parameters[i]);
                 if (rank < 0) {
                     ok = false;
                     break;
@@ -324,7 +386,16 @@ namespace gallt {
                                 continue;
                             }
 
-                            if (conversion_rank(operand_type, candidate->parameters[0]) >= 0) {
+                            if (!operator_associated_with_operands(candidate,
+                                std::vector<AST::Type>{ operand_type })) {
+                                continue;
+                            }
+
+                            AST::Type effective = operator_resolution::effective_operand_type(
+                                operand_type, cast->base->is_lvalue(),
+                                candidate->parameters[0]);
+
+                            if (conversion_rank(effective, candidate->parameters[0]) >= 0) {
                                 resolved_operators_[expr] = candidate;
                                 out = candidate->return_type;
                                 return true;
@@ -338,8 +409,6 @@ namespace gallt {
         }
         std::string symbol;
         std::vector<AST::Expression*> operands;
-        std::vector<bool> operand_needs_address;
-        bool auto_wrap_pointer = false;
         bool postfix_increment = false;
 
         if (auto* comp = dynamic_cast<AST::ComparisonExpression*>(expr)) {
@@ -397,7 +466,6 @@ namespace gallt {
             case AST::UnaryExpression::Operator::BitwiseNot: symbol = "~"; break;
             }
             operands = { unary->operand.get() };
-            operand_needs_address = { true };
         } else if (auto* post = dynamic_cast<AST::PostfixExpression*>(expr)) {
             if (post->op == AST::PostfixExpression::Operator::Increment) {
                 symbol = "++";
@@ -412,13 +480,9 @@ namespace gallt {
             postfix_increment = post->op == AST::PostfixExpression::Operator::Increment ||
                 post->op == AST::PostfixExpression::Operator::Decrement;
             operands = { post->base.get() };
-            operand_needs_address = { true };
-            auto_wrap_pointer = postfix_increment ||
-                post->op == AST::PostfixExpression::Operator::Subscript;
 
             if (post->op == AST::PostfixExpression::Operator::Subscript) {
                 operands.push_back(post->subscript_expr.get());
-                operand_needs_address.push_back(false);
             }
         } else if (auto* assign = dynamic_cast<AST::AssignmentExpression*>(expr)) {
             if (assign->op == AST::AssignmentExpression::Operator::PlusAssign) {
@@ -440,8 +504,6 @@ namespace gallt {
             }
 
             operands = { assign->left.get(), assign->right.get() };
-            operand_needs_address = { true, false };
-            auto_wrap_pointer = true;
         }
         if (symbol.empty()) {
             return false;
@@ -481,87 +543,13 @@ namespace gallt {
             return false;
         }
 
-        (void)auto_wrap_pointer;
-        std::vector<AST::Type> addressable_probe = probe;
-        bool has_addressable = false;
-
-        for (std::size_t i = 0; i < addressable_probe.size(); ++i) {
-            if (i >= operand_needs_address.size() || !operand_needs_address[i]) {
-                continue;
-            }
-
-            if (addressable_probe[i].kind == TypeKind::Pointer ||
-                addressable_probe[i].kind == TypeKind::Array ||
-                addressable_probe[i].kind == TypeKind::Void) {
-                continue;
-            }
-
-            AST::Expression* operand = operands[i];
-            if (operand == nullptr || !operand->is_lvalue()) {
-                continue;
-            }
-
-            addressable_probe[i] = AST::Type::make_pointer(
-                std::make_shared<AST::Type>(addressable_probe[i]));
-            has_addressable = true;
-        }
-
-        AST::FunctionDefinition* chosen = nullptr;
         if (postfix_increment) {
-            std::vector<AST::Type> binary_probe =
-                has_addressable ? addressable_probe : probe;
-            binary_probe.push_back(AST::Type::make_int());
-            AST::FunctionDefinition* post_fix = resolve_user_operator(symbol, binary_probe,
-                expr->location);
-
-            if (post_fix == nullptr) {
-                const std::vector<AST::Type>& placeholders =
-                    has_addressable ? addressable_probe : probe;
-                auto found = operator_overloads_.find("operator" + symbol);
-
-                if (found != operator_overloads_.end()) {
-                    AST::FunctionDefinition* best = nullptr;
-                    int best_rank = -1;
-                    bool ambiguous = false;
-
-                    for (AST::FunctionDefinition* candidate : found->second) {
-                        if (candidate->parameters.size() != 2) { continue; }
-
-                        const int rank = conversion_rank(placeholders[0],
-                            candidate->parameters[0]);
-
-                        if (rank < 0) { continue; }
-
-                        if (best == nullptr || rank < best_rank) {
-                            best = candidate;
-                            best_rank = rank;
-                            ambiguous = false;
-                        } else if (rank == best_rank && candidate != best) {
-                            ambiguous = true;
-                        }
-                    }
-
-                    if (ambiguous) {
-                        report_error_template(expr->location,
-                            ErrorCode::OperatorOverloadAmbiguous, { symbol });
-                    } else {
-                        post_fix = best;
-                    }
-                }
-            }
-
-            if (post_fix != nullptr && post_fix->parameters.size() == 2) {
-                operands.push_back(nullptr);
-                operand_needs_address.push_back(false);
-                chosen = post_fix;
-            }
+            operands.push_back(nullptr);
+            probe.push_back(AST::Type::make_int());
         }
-        if (chosen == nullptr && !postfix_increment) {
-            chosen = resolve_user_operator(symbol, probe, expr->location);
-        }
-        if (chosen == nullptr && !postfix_increment && has_addressable) {
-            chosen = resolve_user_operator(symbol, addressable_probe, expr->location);
-        }
+
+        AST::FunctionDefinition* chosen = resolve_user_operator(symbol, operands, probe,
+            expr->location);
         if (chosen == nullptr) {
             return false;
         }

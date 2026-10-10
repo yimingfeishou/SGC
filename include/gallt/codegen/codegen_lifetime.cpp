@@ -1,5 +1,6 @@
 #include "codegen.hpp"
 #include "codegen_detail.hpp"
+#include "../semantic/lifecycle_transfer.hpp"
 #include <algorithm>
 
 using namespace gallt::AST;
@@ -64,6 +65,8 @@ namespace gallt {
 
     void CodeGenerator::emit_memberwise_copy(const AST::Type& type, const std::string& dst,
         const std::string& src, bool is_assignment) {
+        require_lifecycle_functions(type);
+
         if (type.kind == TypeKind::String) {
             emit_line("call void @gallt_string_assign(ptr " + dst + ", ptr " + src + ")");
             return;
@@ -128,6 +131,8 @@ namespace gallt {
 
     void CodeGenerator::emit_memberwise_move(const AST::Type& type, const std::string& dst,
         const std::string& src, bool is_assignment) {
+        require_lifecycle_functions(type);
+
         if (type.kind == TypeKind::String) {
             emit_line("call void @gallt_string_destroy(ptr " + dst + ")");
             std::string value = new_temp("mv_string");
@@ -172,6 +177,18 @@ namespace gallt {
                     }
                 }
 
+                const std::string& fallback_fn = is_assignment ? def->copy_assignment_name
+                                                               : def->copy_constructor_name;
+
+                if (!fallback_fn.empty() && lifecycle_owner_ != def) {
+                    std::string fallback = function_reference(fallback_fn);
+
+                    if (!fallback.empty()) {
+                        emit_line("call void " + fallback + "(ptr " + dst + ", ptr " + src + ")");
+                        return;
+                    }
+                }
+
                 std::string ir = llvm_type(type);
 
                 for (std::size_t i = 0; i < def->members.size(); ++i) {
@@ -206,6 +223,8 @@ namespace gallt {
 
     void CodeGenerator::emit_deep_copy(const AST::Type& type, const std::string& dst,
         const std::string& src) {
+        require_lifecycle_functions(type);
+
         if (type.kind == TypeKind::String) {
             emit_line("call void @gallt_string_assign(ptr " + dst + ", ptr " + src + ")");
             return;
@@ -301,6 +320,80 @@ namespace gallt {
         return storage;
     }
 
+    bool CodeGenerator::type_needs_cleanup(const AST::Type& type) {
+        if (type_contains_string(type)) { return true; }
+
+        if (type.kind == TypeKind::Struct) {
+            auto it = struct_by_name_.find(type.struct_name);
+            return it != struct_by_name_.end() && it->second != nullptr &&
+                it->second->needs_destruction;
+        }
+
+        return false;
+    }
+
+    bool CodeGenerator::expression_is_lvalue(const AST::Expression* expr) {
+        if (auto* prim = dynamic_cast<const AST::PrimaryExpression*>(expr)) {
+            if (prim->kind == AST::PrimaryExpression::Kind::Parens &&
+                prim->paren_expr != nullptr) {
+                return expression_is_lvalue(prim->paren_expr.get());
+            }
+        }
+
+        return expr != nullptr && expr->is_lvalue();
+    }
+
+    std::string CodeGenerator::transfer_parameter_object(const AST::Type& type,
+        ExprValue& value, bool move) {
+        std::string source = !value.address.empty() ? value.address : value.value;
+
+        if (source.empty()) {
+            source = aggregate_argument_pointer(type, value);
+        }
+
+        if (source.empty()) { return std::string(); }
+
+        std::string storage = emit_alloca(llvm_type(type), "paramvalue");
+        emit_line("store " + llvm_type(type) + " zeroinitializer, ptr " + storage);
+
+        if (move) {
+            emit_memberwise_move(type, storage, source, false);
+        } else {
+            emit_memberwise_copy(type, storage, source, false);
+        }
+
+        return storage;
+    }
+
+    AST::Expression* CodeGenerator::unwrap_copy_move_argument(AST::Expression* argument,
+        bool& explicit_move, bool& explicit_copy) {
+        if (auto* cm = dynamic_cast<AST::PrimaryExpression*>(argument)) {
+            if (cm->kind == AST::PrimaryExpression::Kind::CopyMove &&
+                cm->paren_expr != nullptr) {
+                if (cm->copy_move_kind == AST::PrimaryExpression::CopyMoveKind::Move) {
+                    explicit_move = true;
+                    return cm->paren_expr.get();
+                }
+
+                if (cm->copy_move_kind == AST::PrimaryExpression::CopyMoveKind::Copy) {
+                    explicit_copy = true;
+                    return cm->paren_expr.get();
+                }
+            }
+        }
+
+        return argument;
+    }
+
+    std::string CodeGenerator::aggregate_call_argument(const AST::Type& want,
+        ExprValue& value, bool move) {
+        if (aggregate_parameter_uses_pointer(want) && want.kind == value.type.kind) {
+            return transfer_parameter_object(want, value, move);
+        }
+
+        return aggregate_argument_pointer(want, value);
+    }
+
     void CodeGenerator::collect_constructor_defaults(const std::string& ctor_name,
         std::vector<AST::Expression*>& args) {
         auto it = function_by_name_.find(ctor_name);
@@ -344,14 +437,15 @@ namespace gallt {
 
     void CodeGenerator::emit_struct_return(AST::Expression* expr, const AST::Type& type,
         const std::string& sret) {
+        require_lifecycle_functions(type);
+
         AST::Expression* source_expr = expr;
-        bool is_move = false;
         if (auto* cm = dynamic_cast<AST::PrimaryExpression*>(expr)) {
             if (cm->kind == AST::PrimaryExpression::Kind::CopyMove) {
-                is_move = cm->copy_move_kind == AST::PrimaryExpression::CopyMoveKind::Move;
                 source_expr = cm->paren_expr.get();
             }
         }
+        const bool is_move = lifecycle_transfer::is_move_source(expr);
 
         AST::Type source_type;
         std::string source_address = operand_address(source_expr, &source_type);
@@ -433,12 +527,13 @@ namespace gallt {
         };
 
         for (AST::StructDefinition* def : struct_defs_) {
-            if (def == nullptr) { continue; }
+            if (def == nullptr || instantiated_structs_.count(def) == 0) { continue; }
 
             for (LifecycleKind kind : kinds) {
                 const std::string symbol = lifecycle_symbol(def, kind);
 
-                if (symbol.empty() || lifecycle_symbols_.count(symbol) == 0) { continue; }
+                if (symbol.empty() || lifecycle_catalog_.count(symbol) == 0) { continue; }
+                if (emitted_lifecycle_bodies_.count(symbol) != 0) { continue; }
                 emit_lifecycle_body(def, kind, symbol);
             }
         }
@@ -453,6 +548,8 @@ namespace gallt {
             LifecycleKind::CopyAssignment,
             LifecycleKind::MoveAssignment,
         };
+
+        lifecycle_catalog_.clear();
 
         for (AST::StructDefinition* def : struct_defs_) {
             if (def == nullptr) { continue; }
@@ -471,8 +568,31 @@ namespace gallt {
                     if (!type_is_movable(struct_type)) { continue; }
                 }
 
-                lifecycle_symbols_.insert(symbol);
+                lifecycle_catalog_[symbol] = std::make_pair(def, kind);
             }
+        }
+    }
+
+    void CodeGenerator::require_lifecycle_functions(const AST::Type& type) {
+        if (type.kind == TypeKind::Struct) {
+            auto it = struct_by_name_.find(type.struct_name);
+            if (it != struct_by_name_.end()) {
+                require_lifecycle_functions(it->second);
+            }
+            return;
+        }
+
+        if (type.kind == TypeKind::Array && type.element_type) {
+            require_lifecycle_functions(*type.element_type);
+        }
+    }
+
+    void CodeGenerator::require_lifecycle_functions(const AST::StructDefinition* def) {
+        if (def == nullptr) { return; }
+        if (!instantiated_structs_.insert(def).second) { return; }
+
+        for (const AST::StructDefinition::Member& member : def->members) {
+            require_lifecycle_functions(member.type);
         }
     }
 

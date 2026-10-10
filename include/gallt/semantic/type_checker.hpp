@@ -22,7 +22,7 @@ namespace gallt {
             const std::unordered_map<const AST::Expression*,
                 std::tuple<std::string, std::size_t, AST::Type>>&
                 expression_argument_casts = {},
-            bool require_main = true);
+            bool require_main = true, bool extended_semantics = false);
         ~TypeChecker() = default;
 
         TypeChecker(const TypeChecker&) = delete;
@@ -68,7 +68,9 @@ namespace gallt {
         AST::FunctionDefinition* current_function_ = nullptr;
 
         int loop_depth_ = 0;
+        int switch_depth_ = 0;
         bool require_main_ = true;
+        bool extended_semantics_ = false;
 
         bool builtins_declared_ = false;
 
@@ -86,6 +88,7 @@ namespace gallt {
         std::unordered_map<const AST::PrimaryExpression*, const AST::ExternDeclaration*>
             resolved_externs_;
         std::unordered_map<const AST::Expression*, AST::FunctionDefinition*> resolved_operators_;
+        std::unordered_set<const AST::PostfixExpression*> resolved_overload_calls_;
         std::unordered_map<std::string, std::vector<AST::FunctionDefinition*>> operator_overloads_;
         std::unordered_set<const AST::FunctionDefinition*> redefined_operators_;
 
@@ -118,8 +121,16 @@ namespace gallt {
         bool validate_operator_definition(AST::FunctionDefinition* node);
         bool is_custom_type(const AST::Type& type) const;
         AST::FunctionDefinition* resolve_user_operator(const std::string& op,
+            const std::vector<AST::Expression*>& operands,
             const std::vector<AST::Type>& operand_types, SourceLocation loc);
         bool try_user_defined_operator(AST::Expression* expr, AST::Type& out);
+        void preregister_generated_functions();
+        bool register_function_symbol(AST::FunctionDefinition* node);
+        std::unordered_set<const AST::FunctionDefinition*> preregistered_functions_;
+        static std::string name_namespace_prefix(const std::string& name);
+        bool operator_associated_with_operands(AST::FunctionDefinition* candidate,
+            const std::vector<AST::Type>& operand_types) const;
+        std::unordered_map<const AST::FunctionDefinition*, std::string> operator_namespaces_;
         std::unordered_map<const AST::FunctionDefinition*, std::string> mangled_functions_;
         std::unordered_map<const AST::ExternDeclaration*, std::string> mangled_externs_;
         std::unordered_set<std::string> used_mangled_names_;
@@ -143,11 +154,16 @@ namespace gallt {
             SourceLocation loc);
         void check_struct_initializer(AST::ArrayInitializer* init, const AST::Type& struct_type,
             SourceLocation loc);
+        void check_copy_move_initialization(const AST::Expression* expr,
+            const AST::Type& source_type, const AST::Type& target_type, SourceLocation loc);
         void check_initializer_expressions(AST::Initializer* init);
         void check_if_statement(AST::IfStatement* if_stmt);
         void check_for_statement(AST::ForStatement* for_stmt);
         void check_while_statement(AST::WhileStatement* while_stmt);
+        void check_switch_case_statement(AST::SwitchCaseStatement* switch_stmt);
         void check_break_statement(AST::BreakStatement* break_stmt);
+        void check_continue_statement(AST::ContinueStatement* continue_stmt);
+        void check_fallthrough_statement(AST::FallthroughStatement* fallthrough_stmt);
         void check_return_statement(AST::ReturnStatement* return_stmt);
         void check_expression_statement(AST::ExpressionStatement* expr_stmt);
 
@@ -231,9 +247,12 @@ namespace gallt {
         bool type_layout(const AST::Type& type, std::size_t& size, std::size_t& align) const;
         bool type_is_copyable(const AST::Type& type) const;
         bool type_is_movable(const AST::Type& type) const;
-        static bool is_move_expression(const AST::Expression* expr);
+        static bool is_move_source(const AST::Expression* expr);
         static bool is_expression_parameter_temp(const AST::Initializer* init);
         bool is_address_of_const_identifier(const AST::Expression* expr);
+
+        bool switch_case_types_comparable(const AST::Type& left,
+            const AST::Type& right);
 
         void verify_main_function();
 

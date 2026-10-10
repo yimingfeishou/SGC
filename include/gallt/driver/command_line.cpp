@@ -136,6 +136,20 @@ namespace {
                 out.no_runtime = true;
             } else if (arg == L"--gallt-abi" || arg == L"-GA") {
                 out.gallt_abi = true;
+            } else if (arg == L"--extended-semantics") {
+                std::string* v = require_value(L"--extended-semantics");
+                if (!v) { return false; }
+
+                if (*v == "true") {
+                    out.extended_semantics = true;
+                } else if (*v == "false") {
+                    out.extended_semantics = false;
+                } else {
+                    out.mode = CommandMode::Invalid;
+                    out.error_message = "invalid extended semantics value: " + *v +
+                        " (expected true or false)";
+                    return false;
+                }
             } else if (arg == L"--stack") {
                 std::string* v = require_value(L"--stack");
                 if (!v) { return false; }
@@ -259,6 +273,8 @@ namespace {
             "--linker static\n"
             "  sgc --compile --input \"file.glt\" --output \"program.exe\" "
             "--instantiation-depth <n>\n"
+            "  sgc --compile --input \"file.glt\" --output \"program.exe\" "
+            "--extended-semantics true\n"
             "  sgc --help\n"
             "  sgc --version\n"
             "Options:\n"
@@ -298,6 +314,9 @@ namespace {
             "                                values above 2048 are allowed but\n"
             "                                compile time is not guaranteed and\n"
             "                                compilation may terminate)\n"
+            "  --extended-semantics <bool>   enable extended semantics: some constructs\n"
+            "                                forbidden by the Gallt standard document\n"
+            "                                are relaxed (true or false; default false)\n"
             "Conflicts:\n"
             "  --optimization-level and --debug-symbols cannot be combined\n"
             "  --debug and --release cannot be combined\n"
@@ -312,8 +331,8 @@ namespace {
 
     std::string version_text() {
         return
-        "Standard Gallt Compiler (sgc) 0.5.0-1004 Preview (LLVM backend, x86-64 Windows and Linux)\n"
-        "Build date: 2026-10-04\n"
+        "Standard Gallt Compiler (sgc) 0.5.0-1010 Preview (LLVM backend, x86-64 Windows and Linux)\n"
+        "Build date: 2026-10-10\n"
         "This version is experimental";
     }
 

@@ -135,6 +135,19 @@ namespace gallt {
                 code, detail);
         }
 
+        if (auto* switch_stmt = dynamic_cast<const SwitchCaseStatement*>(stmt)) {
+            for (const SwitchCaseStatement::Clause& clause : switch_stmt->clauses) {
+                for (const std::unique_ptr<Statement>& child : clause.statements) {
+                    if (!statement_is_allowed_in_expression_body(child.get(), bad_loc,
+                        code, detail)) {
+                        return false;
+                    }
+                }
+            }
+
+            return true;
+        }
+
         return true;
     }
 
@@ -170,6 +183,15 @@ namespace gallt {
 
         if (auto* while_stmt = dynamic_cast<const WhileStatement*>(stmt)) {
             collect_declared_names(while_stmt->body.get(), out);
+            return;
+        }
+
+        if (auto* switch_stmt = dynamic_cast<const SwitchCaseStatement*>(stmt)) {
+            for (const SwitchCaseStatement::Clause& clause : switch_stmt->clauses) {
+                for (const std::unique_ptr<Statement>& child : clause.statements) {
+                    collect_declared_names(child.get(), out);
+                }
+            }
             return;
         }
     }
@@ -335,6 +357,19 @@ namespace gallt {
         if (auto* while_stmt = dynamic_cast<const WhileStatement*>(stmt)) {
             collect_free_identifiers(while_stmt->condition.get(), bound, out);
             collect_free_identifiers_in_statement(while_stmt->body.get(), out);
+            return;
+        }
+
+        if (auto* switch_stmt = dynamic_cast<const SwitchCaseStatement*>(stmt)) {
+            collect_free_identifiers(switch_stmt->condition.get(), bound, out);
+
+            for (const SwitchCaseStatement::Clause& clause : switch_stmt->clauses) {
+                collect_free_identifiers(clause.condition.get(), bound, out);
+
+                for (const std::unique_ptr<Statement>& child : clause.statements) {
+                    collect_free_identifiers_in_statement(child.get(), out);
+                }
+            }
             return;
         }
     }

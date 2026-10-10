@@ -1430,7 +1430,7 @@ namespace gallt {
                 static_cast<std::size_t>(index) < text.size())
                 ? text[static_cast<std::size_t>(index)] : '\0';
             out = ConstexprValue::make_integer(
-                static_cast<unsigned char>(value), Type::make_char());
+                static_cast<signed char>(value), Type::make_char());
             return true;
         }
 

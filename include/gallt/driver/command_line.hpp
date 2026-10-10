@@ -38,6 +38,7 @@ namespace gallt {
         bool release_mode = false;
         bool no_runtime = false;
         bool gallt_abi = false;
+        bool extended_semantics = false;
         std::optional<std::uint64_t> stack_size;
         std::optional<std::uint64_t> commit_size;
         std::optional<std::uint64_t> instantiation_depth;

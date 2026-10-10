@@ -428,7 +428,8 @@ namespace {
         lifecycle.run(&combined);
 
         TypeChecker checker(diag, expander.expression_free_identifiers(),
-            expander.expression_argument_casts(), emit_entry_point);
+            expander.expression_argument_casts(), emit_entry_point,
+            options.extended_semantics);
 
         {
             std::unordered_map<const AST::Expression*, AST::Type> call_sites;

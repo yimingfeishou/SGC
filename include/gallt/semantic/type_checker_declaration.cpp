@@ -2,6 +2,7 @@
 #include "../semantic/diagnosed_registry.hpp"
 #include "type_checker_detail.hpp"
 #include "expression_parameter_names.hpp"
+#include "lifecycle_transfer.hpp"
 #include "../parser/ast.hpp"
 #include "../semantic/constant_folding.hpp"
 #include <algorithm>
@@ -157,6 +158,105 @@ namespace gallt {
         return true;
     }
 
+    bool TypeChecker::register_function_symbol(AST::FunctionDefinition* node) {
+        const bool redefinition_already_reported =
+            node->is_operator && redefined_operators_.count(node) != 0;
+
+        if (auto* existing = sym_table_.lookup(node->name)) {
+            if (existing->kind == SymbolKind::Function) {
+                if (existing->function_node == nullptr) {
+                    bool same_signature = existing->param_types.size() == node->parameters.size() &&
+                        std::equal(existing->param_types.begin(), existing->param_types.end(),
+                            node->parameters.begin());
+                    if (same_signature) {
+                        if (existing->type != node->return_type) {
+                            report_error(node->location, ErrorCode::FunctionReturnTypeMismatch,
+                                "function '" + node->name +
+                                "' does not match its extern declaration return type");
+                        }
+                        existing->function_node = node;
+
+                        if (existing->param_names.empty() && !node->param_names.empty()) {
+                            existing->param_names = node->param_names;
+                        }
+                    } else {
+                        Symbol overload_sym = Symbol::make_function(node->name, node->return_type,
+                            node->parameters, node->param_names, node->location, node,
+                            node->is_variadic);
+                        if (!sym_table_.declare_overload(overload_sym)) {
+                            if (!redefinition_already_reported) {
+                                report_error(node->location, ErrorCode::RedefinedFunction,
+                                    "function '" + node->name +
+                                    "' already defined with the same parameter list");
+                            }
+                            return false;
+                        }
+
+                        if (std::vector<Symbol>* set = sym_table_.lookup_overloads(node->name)) {
+                            for (const Symbol& other : *set) {
+                                if (&other == &(*set).back()) { continue; }
+                                if (overloads_ambiguous_by_defaults(other, (*set).back())) {
+                                    report_error_template(node->location,
+                                        ErrorCode::OverloadAmbiguous,
+                                        { node->name });
+                                    break;
+                                }
+                            }
+                        }
+
+                        mangle_overload_set(node->name);
+                    }
+                } else {
+                    Symbol overload_sym = Symbol::make_function(
+                        node->name, node->return_type, node->parameters, node->param_names,
+                        node->location, node, node->is_variadic);
+                    if (!sym_table_.declare_overload(overload_sym)) {
+                        if (!redefinition_already_reported) {
+                            report_error(node->location, ErrorCode::RedefinedFunction,
+                                "function '" + node->name +
+                                "' already defined with the same parameter list");
+                        }
+                        return false;
+                    }
+
+                    if (std::vector<Symbol>* set = sym_table_.lookup_overloads(node->name)) {
+                        for (const Symbol& other : *set) {
+                            if (&other == &(*set).back()) { continue; }
+                            if (overloads_ambiguous_by_defaults(other, (*set).back())) {
+                                report_error_template(node->location,
+                                    ErrorCode::OverloadAmbiguous,
+                                    { node->name });
+                                break;
+                            }
+                        }
+                    }
+
+                    mangle_overload_set(node->name);
+                }
+            } else {
+                report_error(node->location, ErrorCode::RedefinedIdentifier,
+                    "identifier '" + node->name + "' already declared as non-function");
+                return false;
+            }
+        } else {
+            Symbol sym = Symbol::make_function(
+                node->name, node->return_type,
+                node->parameters, node->param_names,
+                node->location, node, node->is_variadic
+            );
+            if (!sym_table_.declare(sym)) {
+                if (!redefinition_already_reported) {
+                    report_error(node->location, ErrorCode::RedefinedFunction,
+                        "function '" + node->name + "' already declared");
+                }
+                return false;
+            }
+            sym_table_.declare_overload(sym);
+        }
+
+        return true;
+    }
+
     void TypeChecker::check_function_definition(AST::FunctionDefinition* node) {
         const std::size_t pack_depth = variadic_packs_.size();
         const AST::FunctionDefinition* saved_constexpr_owner = constexpr_owner_;
@@ -166,8 +266,6 @@ namespace gallt {
             ++constexpr_owner_depth_;
         }
 
-        const bool redefinition_already_reported =
-            node->is_operator && redefined_operators_.count(node) != 0;
         if (node->is_export) {
             validate_export_function(node);
         }
@@ -215,96 +313,10 @@ namespace gallt {
             }
         }
 
-        if (auto* existing = sym_table_.lookup(node->name)) {
-            if (existing->kind == SymbolKind::Function) {
-                if (existing->function_node == nullptr) {
-                    bool same_signature = existing->param_types.size() == node->parameters.size() &&
-                        std::equal(existing->param_types.begin(), existing->param_types.end(),
-                            node->parameters.begin());
-                    if (same_signature) {
-                        if (existing->type != node->return_type) {
-                            report_error(node->location, ErrorCode::FunctionReturnTypeMismatch,
-                                "function '" + node->name +
-                                "' does not match its extern declaration return type");
-                        }
-                        existing->function_node = node;
-
-                        if (existing->param_names.empty() && !node->param_names.empty()) {
-                            existing->param_names = node->param_names;
-                        }
-                    } else {
-                        Symbol overload_sym = Symbol::make_function(node->name, node->return_type,
-                            node->parameters, node->param_names, node->location, node,
-                            node->is_variadic);
-                        if (!sym_table_.declare_overload(overload_sym)) {
-                            if (!redefinition_already_reported) {
-                                report_error(node->location, ErrorCode::RedefinedFunction,
-                                    "function '" + node->name +
-                                    "' already defined with the same parameter list");
-                            }
-                            return;
-                        }
-
-                        if (std::vector<Symbol>* set = sym_table_.lookup_overloads(node->name)) {
-                            for (const Symbol& other : *set) {
-                                if (&other == &(*set).back()) { continue; }
-                                if (overloads_ambiguous_by_defaults(other, (*set).back())) {
-                                    report_error_template(node->location,
-                                        ErrorCode::OverloadAmbiguous,
-                                        { node->name });
-                                    break;
-                                }
-                            }
-                        }
-
-                        mangle_overload_set(node->name);
-                    }
-                } else {
-                    Symbol overload_sym = Symbol::make_function(
-                        node->name, node->return_type, node->parameters, node->param_names,
-                        node->location, node, node->is_variadic);
-                    if (!sym_table_.declare_overload(overload_sym)) {
-                        if (!redefinition_already_reported) {
-                            report_error(node->location, ErrorCode::RedefinedFunction,
-                                "function '" + node->name +
-                                "' already defined with the same parameter list");
-                        }
-                        return;
-                    }
-
-                    if (std::vector<Symbol>* set = sym_table_.lookup_overloads(node->name)) {
-                        for (const Symbol& other : *set) {
-                            if (&other == &(*set).back()) { continue; }
-                            if (overloads_ambiguous_by_defaults(other, (*set).back())) {
-                                report_error_template(node->location,
-                                    ErrorCode::OverloadAmbiguous,
-                                    { node->name });
-                                break;
-                            }
-                        }
-                    }
-
-                    mangle_overload_set(node->name);
-                }
-            } else {
-                report_error(node->location, ErrorCode::RedefinedIdentifier,
-                    "identifier '" + node->name + "' already declared as non-function");
+        if (preregistered_functions_.count(node) == 0) {
+            if (!register_function_symbol(node)) {
                 return;
             }
-        } else {
-            Symbol sym = Symbol::make_function(
-                node->name, node->return_type,
-                node->parameters, node->param_names,
-                node->location, node, node->is_variadic
-            );
-            if (!sym_table_.declare(sym)) {
-                if (!redefinition_already_reported) {
-                    report_error(node->location, ErrorCode::RedefinedFunction,
-                        "function '" + node->name + "' already declared");
-                }
-                return;
-            }
-            sym_table_.declare_overload(sym);
         }
 
         enter_scope();
@@ -476,6 +488,10 @@ namespace gallt {
                             "initializer type '" + init_type.to_string() +
                             "' cannot be converted to member type '" + mem_type.to_string() + "'");
                     }
+                    if (!init_type.is_error()) {
+                        check_copy_move_initialization(expr_init->expr.get(), init_type,
+                            mem_type, member.location);
+                    }
                 } else if (auto* arr_init = dynamic_cast<AST::ArrayInitializer*>(member.initializer.get())) {
                     if (mem_type.kind != TypeKind::Array) {
                         report_error(member.location, ErrorCode::StructMemberTypeMismatch,
@@ -507,11 +523,36 @@ namespace gallt {
                                     report_error(member.location, ErrorCode::StructMemberTypeMismatch,
                                         "array element type mismatch");
                                 }
+                                if (!etype.is_error()) {
+                                    check_copy_move_initialization(e->expr.get(), etype,
+                                        *elem_type, member.location);
+                                }
                             }
                         }
                     }
                 }
             }
+        }
+    }
+
+    void TypeChecker::check_copy_move_initialization(const AST::Expression* expr,
+        const AST::Type& source_type, const AST::Type& target_type, SourceLocation loc) {
+        if (expr == nullptr) { return; }
+        if (target_type.kind != TypeKind::Struct || source_type.kind != TypeKind::Struct) {
+            return;
+        }
+        if (target_type.struct_name != source_type.struct_name) { return; }
+
+        if (is_move_source(expr)) {
+            const bool relaxed = extended_semantics_ &&
+                lifecycle_transfer::is_temporary_source(expr);
+            if (!relaxed && !type_is_movable(target_type)) {
+                report_error_template(loc, ErrorCode::NoMoveViolation,
+                    { target_type.struct_name });
+            }
+        } else if (!type_is_copyable(target_type)) {
+            report_error_template(loc, ErrorCode::NoCopyViolation,
+                { target_type.struct_name });
         }
     }
 
@@ -658,18 +699,8 @@ namespace gallt {
                 AST::Type init_type = check_expression(expr_init->expr.get());
                 expected_type_ = saved_expected;
 
-                if (decl->type.kind == TypeKind::Struct && init_type.kind == TypeKind::Struct &&
-                    init_type.struct_name == decl->type.struct_name) {
-                    if (is_move_expression(expr_init->expr.get())) {
-                        if (!type_is_movable(decl->type)) {
-                            report_error_template(decl->location,
-                                ErrorCode::NoMoveViolation, { decl->type.struct_name });
-                        }
-                    } else if (!type_is_copyable(decl->type)) {
-                        report_error_template(decl->location,
-                            ErrorCode::NoCopyViolation, { decl->type.struct_name });
-                    }
-                }
+                check_copy_move_initialization(expr_init->expr.get(), init_type,
+                    decl->type, decl->location);
 
                 bool is_null = false;
                 if (auto* primary = dynamic_cast<AST::PrimaryExpression*>(expr_init->expr.get())) {
@@ -826,6 +857,10 @@ namespace gallt {
                 report_error(e->location, ErrorCode::StructMemberTypeMismatch,
                     "initializer for member '" + member.name + "' does not match its type");
             }
+            if (!init_type.is_error()) {
+                check_copy_move_initialization(e->expr.get(), init_type, member.type,
+                    e->location);
+            }
         }
     }
 
@@ -884,6 +919,10 @@ namespace gallt {
             if (!value_type.is_error() && !can_implicit_convert(value_type, element)) {
                 report_error(e->location, ErrorCode::AssignmentTypeMismatch,
                     "array element type mismatch");
+            }
+            if (!value_type.is_error()) {
+                check_copy_move_initialization(e->expr.get(), value_type, element,
+                    e->location);
             }
         }
     }

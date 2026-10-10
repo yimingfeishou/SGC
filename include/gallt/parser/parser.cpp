@@ -106,6 +106,10 @@ namespace gallt {
         }
 
         report_error(ErrorCode::ExpressionSyntaxError, err_msg);
+        if (try_recover_expected(type, err_msg.c_str())) {
+            if (current_.type == type) { advance(); }
+            return true;
+        }
         return false;
     }
 
@@ -115,6 +119,7 @@ namespace gallt {
             return;
         }
 
+        if (!in_error_recovery_) { reset_recovery_node(); }
         diag_.report_error(current_.location, code, msg);
         has_error_ = true;
         in_error_recovery_ = true;
@@ -126,6 +131,7 @@ namespace gallt {
             return;
         }
 
+        if (!in_error_recovery_) { reset_recovery_node(); }
         diag_.report_error(loc, code, msg);
         has_error_ = true;
         in_error_recovery_ = true;
@@ -143,6 +149,7 @@ namespace gallt {
             return;
         }
 
+        if (!in_error_recovery_) { reset_recovery_node(); }
         diag_.report_error_template(loc, code, values);
         has_error_ = true;
         in_error_recovery_ = true;
@@ -177,8 +184,6 @@ namespace gallt {
     bool Parser::synchronize() {
         bool advanced = false;
         bool stopped_at_right_brace = false;
-        std::size_t skipped = 0;
-        SourceLocation skip_start = current_.location;
 
         while (current_.type != TokenType::EndOfFile) {
             if (current_.type == TokenType::RightBrace) {
@@ -202,23 +207,276 @@ namespace gallt {
 
             advance();
             advanced = true;
-            ++skipped;
         }
 
         if (!stopped_at_right_brace) {
             in_error_recovery_ = false;
         }
 
-        if (skipped > 1) {
-            diag_.report_note(skip_start, "skipped " + std::to_string(skipped) +
-                " token(s) while recovering from the previous error");
-        }
-
+        reset_recovery_node();
         return stopped_at_right_brace;
     }
 
     SourceLocation Parser::current_location() const {
         return current_.location;
+    }
+
+    std::string_view Parser::intern_recovery_lexeme(const std::string& text) {
+        recovery_lexemes_.push_back(text);
+        return recovery_lexemes_.back();
+    }
+
+    bool Parser::recovery_window_ok(std::size_t offset) const {
+        return offset <= kRecoveryWindow;
+    }
+
+    bool Parser::recovery_is_punctuation(TokenType type) {
+        const Token probe(type, SourceLocation{}, std::string_view());
+        return probe.is_operator() || probe.is_delimiter();
+    }
+
+    bool Parser::recovery_starts_statement(TokenType type) {
+        switch (type) {
+        case TokenType::Identifier:
+        case TokenType::Keyword_Int:
+        case TokenType::Keyword_Lint:
+        case TokenType::Keyword_Uint:
+        case TokenType::Keyword_Luint:
+        case TokenType::Keyword_Float:
+        case TokenType::Keyword_Double:
+        case TokenType::Keyword_Char:
+        case TokenType::Keyword_Uchar:
+        case TokenType::Keyword_Bool:
+        case TokenType::Keyword_String:
+        case TokenType::Keyword_File:
+        case TokenType::Keyword_Void:
+        case TokenType::Keyword_Const:
+        case TokenType::Keyword_Struct:
+        case TokenType::Keyword_Namespace:
+        case TokenType::Keyword_Addition:
+        case TokenType::Keyword_Access:
+        case TokenType::Keyword_Emit:
+        case TokenType::Keyword_If:
+        case TokenType::Keyword_For:
+        case TokenType::Keyword_While:
+        case TokenType::Keyword_Switch:
+        case TokenType::Keyword_Break:
+        case TokenType::Keyword_Continue:
+        case TokenType::Keyword_Fallthrough:
+        case TokenType::Keyword_Return:
+            return true;
+        default:
+            return false;
+        }
+    }
+
+    bool Parser::recovery_starts_expression(TokenType type) {
+        switch (type) {
+        case TokenType::Identifier:
+        case TokenType::IntegerLiteral:
+        case TokenType::FloatLiteral:
+        case TokenType::CharLiteral:
+        case TokenType::StringLiteral:
+        case TokenType::BoolLiteral:
+        case TokenType::Keyword_Null:
+        case TokenType::Keyword_Heap:
+        case TokenType::Keyword_Cast:
+        case TokenType::Keyword_Const:
+        case TokenType::Keyword_Generics:
+        case TokenType::LeftParen:
+        case TokenType::LeftBracket:
+        case TokenType::LeftBrace:
+        case TokenType::Plus:
+        case TokenType::Minus:
+        case TokenType::Star:
+        case TokenType::Tilde:
+        case TokenType::LogicalNot:
+        case TokenType::AddressOf:
+        case TokenType::Increment:
+        case TokenType::Decrement:
+            return true;
+        default:
+            return false;
+        }
+    }
+
+    bool Parser::recovery_is_noise(TokenType type) {
+        return type == TokenType::Semicolon || type == TokenType::Comma;
+    }
+
+    bool Parser::recovery_continues_parsing(bool closes_block) const {
+        if (!recovery_window_ok(3)) { return false; }
+
+        bool reached_end = false;
+
+        for (std::size_t k = 1; k <= 3; ++k) {
+            const Token token = lookahead(k);
+            if (token.type == TokenType::Unknown) { return false; }
+            if (token.type == TokenType::EndOfFile) {
+                if (!closes_block) { return false; }
+                reached_end = true;
+                break;
+            }
+            if (reached_end) { return false; }
+        }
+
+        return true;
+    }
+
+    void Parser::record_recovery(RecoveryKind kind, TokenType expected,
+        TokenType found, std::string expected_text, std::string found_text,
+        SourceLocation loc) {
+        RecoveryRecord record;
+        record.kind = kind;
+        record.expected = expected;
+        record.found = found;
+        record.expected_text = std::move(expected_text);
+        record.found_text = std::move(found_text);
+        record.location = loc;
+        recovery_records_.push_back(record);
+    }
+
+    bool Parser::apply_recovery_insert(TokenType type, const char* context) {
+        (void)context;
+        if (!recovery_is_punctuation(type)) { return false; }
+        const SourceLocation loc = current_.location;
+        const std::string text(token_type_to_string(type));
+        const Token inserted(type, loc, intern_recovery_lexeme(text));
+
+        tokens_.insert(tokens_.begin() + static_cast<std::ptrdiff_t>(token_index_),
+            inserted);
+        current_ = tokens_[token_index_];
+        has_peek_ = false;
+        in_error_recovery_ = false;
+        record_recovery(RecoveryKind::Insert, type, type, text, std::string(), loc);
+        return true;
+    }
+
+    bool Parser::apply_recovery_delete(const char* context) {
+        (void)context;
+        if (token_index_ >= tokens_.size() || tokens_.size() <= 1) { return false; }
+        const Token removed = tokens_[token_index_];
+        if (!recovery_is_punctuation(removed.type)) { return false; }
+        const std::string text(removed.lexeme);
+
+        tokens_.erase(tokens_.begin() + static_cast<std::ptrdiff_t>(token_index_));
+        reset_to(token_index_);
+        in_error_recovery_ = false;
+        record_recovery(RecoveryKind::Delete, TokenType::Unknown, removed.type,
+            std::string(), text, removed.location);
+        return true;
+    }
+
+    bool Parser::try_recover_expected(TokenType expected, const char* context) {
+        if (recovery_blocked_ || complexity_limit_hit_) { return false; }
+        if (expected == TokenType::Unknown || expected == TokenType::Newline ||
+            expected == TokenType::EndOfFile) {
+            recovery_blocked_ = true;
+            return false;
+        }
+        if (!recovery_window_ok(0) || !recovery_window_ok(3)) {
+            recovery_blocked_ = true;
+            return false;
+        }
+
+        const bool closes_block = expected == TokenType::RightBrace ||
+            expected == TokenType::RightParen || expected == TokenType::RightBracket;
+
+        if (recovery_attempts_ < kMaxRecoveryAttempts) {
+            ++recovery_attempts_;
+            const bool follower_is_safe = recovery_starts_statement(current_.type) ||
+                current_.type == TokenType::Newline ||
+                current_.type == TokenType::Semicolon ||
+                current_.type == TokenType::RightBrace ||
+                current_.type == TokenType::EndOfFile;
+            const bool insert_allowed = recovery_is_punctuation(expected) &&
+                ((expected == TokenType::Semicolon &&
+                    recovery_starts_statement(current_.type)) ||
+                    (closes_block && follower_is_safe));
+
+            if (insert_allowed && recovery_continues_parsing(closes_block)) {
+                return apply_recovery_insert(expected, context);
+            }
+        }
+
+        if (recovery_attempts_ < kMaxRecoveryAttempts) {
+            ++recovery_attempts_;
+            const Token next = lookahead(1);
+            const bool delete_allowed = recovery_is_punctuation(current_.type) &&
+                (next.type == expected || recovery_is_noise(current_.type));
+
+            if (delete_allowed && recovery_continues_parsing(closes_block) &&
+                apply_recovery_delete(context)) {
+                return true;
+            }
+        }
+
+        recovery_blocked_ = true;
+        return false;
+    }
+
+    bool Parser::try_recover_statement_end(const char* context) {
+        if (recovery_blocked_ || complexity_limit_hit_) { return false; }
+        if (recovery_attempts_ >= kMaxRecoveryAttempts) {
+            recovery_blocked_ = true;
+            return false;
+        }
+        if (!recovery_window_ok(0) || !recovery_window_ok(3)) {
+            recovery_blocked_ = true;
+            return false;
+        }
+        if (current_.type == TokenType::RightParen ||
+            current_.type == TokenType::RightBracket) {
+            ++recovery_attempts_;
+            return apply_recovery_delete(context);
+        }
+        if (!recovery_starts_statement(current_.type)) {
+            recovery_blocked_ = true;
+            return false;
+        }
+
+        ++recovery_attempts_;
+
+        if (!recovery_continues_parsing(false)) {
+            recovery_blocked_ = true;
+            return false;
+        }
+
+        return apply_recovery_insert(TokenType::Semicolon, context);
+    }
+
+    bool Parser::try_recover_primary_expression(const char* context) {
+        if (recovery_blocked_ || complexity_limit_hit_) { return false; }
+        if (current_.type == TokenType::Unknown ||
+            current_.type == TokenType::EndOfFile ||
+            current_.type == TokenType::Newline) {
+            return false;
+        }
+        if (recovery_starts_expression(current_.type)) { return false; }
+        if (!recovery_starts_expression(lookahead(1).type)) { return false; }
+        if (!recovery_is_punctuation(current_.type)) { return false; }
+        if (!recovery_window_ok(0) || !recovery_window_ok(3)) {
+            recovery_blocked_ = true;
+            return false;
+        }
+        if (recovery_attempts_ >= kMaxRecoveryAttempts) {
+            recovery_blocked_ = true;
+            return false;
+        }
+        ++recovery_attempts_;
+
+        if (!recovery_continues_parsing(false)) {
+            recovery_blocked_ = true;
+            return false;
+        }
+
+        report_error(ErrorCode::ExpressionSyntaxError, context);
+        return apply_recovery_delete(context);
+    }
+
+    void Parser::reset_recovery_node() {
+        recovery_attempts_ = 0;
+        recovery_blocked_ = false;
     }
 
     std::unique_ptr<Program> Parser::parse() {
@@ -309,7 +567,11 @@ namespace gallt {
         case TokenType::Keyword_If:
         case TokenType::Keyword_For:
         case TokenType::Keyword_While:
-        case TokenType::Keyword_Break: {
+        case TokenType::Keyword_Switch:
+        case TokenType::Keyword_Case:
+        case TokenType::Keyword_Break:
+        case TokenType::Keyword_Continue:
+        case TokenType::Keyword_Fallthrough: {
             report_error_template(ErrorCode::StatementInGlobalScope, {});
             while (current_.type != TokenType::Newline &&
                 current_.type != TokenType::EndOfFile) {
@@ -636,8 +898,9 @@ namespace gallt {
             if (member == nullptr && !in_error_recovery_) {
                 if (at_struct_attribute()) {
                     member = parse_struct_definition();
-                } else if (current_.type == TokenType::Identifier &&
-                    at_operator_definition()) {
+                } else if ((current_.type == TokenType::Identifier ||
+                    is_type_start_keyword(current_.type)) &&
+                    looks_like_operator_definition()) {
                     member = parse_operator_definition();
                 } else if (current_.type == TokenType::Identifier &&
                     looks_like_generic_instantiation() && !at_declaration_start()) {
@@ -771,8 +1034,39 @@ namespace gallt {
             return parse_for_statement();
         case TokenType::Keyword_While:
             return parse_while_statement();
+        case TokenType::Keyword_Switch:
+            return parse_switch_statement();
         case TokenType::Keyword_Break:
             return parse_break_statement();
+        case TokenType::Keyword_Continue:
+            return parse_continue_statement();
+        case TokenType::Keyword_Fallthrough:
+            return parse_fallthrough_statement();
+        case TokenType::Keyword_Case:
+            report_error_template(ErrorCode::ExpressionSyntaxError,
+                { std::string("case") });
+            {
+                int nested_braces = 0;
+
+                while (current_.type != TokenType::EndOfFile) {
+                    if (current_.type == TokenType::LeftBrace) {
+                        ++nested_braces;
+                    } else if (current_.type == TokenType::RightBrace) {
+                        if (nested_braces == 0) { break; }
+                        --nested_braces;
+                    } else if (nested_braces == 0 &&
+                        (current_.type == TokenType::Newline ||
+                            current_.type == TokenType::Semicolon)) {
+                        break;
+                    }
+                    advance();
+                }
+
+                if (current_.type != TokenType::RightBrace) {
+                    advance();
+                }
+            }
+            return nullptr;
         case TokenType::Keyword_Return:
             return parse_return_statement();
         case TokenType::LeftBrace:
@@ -1132,11 +1426,140 @@ namespace gallt {
         return std::make_unique<WhileStatement>(loc, std::move(cond), std::move(body));
     }
 
-    std::unique_ptr<BreakStatement> Parser::parse_break_statement() {
+    std::unique_ptr<SwitchCaseStatement> Parser::parse_switch_statement() {
+        SourceLocation loc = current_location();
+        expect(TokenType::Keyword_Switch, "expected 'switch'");
+
+        if (!expect(TokenType::LeftParen, "expected '(' after 'switch'")) {
+            return nullptr;
+        }
+        auto cond = parse_expression();
+
+        if (cond == nullptr) {
+            report_error(ErrorCode::ExpressionSyntaxError,
+                "expected switch condition expression");
+            return nullptr;
+        }
+
+        if (!expect(TokenType::RightParen, "expected ')' after switch condition")) {
+            return nullptr;
+        }
+
+        if (current_.type != TokenType::LeftBrace) {
+            report_error(ErrorCode::MissingBraces,
+                "switch statement must be followed by a block");
+            return nullptr;
+        }
+
+        advance();
+        auto node = std::make_unique<SwitchCaseStatement>(loc, std::move(cond));
+        SwitchCaseStatement::Clause* pending_default = nullptr;
+
+        while (current_.type != TokenType::RightBrace &&
+            current_.type != TokenType::EndOfFile) {
+            skip_newlines();
+
+            if (current_.type == TokenType::RightBrace ||
+                current_.type == TokenType::EndOfFile) {
+                break;
+            }
+
+            if (in_error_recovery_) {
+                synchronize();
+                continue;
+            }
+
+            if (current_.type == TokenType::Keyword_Case) {
+                SourceLocation clause_loc = current_location();
+                advance();
+
+                if (!expect(TokenType::LeftParen, "expected '(' after 'case'")) {
+                    return nullptr;
+                }
+
+                auto case_cond = parse_expression();
+
+                if (case_cond == nullptr) {
+                    report_error(ErrorCode::ExpressionSyntaxError,
+                        "expected case condition expression");
+                    return nullptr;
+                }
+
+                if (!expect(TokenType::RightParen, "expected ')' after case condition")) {
+                    return nullptr;
+                }
+
+                if (current_.type != TokenType::LeftBrace) {
+                    report_error(ErrorCode::MissingBraces,
+                        "case branch must be followed by a block");
+                    return nullptr;
+                }
+
+                auto body = parse_block();
+
+                if (body == nullptr) {
+                    return nullptr;
+                }
+
+                SwitchCaseStatement::Clause clause;
+                clause.is_default = false;
+                clause.condition = std::move(case_cond);
+                clause.statements = std::move(body->statements);
+                clause.location = clause_loc;
+                node->clauses.push_back(std::move(clause));
+                pending_default = nullptr;
+                continue;
+            }
+
+            auto stmt = parse_statement();
+
+            if (stmt == nullptr) {
+                if (!in_error_recovery_) {
+                    report_error(ErrorCode::ExpressionSyntaxError,
+                        "failed to parse statement in switch-case block");
+                }
+                synchronize();
+                continue;
+            }
+
+            if (pending_default == nullptr) {
+                SwitchCaseStatement::Clause clause;
+                clause.is_default = true;
+                clause.location = stmt->location;
+                node->clauses.push_back(std::move(clause));
+                pending_default = &node->clauses.back();
+            }
+
+            pending_default->statements.push_back(std::move(stmt));
+        }
+
+        if (!expect(TokenType::RightBrace, "expected '}' to close switch-case")) {
+            return nullptr;
+        }
+
+        skip_newlines();
+        return node;
+    }
+
+        std::unique_ptr<BreakStatement> Parser::parse_break_statement() {
         SourceLocation loc = current_location();
         expect(TokenType::Keyword_Break, "expected 'break'");
         expect_stmt_end("break statement");
         return std::make_unique<BreakStatement>(loc);
+    }
+
+    std::unique_ptr<ContinueStatement> Parser::parse_continue_statement() {
+        SourceLocation loc = current_location();
+        expect(TokenType::Keyword_Continue, "expected 'continue'");
+        expect_stmt_end("continue statement");
+        return std::make_unique<ContinueStatement>(loc);
+    }
+
+    std::unique_ptr<FallthroughStatement> Parser::parse_fallthrough_statement() {
+        SourceLocation loc = current_location();
+        expect(TokenType::Keyword_Fallthrough, "expected 'fallthrough'");
+        expect_stmt_end("fallthrough statement");
+        return std::make_unique<FallthroughStatement>(loc);
     }
 
     std::unique_ptr<ReturnStatement> Parser::parse_return_statement() {
@@ -1271,6 +1694,7 @@ namespace gallt {
 
         report_error(ErrorCode::ExpressionSyntaxError,
             context + " must end with ';' or newline");
+        if (try_recover_statement_end(context.c_str())) { return true; }
         return false;
     }
 

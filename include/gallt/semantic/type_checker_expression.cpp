@@ -108,7 +108,7 @@ namespace gallt {
         if (expr->op == AST::AssignmentExpression::Operator::Assign &&
             left_type.kind == TypeKind::Struct && right_type.kind == TypeKind::Struct &&
             left_type.struct_name == right_type.struct_name) {
-            if (is_move_expression(expr->right.get())) {
+            if (is_move_source(expr->right.get())) {
                 if (!type_is_movable(left_type)) {
                     report_error_template(expr->location, ErrorCode::NoMoveViolation,
                         { left_type.struct_name });
@@ -763,6 +763,18 @@ namespace gallt {
     }
 
     AST::Type TypeChecker::check_postfix(AST::PostfixExpression* expr) {
+        {
+            auto resolved = resolved_overload_calls_.find(expr);
+
+            if (resolved != resolved_overload_calls_.end()) {
+                auto cached = expression_types_.find(expr);
+
+                if (cached != expression_types_.end()) {
+                    return cached->second;
+                }
+            }
+        }
+
         if (expr->op == AST::PostfixExpression::Operator::Subscript ||
             expr->op == AST::PostfixExpression::Operator::Dot) {
             std::string base_name;
@@ -913,6 +925,7 @@ namespace gallt {
                 if (set != nullptr && set->size() > 1) {
                     Symbol* chosen = resolve_overload_call(func_name, expr, direct_primary);
                     if (chosen == nullptr) { return AST::Type::make_error(); }
+                    resolved_overload_calls_.insert(expr);
                     check_constexpr_call(expr, *chosen);
                     return chosen->type;
                 }
@@ -1265,7 +1278,7 @@ namespace gallt {
                     if (func_type.parameter_types[i].kind == TypeKind::Struct &&
                         arg_type.kind == TypeKind::Struct &&
                         arg_type.struct_name == func_type.parameter_types[i].struct_name) {
-                        if (is_move_expression(expr->arguments[i].get())) {
+                        if (is_move_source(expr->arguments[i].get())) {
                             if (!type_is_movable(func_type.parameter_types[i])) {
                                 report_error_template(expr->arguments[i]->location,
                                     ErrorCode::NoMoveViolation,
@@ -1404,20 +1417,11 @@ namespace gallt {
         case AST::PostfixExpression::Operator::Arrow: {
             if (base_type.kind == TypeKind::Struct &&
                operator_overloads_.count("operator->") != 0) {
-                std::vector<AST::Type> addressable;
-                if (expr->base->is_lvalue()) {
-                    addressable.push_back(AST::Type::make_pointer(
-                       std::make_shared<AST::Type>(base_type)));
-                }
-                std::vector<AST::Type> by_value;
-
-                by_value.push_back(base_type);
+                std::vector<AST::Expression*> arrow_operands = { expr->base.get() };
+                std::vector<AST::Type> arrow_operand_types = { base_type };
                 AST::FunctionDefinition* arrow_operator =
-                   resolve_user_operator("->", by_value, expr->location);
-                if (arrow_operator == nullptr && !addressable.empty()) {
-                    arrow_operator = resolve_user_operator("->", addressable,
+                   resolve_user_operator("->", arrow_operands, arrow_operand_types,
                        expr->location);
-                }
                 if (arrow_operator != nullptr) {
                     resolved_operators_[expr->base.get()] = arrow_operator;
                     base_type = arrow_operator->return_type;

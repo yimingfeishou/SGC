@@ -810,10 +810,46 @@ namespace gallt {
             virtual ~WhileStatement() noexcept = default;
         };
 
+        class SwitchCaseStatement : public Statement {
+        public:
+            struct Clause {
+                bool is_default = false;
+                std::unique_ptr<Expression> condition;
+                std::vector<std::unique_ptr<Statement>> statements;
+                SourceLocation location;
+                bool constant_value_known = false;
+                long long constant_value_bits = 0;
+            };
+
+            std::unique_ptr<Expression> condition;
+            std::vector<Clause> clauses;
+            bool jump_table_eligible = false;
+            Type jump_table_source_type;
+            Type jump_table_type;
+
+            SwitchCaseStatement(SourceLocation loc,
+                std::unique_ptr<Expression> cond)
+                : Node(loc), Statement(loc), condition(std::move(cond)) {
+            }
+            virtual ~SwitchCaseStatement() noexcept = default;
+        };
+
         class BreakStatement : public Statement {
         public:
             explicit BreakStatement(SourceLocation loc) : Node(loc), Statement(loc) {}
             virtual ~BreakStatement() noexcept = default;
+        };
+
+        class ContinueStatement : public Statement {
+        public:
+            explicit ContinueStatement(SourceLocation loc) : Node(loc), Statement(loc) {}
+            virtual ~ContinueStatement() noexcept = default;
+        };
+
+        class FallthroughStatement : public Statement {
+        public:
+            explicit FallthroughStatement(SourceLocation loc) : Node(loc), Statement(loc) {}
+            virtual ~FallthroughStatement() noexcept = default;
         };
 
         class ReturnStatement : public Statement {
@@ -1185,6 +1221,9 @@ namespace gallt {
             virtual ~PrimaryExpression() noexcept = default;
 
             bool is_lvalue() const override {
+                if (kind == Kind::Parens) {
+                    return paren_expr != nullptr && paren_expr->is_lvalue();
+                }
                 return kind == Kind::Identifier;
             }
         };

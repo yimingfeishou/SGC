@@ -1,6 +1,7 @@
 #include "codegen.hpp"
 #include "codegen_detail.hpp"
 #include "../semantic/constant_folding.hpp"
+#include "../semantic/lifecycle_transfer.hpp"
 #include <algorithm>
 #include <charconv>
 #include <cmath>
@@ -312,6 +313,8 @@ namespace gallt {
     }
 
     void CodeGenerator::emit_variable_declaration(AST::VariableDeclaration* decl) {
+        require_lifecycle_functions(decl->type);
+
         if (decl->type.is_const) {
             LocalInfo constant;
             if (fold_constant_declaration(decl, constant)) {
@@ -389,7 +392,8 @@ namespace gallt {
             }
 
             ExprValue value = gen_expr(expr_init->expr.get());
-            emit_aggregate_assign(address, decl->type, value);
+            emit_aggregate_assign(address, decl->type, value, false,
+                lifecycle_transfer::is_move_source(expr_init->expr.get()));
             return;
         }
 

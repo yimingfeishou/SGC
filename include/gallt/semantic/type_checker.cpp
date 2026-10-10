@@ -22,10 +22,10 @@ namespace gallt {
         const std::unordered_map<const AST::Expression*,
             std::tuple<std::string, std::size_t, AST::Type>>&
             expression_argument_casts,
-        bool require_main)
+        bool require_main, bool extended_semantics)
         : diag_(diag), expression_free_identifiers_(expression_free_identifiers),
         expression_argument_casts_(expression_argument_casts),
-        require_main_(require_main) {
+        require_main_(require_main), extended_semantics_(extended_semantics) {
         configure_constexpr_host();
     }
 
@@ -57,6 +57,7 @@ namespace gallt {
         }
 
         collect_operator_overloads();
+        preregister_generated_functions();
 
         for (auto& top : program->top_levels) {
             if (auto* func = dynamic_cast<AST::FunctionDefinition*>(top.get())) {
@@ -86,6 +87,20 @@ namespace gallt {
         exit_scope();
 
         return !diag_.has_errors();
+    }
+
+    void TypeChecker::preregister_generated_functions() {
+        for (auto& top : program_->top_levels) {
+            auto* func = dynamic_cast<AST::FunctionDefinition*>(top.get());
+            if (func == nullptr) {
+                continue;
+            }
+            if (func->name.rfind("__sgc_", 0) != 0) {
+                continue;
+            }
+            preregistered_functions_.insert(func);
+            register_function_symbol(func);
+        }
     }
 
     class TypeChecker::NodeChecker : public AST::AstRewriter {
@@ -173,8 +188,23 @@ namespace gallt {
             return false;
         }
 
+        bool EnterSwitchCaseStatement(AST::SwitchCaseStatement* node) override {
+            owner_.check_switch_case_statement(node);
+            return false;
+        }
+
         bool EnterBreakStatement(AST::BreakStatement* node) override {
             owner_.check_break_statement(node);
+            return false;
+        }
+
+        bool EnterContinueStatement(AST::ContinueStatement* node) override {
+            owner_.check_continue_statement(node);
+            return false;
+        }
+
+        bool EnterFallthroughStatement(AST::FallthroughStatement* node) override {
+            owner_.check_fallthrough_statement(node);
             return false;
         }
 

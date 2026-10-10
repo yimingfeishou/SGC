@@ -24,7 +24,11 @@ namespace gallt {
                 {"else", TokenType::Keyword_Else},
                 {"for", TokenType::Keyword_For},
                 {"while", TokenType::Keyword_While},
+                {"switch", TokenType::Keyword_Switch},
+                {"case", TokenType::Keyword_Case},
+                {"fallthrough", TokenType::Keyword_Fallthrough},
                 {"break", TokenType::Keyword_Break},
+                {"continue", TokenType::Keyword_Continue},
                 {"return", TokenType::Keyword_Return},
                 {"guide", TokenType::Keyword_Guide},
                 {"clib", TokenType::Keyword_Clib},
@@ -64,7 +68,11 @@ namespace gallt {
         case TokenType::Keyword_Else: return "else";
         case TokenType::Keyword_For: return "for";
         case TokenType::Keyword_While: return "while";
+        case TokenType::Keyword_Switch: return "switch";
+        case TokenType::Keyword_Case: return "case";
+        case TokenType::Keyword_Fallthrough: return "fallthrough";
         case TokenType::Keyword_Break: return "break";
+        case TokenType::Keyword_Continue: return "continue";
         case TokenType::Keyword_Return: return "return";
         case TokenType::Keyword_Guide: return "guide";
         case TokenType::Keyword_Clib: return "clib";

@@ -291,6 +291,19 @@ namespace gallt {
             return;
         }
 
+        if (auto* statement = dynamic_cast<const SwitchCaseStatement*>(stmt)) {
+            validate_constexpr_expression(statement->condition.get());
+
+            for (const SwitchCaseStatement::Clause& clause : statement->clauses) {
+                validate_constexpr_expression(clause.condition.get());
+
+                for (const std::unique_ptr<Statement>& child : clause.statements) {
+                    validate_constexpr_statement(child.get());
+                }
+            }
+            return;
+        }
+
         if (auto* statement = dynamic_cast<const ReturnStatement*>(stmt)) {
             validate_constexpr_expression(statement->value.get());
             return;
@@ -302,6 +315,8 @@ namespace gallt {
         }
 
         if (dynamic_cast<const BreakStatement*>(stmt) != nullptr ||
+            dynamic_cast<const ContinueStatement*>(stmt) != nullptr ||
+            dynamic_cast<const FallthroughStatement*>(stmt) != nullptr ||
             dynamic_cast<const EmptyStatement*>(stmt) != nullptr) {
             return;
         }

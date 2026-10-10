@@ -7,6 +7,8 @@
 #include <vector>
 #include <memory>
 #include <optional>
+#include <deque>
+#include <string_view>
 #include <unordered_set>
 
 namespace gallt {
@@ -63,6 +65,44 @@ namespace gallt {
         std::size_t suppressed_error_count_ = 0;
         int block_depth_ = 0;
         int initializer_depth_ = 0;
+
+        static constexpr std::size_t kRecoveryWindow = 10;
+        static constexpr int kMaxRecoveryAttempts = 3;
+
+        enum class RecoveryKind {
+            Insert,
+            Delete
+        };
+
+        struct RecoveryRecord {
+            RecoveryKind kind = RecoveryKind::Insert;
+            TokenType expected = TokenType::Unknown;
+            TokenType found = TokenType::Unknown;
+            std::string expected_text;
+            std::string found_text;
+            SourceLocation location;
+        };
+
+        std::deque<std::string> recovery_lexemes_;
+        std::vector<RecoveryRecord> recovery_records_;
+        int recovery_attempts_ = 0;
+        bool recovery_blocked_ = false;
+
+        std::string_view intern_recovery_lexeme(const std::string& text);
+        bool recovery_window_ok(std::size_t offset) const;
+        bool recovery_continues_parsing(bool closes_block) const;
+        static bool recovery_is_punctuation(TokenType type);
+        static bool recovery_starts_statement(TokenType type);
+        static bool recovery_starts_expression(TokenType type);
+        static bool recovery_is_noise(TokenType type);
+        void record_recovery(RecoveryKind kind, TokenType expected, TokenType found,
+            std::string expected_text, std::string found_text, SourceLocation loc);
+        bool apply_recovery_insert(TokenType type, const char* context);
+        bool apply_recovery_delete(const char* context);
+        bool try_recover_expected(TokenType expected, const char* context);
+        bool try_recover_statement_end(const char* context);
+        bool try_recover_primary_expression(const char* context);
+        void reset_recovery_node();
 
         bool in_error_recovery_ = false;
         int generic_ct_depth_ = 0;
@@ -148,7 +188,10 @@ namespace gallt {
         std::unique_ptr<AST::IfStatement> parse_if_statement(bool compile_time = false);
         std::unique_ptr<AST::ForStatement> parse_for_statement();
         std::unique_ptr<AST::WhileStatement> parse_while_statement();
+        std::unique_ptr<AST::SwitchCaseStatement> parse_switch_statement();
         std::unique_ptr<AST::BreakStatement> parse_break_statement();
+        std::unique_ptr<AST::ContinueStatement> parse_continue_statement();
+        std::unique_ptr<AST::FallthroughStatement> parse_fallthrough_statement();
         std::unique_ptr<AST::ReturnStatement> parse_return_statement();
         std::unique_ptr<AST::Block> parse_block();
         std::unique_ptr<AST::ExpressionStatement> parse_expression_statement();

@@ -88,6 +88,13 @@ namespace {
 
         void LeaveForStatement(ForStatement*) override { leave_scope(); }
 
+        bool EnterSwitchCaseStatement(SwitchCaseStatement*) override {
+            marks_.push_back(introduced_.size());
+            return true;
+        }
+
+        void LeaveSwitchCaseStatement(SwitchCaseStatement*) override { leave_scope(); }
+
         void LeaveVariableDeclaration(VariableDeclaration* node) override {
             declare_local(node->name);
         }
@@ -193,45 +200,60 @@ namespace {
     }
 
     void LifecycleLowering::lower_special_members() {
-        std::vector<std::unique_ptr<TopLevel>> generated;
+        std::unordered_map<const AST::TopLevel*,
+            std::vector<std::unique_ptr<TopLevel>>> generated;
+        std::vector<std::unique_ptr<TopLevel>> orphaned;
 
-        for (auto& pair : structs_) {
-            StructInfo& info = pair.second;
+        for (AST::StructDefinition* ordered : struct_order_) {
+            auto found = structs_.find(ordered->name);
+            if (found == structs_.end()) { continue; }
+            StructInfo& info = found->second;
             StructDefinition* def = info.def;
+            std::vector<std::unique_ptr<TopLevel>>* bucket = nullptr;
+
+            if (info.anchor != nullptr) {
+                bucket = &generated[info.anchor];
+            } else {
+                bucket = &orphaned;
+            }
+
+            auto append = [&](std::unique_ptr<FunctionDefinition> func) {
+                bucket->push_back(std::move(func));
+            };
 
             for (std::size_t i = 0; i < info.constructors.size(); ++i) {
                 auto func = lower_special_member(def, info.constructors[i],
                     info.ctor_names[i]);
-                generated.push_back(std::move(func));
+                append(std::move(func));
             }
 
             if (info.destructor != nullptr) {
                 auto func = lower_special_member(def, info.destructor, info.dtor_name);
-                generated.push_back(std::move(func));
+                append(std::move(func));
             }
 
             if (info.copy_constructor != nullptr) {
                 auto func = lower_special_member(def, info.copy_constructor,
                     info.copy_ctor_name);
-                generated.push_back(std::move(func));
+                append(std::move(func));
             }
 
             if (info.move_constructor != nullptr) {
                 auto func = lower_special_member(def, info.move_constructor,
                     info.move_ctor_name);
-                generated.push_back(std::move(func));
+                append(std::move(func));
             }
 
             if (info.copy_assignment != nullptr) {
                 auto func = lower_special_member(def, info.copy_assignment,
                     info.copy_assign_name);
-                generated.push_back(std::move(func));
+                append(std::move(func));
             }
 
             if (info.move_assignment != nullptr) {
                 auto func = lower_special_member(def, info.move_assignment,
                     info.move_assign_name);
-                generated.push_back(std::move(func));
+                append(std::move(func));
             }
             def->destructor_name = (info.destructor != nullptr) ? info.dtor_name : std::string();
             def->copy_constructor_name = info.copy_ctor_name;
@@ -247,11 +269,26 @@ namespace {
                 def->constructor_param_types.push_back(ctor->parameters);
             }
         }
-        std::vector<std::unique_ptr<TopLevel>> merged;
-        merged.reserve(program_->top_levels.size() + generated.size());
 
-        for (auto& node : generated) { merged.push_back(std::move(node)); }
-        for (auto& node : program_->top_levels) { merged.push_back(std::move(node)); }
+        std::vector<std::unique_ptr<TopLevel>> merged;
+        merged.reserve(program_->top_levels.size() + orphaned.size());
+
+        for (auto& node : program_->top_levels) {
+            AST::TopLevel* anchor = node.get();
+            merged.push_back(std::move(node));
+
+            auto found = generated.find(anchor);
+
+            if (found == generated.end()) { continue; }
+
+            for (auto& extra : found->second) {
+                merged.push_back(std::move(extra));
+            }
+        }
+
+        for (auto& extra : orphaned) {
+            merged.push_back(std::move(extra));
+        }
 
         program_->top_levels = std::move(merged);
     }
@@ -466,6 +503,67 @@ namespace {
 
         auto* expr_init2 = dynamic_cast<ExpressionInitializer*>(decl->initializer.get());
         if (expr_init2 == nullptr) {
+            auto* brace = dynamic_cast<ArrayInitializer*>(decl->initializer.get());
+            const bool has_brace_elements = brace != nullptr && !brace->elements.empty();
+
+            if (has_brace_elements) {
+                if (!info.constructors.empty()) {
+                    std::vector<Expression*> args;
+                    bool all_expressions = true;
+
+                    for (auto& element : brace->elements) {
+                        auto* expression =
+                            dynamic_cast<ExpressionInitializer*>(element.get());
+
+                        if (expression == nullptr) {
+                            all_expressions = false;
+                            break;
+                        }
+
+                        args.push_back(expression->expr.get());
+                    }
+
+                    if (all_expressions) {
+                        bool ambiguous = false;
+                        SpecialMemberFunction* ctor =
+                            select_constructor(info, args, &ambiguous);
+
+                        if (ambiguous) {
+                            report_template(decl->location,
+                                ErrorCode::SpecialMemberAmbiguous, { struct_name });
+                            return;
+                        }
+
+                        if (ctor != nullptr) {
+                            std::size_t index = static_cast<std::size_t>(
+                                std::find(info.constructors.begin(),
+                                    info.constructors.end(), ctor)
+                                - info.constructors.begin());
+                            auto call = std::make_unique<PostfixExpression>(
+                                decl->location,
+                                std::make_unique<PrimaryExpression>(decl->location,
+                                    info.ctor_names[index]),
+                                PostfixExpression::Operator::FunctionCall);
+                            call->arguments.push_back(make_self_address());
+
+                            for (auto& element : brace->elements) {
+                                auto* expression =
+                                    static_cast<ExpressionInitializer*>(element.get());
+                                call->arguments.push_back(std::move(expression->expr));
+                            }
+
+                            decl->initializer.reset();
+                            decl->constructed_by_lowering = true;
+                            insert_after.push_back(std::make_unique<ExpressionStatement>(
+                                decl->location, std::move(call)));
+                            return;
+                        }
+                    }
+                }
+
+                return;
+            }
+
             if (!info.constructors.empty()) {
                 for (std::size_t i = 0; i < info.constructors.size(); ++i) {
                     std::size_t required = info.constructors[i]->parameters.size();
@@ -491,31 +589,6 @@ namespace {
         }
 
         auto* call = dynamic_cast<PostfixExpression*>(expr_init2->expr.get());
-        if (auto* cm = dynamic_cast<PrimaryExpression*>(expr_init2->expr.get())) {
-            if (cm->kind == PrimaryExpression::Kind::CopyMove) {
-                bool is_move = cm->copy_move_kind == PrimaryExpression::CopyMoveKind::Move;
-                bool is_copy = cm->copy_move_kind == PrimaryExpression::CopyMoveKind::Copy;
-                const std::string* special = nullptr;
-                if (is_move && info.move_constructor != nullptr) { special = &info.move_ctor_name; }
-                if (is_copy && info.copy_constructor != nullptr) { special = &info.copy_ctor_name; }
-
-                if (special != nullptr) {
-                    std::unique_ptr<Expression> source_operand = std::move(cm->paren_expr);
-
-                    if (auto* src_prim = dynamic_cast<PrimaryExpression*>(source_operand.get())) {
-                        if (src_prim->kind == PrimaryExpression::Kind::Identifier) {
-                            source_operand = std::make_unique<UnaryExpression>(cm->location,
-                                UnaryExpression::Operator::AddressOf,
-                            std::move(source_operand));
-                        }
-                    }
-
-                    emit_self_call(*special, std::move(source_operand), cm->location);
-                    return;
-                }
-                return;
-            }
-        }
 
         if (call == nullptr || call->op != PostfixExpression::Operator::FunctionCall) { return; }
         auto* callee = dynamic_cast<PrimaryExpression*>(call->base.get());
@@ -588,32 +661,6 @@ namespace {
             return;
         }
         expr_init2->expr = std::move(source);
-    }
-
-    void LifecycleLowering::rewrite_assignment_call(ExpressionStatement* stmt,
-        AssignmentExpression* assign, const std::string& func_name) {
-        std::unique_ptr<Expression> target = std::move(assign->left);
-        auto address = [](std::unique_ptr<Expression> operand) -> std::unique_ptr<Expression> {
-            if (auto* prim = dynamic_cast<PrimaryExpression*>(operand.get())) {
-                if (prim->kind == PrimaryExpression::Kind::Identifier) {
-                    return std::make_unique<UnaryExpression>(operand->location,
-                        UnaryExpression::Operator::AddressOf, std::move(operand));
-                }
-            }
-            return operand;
-        };
-        std::unique_ptr<Expression> source = std::move(assign->right);
-        if (auto* cm = dynamic_cast<PrimaryExpression*>(source.get())) {
-            if (cm->kind == PrimaryExpression::Kind::CopyMove) {
-                source = std::move(cm->paren_expr);
-            }
-        }
-        auto call = std::make_unique<PostfixExpression>(stmt->location,
-            std::make_unique<PrimaryExpression>(stmt->location, func_name),
-            PostfixExpression::Operator::FunctionCall);
-        call->arguments.push_back(address(std::move(target)));
-        call->arguments.push_back(address(std::move(source)));
-        stmt->expr = std::move(call);
     }
 
     class LifecycleLowering::ExpressionRewriter : public AstRewriter {
@@ -918,6 +965,45 @@ namespace {
             return false;
         }
 
+        bool EnterSwitchCaseStatement(SwitchCaseStatement* node) override {
+            owner_.rewrite_expression(node->condition.get());
+
+            for (SwitchCaseStatement::Clause& clause : node->clauses) {
+                owner_.rewrite_expression(clause.condition.get());
+                std::vector<std::unique_ptr<Statement>> rewritten;
+
+                for (std::unique_ptr<Statement>& child : clause.statements) {
+                    std::vector<std::unique_ptr<Statement>> insert_after;
+
+                    if (auto* vd = dynamic_cast<VariableDeclaration*>(child.get())) {
+                        owner_.local_types_[vd->name] = vd->type;
+
+                        if (vd->type.kind == TypeKind::Pointer) {
+                            if (auto* expr_init = dynamic_cast<ExpressionInitializer*>(
+                                vd->initializer.get())) {
+                                owner_.track_pointer_source(vd->name,
+                                    expr_init->expr.get());
+                            }
+                        }
+
+                        owner_.rewrite_declaration(vd, insert_after);
+                    } else {
+                        owner_.rewrite_statement(child.get());
+                    }
+
+                    rewritten.push_back(std::move(child));
+
+                    for (std::unique_ptr<Statement>& extra : insert_after) {
+                        rewritten.push_back(std::move(extra));
+                    }
+                }
+
+                clause.statements = std::move(rewritten);
+            }
+
+            return false;
+        }
+
         bool EnterReturnStatement(ReturnStatement* node) override {
             owner_.rewrite_expression(node->value.get());
 
@@ -993,43 +1079,6 @@ namespace {
                             type_it->second.kind == TypeKind::Pointer) {
                             owner_.track_pointer_source(left_id->identifier,
                                 assign->right.get());
-                        }
-                    }
-
-                    if (left_id != nullptr &&
-                        left_id->kind == PrimaryExpression::Kind::Identifier) {
-                        auto type_it = owner_.local_types_.find(left_id->identifier);
-
-                        if (type_it != owner_.local_types_.end() &&
-                            type_it->second.kind == TypeKind::Struct) {
-                            auto info_it = owner_.structs_.find(
-                                type_it->second.struct_name);
-
-                            if (info_it != owner_.structs_.end()) {
-                                StructInfo& info = info_it->second;
-                                bool is_move = false;
-
-                                if (auto* cm = dynamic_cast<PrimaryExpression*>(
-                                    assign->right.get())) {
-                                    if (cm->kind == PrimaryExpression::Kind::CopyMove &&
-                                        cm->copy_move_kind ==
-                                        PrimaryExpression::CopyMoveKind::Move) {
-                                        is_move = true;
-                                    }
-                                }
-
-                                if (is_move && info.move_assignment != nullptr) {
-                                    owner_.rewrite_assignment_call(node, assign,
-                                        info.move_assign_name);
-                                    return false;
-                                }
-
-                                if (!is_move && info.copy_assignment != nullptr) {
-                                    owner_.rewrite_assignment_call(node, assign,
-                                        info.copy_assign_name);
-                                    return false;
-                                }
-                            }
                         }
                     }
                 }

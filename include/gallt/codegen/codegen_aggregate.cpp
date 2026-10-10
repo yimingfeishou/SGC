@@ -1,6 +1,7 @@
 #include "codegen.hpp"
 #include "codegen_detail.hpp"
 #include "../semantic/constant_folding.hpp"
+#include "../semantic/lifecycle_transfer.hpp"
 #include <algorithm>
 #include <charconv>
 #include <cmath>
@@ -41,6 +42,7 @@ namespace gallt {
             if (it == struct_by_name_.end()) { return; }
             std::string struct_ir = llvm_type(type);
             const AST::StructDefinition* def = it->second;
+            require_lifecycle_functions(def);
 
             if (!def->destructor_name.empty()) {
                 std::string callee = function_reference(def->destructor_name);
@@ -74,7 +76,8 @@ namespace gallt {
     }
 
     void CodeGenerator::emit_aggregate_assign(const std::string& dest_address,
-        const AST::Type& dest_type, ExprValue& source, bool is_assignment) {
+        const AST::Type& dest_type, ExprValue& source, bool is_assignment,
+        bool prefer_move) {
         if (dest_type.kind == TypeKind::String) {
             emit_string_assign(dest_address, source);
             destroy_owned_string(source);
@@ -110,7 +113,11 @@ namespace gallt {
                 emit_line("store " + type_text + " " + loaded + ", ptr " + source_storage);
             }
 
-            emit_memberwise_copy(dest_type, dest_address, source_storage, is_assignment);
+            if (prefer_move) {
+                emit_memberwise_move(dest_type, dest_address, source_storage, is_assignment);
+            } else {
+                emit_memberwise_copy(dest_type, dest_address, source_storage, is_assignment);
+            }
         }
     }
 
@@ -134,6 +141,7 @@ namespace gallt {
     bool CodeGenerator::emit_struct_default_constructor(const std::string& address,
         const AST::StructDefinition* def, SourceLocation loc) {
         if (def == nullptr) { return false; }
+        require_lifecycle_functions(def);
         if (lifecycle_owner_ == def) { return false; }
         const int ctor_index = default_constructor_index(def);
 
@@ -176,13 +184,19 @@ namespace gallt {
         std::string call_text = "call void " + callee + "(ptr " + address;
 
         for (std::size_t i = 0; i < ctor_args.size(); ++i) {
-            ExprValue value = gen_expr(ctor_args[i]);
+            bool explicit_move = false;
+            bool explicit_copy = false;
+            AST::Expression* argument = unwrap_copy_move_argument(ctor_args[i],
+                explicit_move, explicit_copy);
+            ExprValue value = gen_expr(argument);
             AST::Type want = (params != nullptr && i < params->size())
                 ? (*params)[i] : value.type;
             if (aggregate_parameter_uses_pointer(want) &&
                 (value.type.kind == TypeKind::Struct ||
                     value.type.kind == TypeKind::String)) {
-                call_text += ", ptr " + aggregate_argument_pointer(want, value);
+                call_text += ", ptr " + aggregate_call_argument(want, value,
+                    !explicit_copy &&
+                        (explicit_move || !expression_is_lvalue(argument)));
             } else {
                 call_text += ", " + llvm_type(want) + " " +
                     convert_value(value.value, value.type, want);
@@ -197,6 +211,8 @@ namespace gallt {
 
     void CodeGenerator::emit_struct_brace_initialization(const std::string& address,
         const AST::Type& struct_type, AST::ArrayInitializer* init) {
+        require_lifecycle_functions(struct_type);
+
         auto it = struct_by_name_.find(struct_type.struct_name);
         if (it == struct_by_name_.end() || it->second == nullptr) { return; }
         AST::StructDefinition* def = it->second;
@@ -225,7 +241,8 @@ namespace gallt {
                 }
             } else if (auto* e = dynamic_cast<AST::ExpressionInitializer*>(element)) {
                 ExprValue value = gen_expr(e->expr.get());
-                emit_aggregate_assign(field_ptr, member.type, value);
+                emit_aggregate_assign(field_ptr, member.type, value, false,
+                    lifecycle_transfer::is_move_source(e->expr.get()));
             }
         }
 
@@ -247,7 +264,8 @@ namespace gallt {
                 } else if (auto* e =
                     dynamic_cast<AST::ExpressionInitializer*>(member.initializer.get())) {
                     ExprValue value = gen_expr(e->expr.get());
-                    emit_aggregate_assign(field_ptr, member.type, value);
+                    emit_aggregate_assign(field_ptr, member.type, value, false,
+                        lifecycle_transfer::is_move_source(e->expr.get()));
                     handled = true;
                 }
             }
@@ -273,6 +291,7 @@ namespace gallt {
     void CodeGenerator::emit_array_brace_initialization(const std::string& address,
         const AST::Type& array_type, AST::ArrayInitializer* init) {
         if (init == nullptr || !array_type.element_type) { return; }
+        require_lifecycle_functions(array_type);
         const AST::Type& element_type = *array_type.element_type;
         const size_t provided = init->elements.size();
         const size_t count = std::min<size_t>(array_type.array_size.value_or(provided), provided);
@@ -294,7 +313,8 @@ namespace gallt {
 
             if (auto* e = dynamic_cast<AST::ExpressionInitializer*>(element)) {
                 ExprValue value = gen_expr(e->expr.get());
-                emit_aggregate_assign(element_ptr, element_type, value);
+                emit_aggregate_assign(element_ptr, element_type, value, false,
+                    lifecycle_transfer::is_move_source(e->expr.get()));
             }
         }
 

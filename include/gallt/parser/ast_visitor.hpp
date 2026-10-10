@@ -26,7 +26,8 @@ namespace gallt {
 
         using AstStatementTypes = AstTypeList<
             EmptyStatement, Block, VariableDeclaration, IfStatement, ForStatement,
-            WhileStatement, BreakStatement, ReturnStatement, ExpressionStatement,
+            WhileStatement, SwitchCaseStatement, BreakStatement, ContinueStatement,
+            FallthroughStatement, ReturnStatement, ExpressionStatement,
             DestructStatement, EmitStatement, StructDefinition, GenericDefinition,
             InstantiationStatement, NamespaceDefinition, AccessNamespaceStatement,
             AdditionNamespaceStatement, CondDefinition, UncondDefinition,
@@ -381,8 +382,14 @@ namespace gallt {
             virtual void LeaveForStatement(const ForStatement*) {}
             virtual bool EnterWhileStatement(const WhileStatement*) { return true; }
             virtual void LeaveWhileStatement(const WhileStatement*) {}
+            virtual bool EnterSwitchCaseStatement(const SwitchCaseStatement*) { return true; }
+            virtual void LeaveSwitchCaseStatement(const SwitchCaseStatement*) {}
             virtual bool EnterBreakStatement(const BreakStatement*) { return true; }
             virtual void LeaveBreakStatement(const BreakStatement*) {}
+            virtual bool EnterContinueStatement(const ContinueStatement*) { return true; }
+            virtual void LeaveContinueStatement(const ContinueStatement*) {}
+            virtual bool EnterFallthroughStatement(const FallthroughStatement*) { return true; }
+            virtual void LeaveFallthroughStatement(const FallthroughStatement*) {}
             virtual bool EnterReturnStatement(const ReturnStatement*) { return true; }
             virtual void LeaveReturnStatement(const ReturnStatement*) {}
             virtual bool EnterExpressionStatement(const ExpressionStatement*) { return true; }
@@ -590,9 +597,26 @@ namespace gallt {
                     if (!visit_statement(node->body.get())) { return false; }
                     LeaveWhileStatement(node);
                     return true;
+                } else if constexpr (std::is_same_v<T, SwitchCaseStatement>) {
+                    if (!EnterSwitchCaseStatement(node)) { return true; }
+                    if (!visit_expression(node->condition.get())) { return false; }
+                    for (const SwitchCaseStatement::Clause& clause : node->clauses) {
+                        if (!visit_expression(clause.condition.get())) { return false; }
+                        if (!visit_statements(clause.statements)) { return false; }
+                    }
+                    LeaveSwitchCaseStatement(node);
+                    return true;
                 } else if constexpr (std::is_same_v<T, BreakStatement>) {
                     if (!EnterBreakStatement(node)) { return true; }
                     LeaveBreakStatement(node);
+                    return true;
+                } else if constexpr (std::is_same_v<T, ContinueStatement>) {
+                    if (!EnterContinueStatement(node)) { return true; }
+                    LeaveContinueStatement(node);
+                    return true;
+                } else if constexpr (std::is_same_v<T, FallthroughStatement>) {
+                    if (!EnterFallthroughStatement(node)) { return true; }
+                    LeaveFallthroughStatement(node);
                     return true;
                 } else if constexpr (std::is_same_v<T, ReturnStatement>) {
                     if (!EnterReturnStatement(node)) { return true; }
@@ -1088,8 +1112,14 @@ namespace gallt {
             virtual void LeaveForStatement(ForStatement*) {}
             virtual bool EnterWhileStatement(WhileStatement*) { return true; }
             virtual void LeaveWhileStatement(WhileStatement*) {}
+            virtual bool EnterSwitchCaseStatement(SwitchCaseStatement*) { return true; }
+            virtual void LeaveSwitchCaseStatement(SwitchCaseStatement*) {}
             virtual bool EnterBreakStatement(BreakStatement*) { return true; }
             virtual void LeaveBreakStatement(BreakStatement*) {}
+            virtual bool EnterContinueStatement(ContinueStatement*) { return true; }
+            virtual void LeaveContinueStatement(ContinueStatement*) {}
+            virtual bool EnterFallthroughStatement(FallthroughStatement*) { return true; }
+            virtual void LeaveFallthroughStatement(FallthroughStatement*) {}
             virtual bool EnterReturnStatement(ReturnStatement*) { return true; }
             virtual void LeaveReturnStatement(ReturnStatement*) {}
             virtual bool EnterExpressionStatement(ExpressionStatement*) { return true; }
@@ -1316,9 +1346,26 @@ namespace gallt {
                     if (!rewrite_statement(node->body)) { return false; }
                     LeaveWhileStatement(node);
                     return true;
+                } else if constexpr (std::is_same_v<T, SwitchCaseStatement>) {
+                    if (!EnterSwitchCaseStatement(node)) { return true; }
+                    if (!rewrite_expression(node->condition)) { return false; }
+                    for (SwitchCaseStatement::Clause& clause : node->clauses) {
+                        if (!rewrite_expression(clause.condition)) { return false; }
+                        if (!rewrite_statements(clause.statements)) { return false; }
+                    }
+                    LeaveSwitchCaseStatement(node);
+                    return true;
                 } else if constexpr (std::is_same_v<T, BreakStatement>) {
                     if (!EnterBreakStatement(node)) { return true; }
                     LeaveBreakStatement(node);
+                    return true;
+                } else if constexpr (std::is_same_v<T, ContinueStatement>) {
+                    if (!EnterContinueStatement(node)) { return true; }
+                    LeaveContinueStatement(node);
+                    return true;
+                } else if constexpr (std::is_same_v<T, FallthroughStatement>) {
+                    if (!EnterFallthroughStatement(node)) { return true; }
+                    LeaveFallthroughStatement(node);
                     return true;
                 } else if constexpr (std::is_same_v<T, ReturnStatement>) {
                     if (!EnterReturnStatement(node)) { return true; }

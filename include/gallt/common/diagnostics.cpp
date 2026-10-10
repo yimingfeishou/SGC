@@ -32,7 +32,7 @@ namespace gallt {
             { ErrorCode::ArrayLengthMismatch, "array initializer length does not match the declaration: declared '[size]', initialized '[size2]'" },
             { ErrorCode::IdentifierNotInScope, "identifier '[identifier]' is not in the current scope" },
             { ErrorCode::MissingBraces, "control statement requires a '{' block to introduce a scope" },
-            { ErrorCode::BreakOutsideLoop, "'break' may only appear inside a loop body" },
+            { ErrorCode::BreakOutsideLoop, "'break' / 'continue' statements may only appear inside a loop body" },
             { ErrorCode::ExpressionSyntaxError, "expression syntax error: unexpected token '[token]'" },
             { ErrorCode::MainSignatureError, "invalid main signature: must be 'int main()' or 'int main(int count, char* array[])'" },
             { ErrorCode::MainReturnTypeError, "main must return int, but returns '[type]'" },
@@ -135,8 +135,8 @@ namespace gallt {
             { ErrorCode::OperatorOverloadOperandCountMismatch, "operator overload '[op]' operand count mismatch: expected '[num]', provided '[num2]'" },
             { ErrorCode::OperatorOverloadRequiresCustomType, "operator overload '[op]' requires at least one operand of a custom type" },
             { ErrorCode::ModifyingOperatorFirstParameterNotPointer, "first parameter of modifying operator '[op]' must be of pointer type" },
-            { ErrorCode::SubscriptOperatorMustReturnPointer, "operator[] must return a pointer type" },
-            { ErrorCode::ArrowOperatorMustReturnPointer, "operator-> must return a pointer type" },
+            { ErrorCode::SubscriptOperatorMustReturnPointer, "operator [] must return a pointer type" },
+            { ErrorCode::ArrowOperatorMustReturnPointer, "operator -> must return a pointer type" },
             { ErrorCode::OperatorOverloadDefaultArgumentNotAllowed, "operator overload '[op]' may not declare default arguments" },
             { ErrorCode::OperatorOverloadInsideStruct, "operator overload '[op]' may not be declared inside a struct" },
             { ErrorCode::ConversionOperatorTargetInvalid, "invalid conversion operator target type '[type]'" },
@@ -190,6 +190,7 @@ namespace gallt {
             { ErrorCode::ConstexprStructMemberNotCompilable, "struct member '[member]' is not compilable at compile time" },
             { ErrorCode::ConstexprSideEffectStatement, "compile-time function expression '[expr]' contains a side-effect statement" },
             { ErrorCode::InstantiationDepthTooDeep, "generic instantiation recursion depth is too deep, the limit is '[depth]', the current depth is '[value]'" },
+            { ErrorCode::FallthroughOutsideSwitch, "'fallthrough' statement may only appear inside a switch-case" },
         };
 
         const char* const kUnknownErrorTemplate =

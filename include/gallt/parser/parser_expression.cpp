@@ -903,6 +903,9 @@ namespace gallt {
         }
 
         default: {
+            if (try_recover_primary_expression("expected primary expression")) {
+                return parse_primary_expression();
+            }
             report_error(ErrorCode::ExpressionSyntaxError, "expected primary expression");
             return nullptr;
         }

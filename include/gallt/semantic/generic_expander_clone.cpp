@@ -739,8 +739,36 @@ namespace gallt {
                 clone_substatement(s->body.get(), sub));
         }
 
+        if (auto* s = dynamic_cast<const SwitchCaseStatement*>(stmt)) {
+            auto clone = std::make_unique<SwitchCaseStatement>(s->location,
+                clone_expression(s->condition.get(), sub));
+
+            for (const SwitchCaseStatement::Clause& clause : s->clauses) {
+                SwitchCaseStatement::Clause copied;
+                copied.is_default = clause.is_default;
+                copied.condition = clone_expression(clause.condition.get(), sub);
+                copied.location = clause.location;
+
+                for (const std::unique_ptr<Statement>& child : clause.statements) {
+                    copied.statements.push_back(clone_substatement(child.get(), sub));
+                }
+
+                clone->clauses.push_back(std::move(copied));
+            }
+
+            return clone;
+        }
+
         if (auto* s = dynamic_cast<const BreakStatement*>(stmt)) {
             return std::make_unique<BreakStatement>(s->location);
+        }
+
+        if (auto* s = dynamic_cast<const ContinueStatement*>(stmt)) {
+            return std::make_unique<ContinueStatement>(s->location);
+        }
+
+        if (auto* s = dynamic_cast<const FallthroughStatement*>(stmt)) {
+            return std::make_unique<FallthroughStatement>(s->location);
         }
 
         if (auto* s = dynamic_cast<const ReturnStatement*>(stmt)) {

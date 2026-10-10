@@ -2,6 +2,7 @@
 #include "../semantic/diagnosed_registry.hpp"
 #include "type_checker_detail.hpp"
 #include "expression_parameter_names.hpp"
+#include "lifecycle_transfer.hpp"
 #include "../parser/ast.hpp"
 #include "../semantic/constant_folding.hpp"
 #include <algorithm>
@@ -47,6 +48,15 @@ namespace gallt {
 
         if (auto* while_stmt = dynamic_cast<AST::WhileStatement*>(stmt)) {
             if (while_stmt->body) { collect_local_structs(while_stmt->body.get()); }
+            return;
+        }
+
+        if (auto* switch_stmt = dynamic_cast<AST::SwitchCaseStatement*>(stmt)) {
+            for (AST::SwitchCaseStatement::Clause& clause : switch_stmt->clauses) {
+                for (std::unique_ptr<AST::Statement>& child : clause.statements) {
+                    collect_local_structs(child.get());
+                }
+            }
             return;
         }
     }
@@ -749,10 +759,8 @@ namespace gallt {
             expression_parameter_names::is_generated_name(prim->identifier);
     }
 
-    bool TypeChecker::is_move_expression(const AST::Expression* expr) {
-        auto* cm = dynamic_cast<const AST::PrimaryExpression*>(expr);
-        return cm != nullptr && cm->kind == AST::PrimaryExpression::Kind::CopyMove &&
-            cm->copy_move_kind == AST::PrimaryExpression::CopyMoveKind::Move;
+    bool TypeChecker::is_move_source(const AST::Expression* expr) {
+        return lifecycle_transfer::is_move_source(expr);
     }
 
 }

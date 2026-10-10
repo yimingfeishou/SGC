@@ -30,7 +30,9 @@ namespace gallt {
             }
         }
 
-        if (lifecycle_symbols_.count(name) != 0) {
+        auto lifecycle = lifecycle_catalog_.find(name);
+        if (lifecycle != lifecycle_catalog_.end()) {
+            require_lifecycle_functions(lifecycle->second.first);
             return "@glt_" + name;
         }
 

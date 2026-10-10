@@ -1407,6 +1407,45 @@ namespace gallt {
             return false;
         }
 
+        bool EnterSwitchCaseStatement(SwitchCaseStatement* node) override {
+            owner_.expand_expression(node->condition);
+
+            for (SwitchCaseStatement::Clause& clause : node->clauses) {
+                owner_.expand_expression(clause.condition);
+                owner_.push_scope();
+
+                for (std::unique_ptr<Statement>& child : clause.statements) {
+                    if (auto* vd = dynamic_cast<VariableDeclaration*>(child.get())) {
+                        owner_.declare_name(vd->name);
+                    } else if (auto* sd = dynamic_cast<StructDefinition*>(child.get())) {
+                        owner_.declare_name(sd->name);
+                    } else if (auto* def = dynamic_cast<FunctionDefinition*>(child.get())) {
+                        owner_.declare_name(def->name);
+                    }
+                }
+
+                for (std::unique_ptr<Statement>& child : clause.statements) {
+                    owner_.expand_statement(child.get());
+                }
+
+                std::vector<std::unique_ptr<Statement>> kept;
+                kept.reserve(clause.statements.size());
+
+                for (std::unique_ptr<Statement>& child : clause.statements) {
+                    if (dynamic_cast<InstantiationStatement*>(child.get()) != nullptr) {
+                        continue;
+                    }
+
+                    kept.push_back(std::move(child));
+                }
+
+                clause.statements = std::move(kept);
+                owner_.pop_scope();
+            }
+
+            return false;
+        }
+
         bool EnterReturnStatement(ReturnStatement* node) override {
             owner_.expand_expression(node->value);
             return false;

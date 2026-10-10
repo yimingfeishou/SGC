@@ -153,22 +153,31 @@ namespace gallt {
 
             if (after != std::string::npos) {
                 offset = after;
-                while (lookahead_type(offset) == TokenType::Star ||
-                    lookahead_type(offset) == TokenType::Power) {
-                    ++offset;
+                if (lookahead_type(offset) == TokenType::Dot ||
+                    lookahead_type(offset) == TokenType::ColonColon) {
+                    offset += 2;
                 }
-            } else if (lookahead_type(1) == TokenType::Star ||
-                lookahead_type(1) == TokenType::Power) {
-                offset = 2;
             } else {
                 offset = 1;
+                while (lookahead_type(offset) == TokenType::ColonColon &&
+                    lookahead_type(offset + 1) == TokenType::Identifier) {
+                    offset += 2;
+                }
+            }
+
+            while (lookahead_type(offset) == TokenType::Star ||
+                lookahead_type(offset) == TokenType::Power) {
+                ++offset;
             }
         } else if (is_type_start_keyword(current_.type)) {
-            if (lookahead_type(1) == TokenType::Star ||
-                lookahead_type(1) == TokenType::Power) {
-                offset = 2;
-            } else {
-                offset = 1;
+            offset = 1;
+            while (lookahead_type(offset) == TokenType::ColonColon &&
+                lookahead_type(offset + 1) == TokenType::Identifier) {
+                offset += 2;
+            }
+            while (lookahead_type(offset) == TokenType::Star ||
+                lookahead_type(offset) == TokenType::Power) {
+                ++offset;
             }
         } else {
             return false;
@@ -182,9 +191,16 @@ namespace gallt {
             lookahead_type(offset + 1) == TokenType::RightBracket) {
             return true;
         }
-        return (lookahead_type(offset + 1) == TokenType::Identifier ||
-            is_type_start_keyword(lookahead_type(offset + 1))) &&
-            lookahead_type(offset + 2) == TokenType::LeftParen;
+        std::size_t target = offset + 1;
+        if (lookahead_type(target) == TokenType::Identifier) {
+            while (lookahead_type(target + 1) == TokenType::ColonColon &&
+                lookahead_type(target + 2) == TokenType::Identifier) {
+                target += 2;
+            }
+        }
+        return (lookahead_type(target) == TokenType::Identifier ||
+            is_type_start_keyword(lookahead_type(target))) &&
+            lookahead_type(target + 1) == TokenType::LeftParen;
     }
 
     bool Parser::at_operator_parameter_list() const {

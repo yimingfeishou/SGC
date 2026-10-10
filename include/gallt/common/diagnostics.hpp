@@ -196,6 +196,7 @@ namespace gallt {
         ConstexprStructMemberNotCompilable = 174,
         ConstexprSideEffectStatement = 175,
         InstantiationDepthTooDeep = 176,
+        FallthroughOutsideSwitch = 177,
     };
 
     struct Diagnostic {

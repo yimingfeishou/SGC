@@ -46,30 +46,37 @@ namespace gallt {
     }
 
     void LifecycleLowering::collect_structs() {
-        std::function<void(Statement*)> walk = [&](Statement* stmt) {
+        struct_order_.clear();
+
+        std::function<void(Statement*, AST::TopLevel*)> walk =
+            [&](Statement* stmt, AST::TopLevel* anchor) {
             if (stmt == nullptr) { return; }
             if (auto* def = dynamic_cast<StructDefinition*>(stmt)) {
-                register_struct_definition(def);
+                register_struct_definition(def, anchor);
             }
 
             if (auto* block = dynamic_cast<Block*>(stmt)) {
-                for (auto& inner : block->statements) { walk(inner.get()); }
+                for (auto& inner : block->statements) { walk(inner.get(), anchor); }
             } else if (auto* ifs = dynamic_cast<IfStatement*>(stmt)) {
-                walk(ifs->then_block.get());
-                if (ifs->else_block) { walk(ifs->else_block.get()); }
+                walk(ifs->then_block.get(), anchor);
+                if (ifs->else_block) { walk(ifs->else_block.get(), anchor); }
             } else if (auto* for_ = dynamic_cast<ForStatement*>(stmt)) {
-                if (for_->init) { walk(for_->init.get()); }
-                if (for_->body) { walk(for_->body.get()); }
+                if (for_->init) { walk(for_->init.get(), anchor); }
+                if (for_->body) { walk(for_->body.get(), anchor); }
             } else if (auto* while_ = dynamic_cast<WhileStatement*>(stmt)) {
-                if (while_->body) { walk(while_->body.get()); }
+                if (while_->body) { walk(while_->body.get(), anchor); }
+            } else if (auto* switch_ = dynamic_cast<SwitchCaseStatement*>(stmt)) {
+                for (auto& clause : switch_->clauses) {
+                    for (auto& child : clause.statements) { walk(child.get(), anchor); }
+                }
             }
         };
 
         for (auto& top : program_->top_levels) {
             if (auto* def = dynamic_cast<StructDefinition*>(top.get())) {
-                register_struct_definition(def);
+                register_struct_definition(def, top.get());
             } else if (auto* func = dynamic_cast<FunctionDefinition*>(top.get())) {
-                if (func->body != nullptr) { walk(func->body.get()); }
+                if (func->body != nullptr) { walk(func->body.get(), top.get()); }
             }
         }
 
@@ -92,12 +99,20 @@ namespace gallt {
         }
     }
 
-    void LifecycleLowering::register_struct_definition(StructDefinition* def) {
+    void LifecycleLowering::register_struct_definition(StructDefinition* def,
+        AST::TopLevel* anchor) {
         if (def == nullptr) { return; }
-        if (structs_.count(def->name) != 0) { return; }
+        if (structs_.count(def->name) != 0) {
+            if (structs_[def->name].anchor == nullptr) {
+                structs_[def->name].anchor = anchor;
+            }
+            return;
+        }
+        struct_order_.push_back(def);
         struct_defs_[def->name] = def;
             StructInfo& info = structs_[def->name];
             info.def = def;
+            info.anchor = anchor;
             info.no_copy = def->no_copy;
             info.no_move = def->no_move;
 
@@ -309,6 +324,12 @@ namespace gallt {
                     scan_return(fors->body.get());
                 } else if (auto* whiles = dynamic_cast<const WhileStatement*>(stmt)) {
                     scan_return(whiles->body.get());
+                } else if (auto* switches = dynamic_cast<const SwitchCaseStatement*>(stmt)) {
+                    for (const auto& clause : switches->clauses) {
+                        for (const auto& child : clause.statements) {
+                            scan_return(child.get());
+                        }
+                    }
                 }
             };
 
@@ -549,6 +570,29 @@ namespace gallt {
             if (auto* while_stmt = dynamic_cast<const WhileStatement*>(stmt)) {
                 scan_expression(while_stmt->condition.get());
                 scan_statement(while_stmt->body.get());
+                return;
+            }
+
+            if (auto* switch_stmt = dynamic_cast<const SwitchCaseStatement*>(stmt)) {
+                scan_expression(switch_stmt->condition.get());
+
+                for (const auto& clause : switch_stmt->clauses) {
+                    scan_expression(clause.condition.get());
+                    std::vector<std::string> introduced;
+
+                    for (const auto& child : clause.statements) {
+                        if (auto* decl = dynamic_cast<const VariableDeclaration*>(
+                            child.get())) {
+                            if (shadowed.insert(decl->name).second) {
+                                introduced.push_back(decl->name);
+                            }
+                        }
+
+                        scan_statement(child.get());
+                    }
+
+                    for (const std::string& name : introduced) { shadowed.erase(name); }
+                }
                 return;
             }
 

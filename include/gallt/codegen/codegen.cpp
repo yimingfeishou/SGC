@@ -4,6 +4,7 @@
 #include "codegen_detail.hpp"
 #include "../runtime/crt_embedded.hpp"
 #include "../semantic/constant_folding.hpp"
+#include "../semantic/lifecycle_transfer.hpp"
 #include <algorithm>
 #include <charconv>
 #include <cmath>
@@ -191,6 +192,7 @@ namespace gallt {
     void CodeGenerator::collect_structs() {
         struct_by_name_.clear();
         struct_defs_.clear();
+        instantiated_structs_.clear();
 
         StructCollectRewriter visitor(*this);
 
@@ -243,6 +245,7 @@ namespace gallt {
         debug_type_ids_.clear();
         debug_location_ids_.clear();
         debug_subroutine_ids_.clear();
+        debug_global_expression_ids_.clear();
         debug_next_id_ = 5;
         debug_subprogram_id_ = 0;
         debug_shared_subroutine_id_ = 0;
@@ -262,8 +265,8 @@ namespace gallt {
         emit_function_declarations();
         emit_global_variables();
         emit_functions();
-        emit_lifecycle_functions();
         emit_global_initializer();
+        emit_lifecycle_functions();
 
         if (emit_entry_point_) {
             emit_main_wrapper();
@@ -567,9 +570,22 @@ namespace gallt {
         lines_.push_back("!2 = !{i32 2, !\"CodeView\", i32 1}");
         lines_.push_back("!3 = !{i32 2, !\"Debug Info Version\", i32 3}");
         lines_.push_back("!4 = !{i32 1, !\"wchar_size\", i32 4}");
-        lines_.push_back("!0 = distinct !DICompileUnit(language: DW_LANG_C99, file: !1, "
+        std::string unit = "!0 = distinct !DICompileUnit(language: DW_LANG_C99, file: !1, "
             "producer: \"sgc Standard Gallt Compiler\", isOptimized: false, "
-            "runtimeVersion: 0, emissionKind: " + std::string(emission) + ")");
+            "runtimeVersion: 0, emissionKind: " + std::string(emission);
+        if (!debug_global_expression_ids_.empty()) {
+            const unsigned globals_id = next_debug_id();
+            std::string list = "!" + std::to_string(globals_id) + " = !{";
+            for (std::size_t i = 0; i < debug_global_expression_ids_.size(); ++i) {
+                if (i != 0) { list += ", "; }
+                list += "!" + std::to_string(debug_global_expression_ids_[i]);
+            }
+            list += "}";
+            debug_metadata_.push_back(list);
+            unit += ", globals: !" + std::to_string(globals_id);
+        }
+        unit += ")";
+        lines_.push_back(unit);
         lines_.push_back("!1 = !DIFile(filename: \"" +
             escape_metadata_string(debug_source_file_) + "\", directory: \"" +
             escape_metadata_string(debug_source_dir_) + "\")");
@@ -789,6 +805,7 @@ namespace gallt {
 
         for (const auto& top : program_->top_levels) {
             if (auto* var = dynamic_cast<AST::VariableDeclaration*>(top.get())) {
+                require_lifecycle_functions(var->type);
                 if (var->type.is_const) {
                     const_globals_.push_back(var);
                 } else {
@@ -846,10 +863,15 @@ namespace gallt {
                 "global " + type_text + " zeroinitializer";
 
             if (debug_level_ >= 2) {
+                const unsigned expression_id = next_debug_id();
                 const unsigned variable_id = next_debug_id();
                 const unsigned type_id = debug_type_id(var->type);
                 const unsigned line = var->location.line > 0
                     ? static_cast<unsigned>(var->location.line) : 1u;
+                debug_metadata_.push_back("!" + std::to_string(expression_id) +
+                    " = !DIGlobalVariableExpression(var: !" +
+                    std::to_string(variable_id) + ", expr: !DIExpression())");
+                debug_global_expression_ids_.push_back(expression_id);
                 debug_metadata_.push_back("!" + std::to_string(variable_id) +
                     " = distinct !DIGlobalVariable(name: \"" +
                     escape_metadata_string(var->name) + "\", scope: !1, file: !1, line: " +
@@ -857,7 +879,7 @@ namespace gallt {
                     (type_id != 0 ? "!" + std::to_string(type_id)
                                   : std::string("null")) +
                     ", isLocal: false, isDefinition: true)");
-                definition += ", !dbg !" + std::to_string(variable_id);
+                definition += ", !dbg !" + std::to_string(expression_id);
             }
 
             emit_line(definition);
@@ -891,7 +913,8 @@ namespace gallt {
         for (AST::VariableDeclaration* var : global_vars_) {
             if (var->initializer) {
                 emit_initializer_to_address(var, "@glt_g_" + var->name);
-            } else if (var->type.kind == TypeKind::Struct) {
+            } else if (!var->constructed_by_lowering &&
+                var->type.kind == TypeKind::Struct) {
                 AST::ArrayInitializer empty_init(var->location,
                     std::vector<std::unique_ptr<AST::Initializer>>{});
                 emit_struct_brace_initialization("@glt_g_" + var->name, var->type,
@@ -902,7 +925,8 @@ namespace gallt {
         for (AST::VariableDeclaration* var : runtime_const_globals_) {
             if (var->initializer) {
                 emit_initializer_to_address(var, "@glt_g_" + var->name);
-            } else if (var->type.kind == TypeKind::Struct) {
+            } else if (!var->constructed_by_lowering &&
+                var->type.kind == TypeKind::Struct) {
                 AST::ArrayInitializer empty_init(var->location,
                     std::vector<std::unique_ptr<AST::Initializer>>{});
                 emit_struct_brace_initialization("@glt_g_" + var->name, var->type,
@@ -1032,7 +1056,8 @@ namespace gallt {
 
         if (auto* expr_init = dynamic_cast<AST::ExpressionInitializer*>(decl->initializer.get())) {
             ExprValue value = gen_expr(expr_init->expr.get());
-            emit_aggregate_assign(address, decl->type, value);
+            emit_aggregate_assign(address, decl->type, value, false,
+                lifecycle_transfer::is_move_source(expr_init->expr.get()));
             return;
         }
 
@@ -1128,6 +1153,9 @@ namespace gallt {
         current_label_.clear();
         current_function_ = func;
         break_labels_.clear();
+        continue_labels_.clear();
+        continue_cleanup_depths_.clear();
+        switch_stack_.clear();
         hoisted_allocas_.clear();
         hoist_insert_index_ = 0;
 
@@ -1135,6 +1163,7 @@ namespace gallt {
         std::string ret = llvm_type(func->return_type);
         if (func->return_type.kind == TypeKind::Function) { ret = "ptr"; }
         bool sret = returns_via_sret(func->return_type);
+        if (sret) { require_lifecycle_functions(func->return_type); }
 
         const std::string linkage = (func->name != "main" &&
             !is_exported_function(func->name)) ? module_local_prefix() : std::string();
@@ -1156,6 +1185,7 @@ namespace gallt {
             if (header_has_parameter) { header += ", "; }
             header_has_parameter = true;
             header += parameter_ir_type(func->parameters[i]);
+            require_lifecycle_functions(func->parameters[i]);
             std::string param_name = (i < func->param_names.size() && !func->param_names[i].empty())
                 ? func->param_names[i]
                 : "_arg" + std::to_string(i);
@@ -1190,26 +1220,17 @@ namespace gallt {
                 ? func->param_names[i]
                 : "_arg" + std::to_string(i);
             std::string type_text = llvm_type(func->parameters[i]);
-            std::string address = emit_alloca(type_text, ("alloca_" + param_name).c_str());
             std::string incoming = "%" + param_name;
             const AST::Type& param_type = func->parameters[i];
-            if (aggregate_parameter_uses_pointer(param_type)) {
-                emit_line("store " + type_text + " zeroinitializer, ptr " + address);
-                emit_memberwise_copy(param_type, address, incoming, false);
+            const bool caller_constructed = aggregate_parameter_uses_pointer(param_type);
+            std::string address = caller_constructed
+                ? incoming
+                : emit_alloca(type_text, ("alloca_" + param_name).c_str());
 
-                bool needs_cleanup = (param_type.kind == TypeKind::String) ||
-                    type_contains_string(param_type);
-                if (!needs_cleanup && param_type.kind == TypeKind::Struct) {
-                    auto def_it = struct_by_name_.find(param_type.struct_name);
-                    needs_cleanup = def_it != struct_by_name_.end() && def_it->second != nullptr &&
-                        def_it->second->needs_destruction;
-                }
-
-                if (needs_cleanup) {
-                    register_string_cleanup(address, param_type);
-                }
-            } else {
+            if (!caller_constructed) {
                 emit_line("store " + type_text + " " + incoming + ", ptr " + address);
+            } else if (type_needs_cleanup(param_type)) {
+                register_string_cleanup(address, param_type);
             }
 
             LocalInfo info;
@@ -1222,6 +1243,7 @@ namespace gallt {
             VariadicPackLocal pack;
             pack.name = pack_name;
             pack.element = func->parameters.back();
+            require_lifecycle_functions(pack.element);
             pack.data_slot = emit_alloca("ptr", "packdata");
             pack.length_slot = emit_alloca("i32", "packlen");
             emit_line("store ptr %" + pack_name + "$data, ptr " + pack.data_slot);
@@ -1379,11 +1401,15 @@ namespace gallt {
             owner_.start_block(body_label);
             owner_.break_labels_.push_back(end_label);
             owner_.break_cleanup_depths_.push_back(break_depth);
+            owner_.continue_labels_.push_back(step_label);
+            owner_.continue_cleanup_depths_.push_back(owner_.cleanup_scopes_.size());
 
             if (node->body) {
                 owner_.emit_block(static_cast<Block*>(node->body.get()), true);
             }
 
+            owner_.continue_labels_.pop_back();
+            owner_.continue_cleanup_depths_.pop_back();
             owner_.break_labels_.pop_back();
             owner_.break_cleanup_depths_.pop_back();
             owner_.emit_line("br label %" + step_label);
@@ -1413,11 +1439,15 @@ namespace gallt {
             owner_.start_block(body_label);
             owner_.break_labels_.push_back(end_label);
             owner_.break_cleanup_depths_.push_back(owner_.cleanup_scopes_.size());
+            owner_.continue_labels_.push_back(cond_label);
+            owner_.continue_cleanup_depths_.push_back(owner_.cleanup_scopes_.size());
 
             if (node->body) {
                 owner_.emit_block(static_cast<Block*>(node->body.get()), true);
             }
 
+            owner_.continue_labels_.pop_back();
+            owner_.continue_cleanup_depths_.pop_back();
             owner_.break_labels_.pop_back();
             owner_.break_cleanup_depths_.pop_back();
             owner_.emit_line("br label %" + cond_label);
@@ -1436,6 +1466,158 @@ namespace gallt {
                 owner_.current_label_ = owner_.new_label("afterbreak");
             }
 
+            return false;
+        }
+
+        bool EnterContinueStatement(ContinueStatement*) override {
+            if (!owner_.continue_labels_.empty()) {
+                if (!owner_.continue_cleanup_depths_.empty()) {
+                    owner_.destroy_active_cleanup_scopes(
+                        owner_.continue_cleanup_depths_.back());
+                }
+
+                owner_.emit_line("br label %" + owner_.continue_labels_.back());
+                owner_.current_label_ = owner_.new_label("aftercontinue");
+            }
+
+            return false;
+        }
+
+        bool EnterFallthroughStatement(FallthroughStatement*) override {
+            if (!owner_.switch_stack_.empty()) {
+                CodeGenerator::SwitchContext& context = owner_.switch_stack_.back();
+                const std::size_t next = context.current_clause + 1;
+                const std::string target = next < context.clause_labels.size()
+                    ? context.clause_labels[next] : context.end_label;
+                owner_.destroy_statement_temporaries();
+                owner_.destroy_active_cleanup_scopes(context.clause_cleanup_depth);
+                owner_.emit_line("br label %" + target);
+                owner_.current_label_ = owner_.new_label("afterfallthrough");
+            }
+
+            return false;
+        }
+
+        bool EnterSwitchCaseStatement(SwitchCaseStatement* node) override {
+            const std::string end_label = owner_.new_label("switchend");
+            std::vector<std::string> clause_labels;
+            clause_labels.reserve(node->clauses.size());
+
+            for (std::size_t i = 0; i < node->clauses.size(); ++i) {
+                clause_labels.push_back(owner_.new_label("swcase"));
+            }
+
+            std::string default_target = end_label;
+
+            for (std::size_t i = 0; i < node->clauses.size(); ++i) {
+                if (node->clauses[i].is_default) {
+                    default_target = clause_labels[i];
+                    break;
+                }
+            }
+
+            ExprValue switch_value = node->condition
+                ? owner_.gen_expr(node->condition.get()) : ExprValue{};
+            const bool jump_table =
+                node->jump_table_eligible && !node->clauses.empty() &&
+                switch_value.type.kind == node->jump_table_source_type.kind;
+
+            if (jump_table) {
+                const int width = node->jump_table_type.integer_bit_width();
+                const std::string type_text = owner_.llvm_type(node->jump_table_type);
+                auto signed_constant = [width](unsigned long long bits) -> long long {
+                    if (width >= 64) { return static_cast<long long>(bits); }
+                    const unsigned long long mask = (1ull << width) - 1;
+                    const unsigned long long masked = bits & mask;
+                    if ((masked & (1ull << (width - 1))) != 0) {
+                        return static_cast<long long>(masked | ~mask);
+                    }
+                    return static_cast<long long>(masked);
+                };
+                const std::string operand = owner_.convert_value(switch_value.value,
+                    switch_value.type, node->jump_table_type);
+                std::string instruction = "switch " + type_text + " " +
+                    operand + ", label %" + default_target + " [";
+
+                for (std::size_t i = 0; i < node->clauses.size(); ++i) {
+                    if (node->clauses[i].is_default) { continue; }
+                    const long long case_value = signed_constant(
+                        static_cast<unsigned long long>(
+                            node->clauses[i].constant_value_bits));
+                    instruction += " " + type_text + " " +
+                        std::to_string(case_value) + ", label %" + clause_labels[i];
+                }
+
+                instruction += " ]";
+                owner_.emit_line(instruction);
+            } else {
+                std::vector<std::size_t> case_indices;
+
+                for (std::size_t i = 0; i < node->clauses.size(); ++i) {
+                    if (!node->clauses[i].is_default) { case_indices.push_back(i); }
+                }
+
+                std::vector<std::string> check_labels;
+                check_labels.reserve(case_indices.size());
+                for (std::size_t i = 0; i < case_indices.size(); ++i) {
+                    check_labels.push_back(owner_.new_label("swcheck"));
+                }
+
+                owner_.emit_line("br label %" + (check_labels.empty()
+                    ? default_target : check_labels.front()));
+
+                for (std::size_t k = 0; k < case_indices.size(); ++k) {
+                    const std::size_t index = case_indices[k];
+                    const std::string next = (k + 1 < case_indices.size())
+                        ? check_labels[k + 1] : default_target;
+                    owner_.start_block(check_labels[k]);
+                    ExprValue case_value = owner_.gen_expr(
+                        node->clauses[index].condition.get());
+                    const std::string equal = owner_.equality_predicate(
+                        switch_value, case_value);
+                    owner_.emit_line("br i1 " + equal + ", label %" +
+                        clause_labels[index] + ", label %" + next);
+                }
+            }
+
+            owner_.switch_stack_.push_back(
+                CodeGenerator::SwitchContext{end_label, clause_labels, 0, 0});
+
+            for (std::size_t i = 0; i < node->clauses.size(); ++i) {
+                owner_.switch_stack_.back().current_clause = i;
+                owner_.start_block(clause_labels[i]);
+                owner_.push_scope();
+                owner_.switch_stack_.back().clause_cleanup_depth =
+                    owner_.cleanup_scopes_.size() - 1;
+
+                for (std::unique_ptr<Statement>& stmt : node->clauses[i].statements) {
+                    const std::size_t temporary_mark =
+                        owner_.statement_temporaries_.size();
+                    owner_.emit_statement(stmt.get());
+
+                    if (!owner_.current_block_terminated_) {
+                        while (owner_.statement_temporaries_.size() > temporary_mark) {
+                            CodeGenerator::CleanupRecord record =
+                                owner_.statement_temporaries_.back();
+                            owner_.statement_temporaries_.pop_back();
+                            owner_.emit_destroy_string_at(record.type, record.address);
+                        }
+                    } else {
+                        owner_.statement_temporaries_.resize(temporary_mark);
+                    }
+                }
+
+                if (owner_.current_block_terminated_) {
+                    owner_.discard_current_cleanup_scope();
+                    owner_.pop_scope();
+                } else {
+                    owner_.pop_scope();
+                    owner_.emit_line("br label %" + end_label);
+                }
+            }
+
+            owner_.switch_stack_.pop_back();
+            owner_.start_block(end_label);
             return false;
         }
 

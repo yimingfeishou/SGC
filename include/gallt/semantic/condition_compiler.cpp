@@ -406,6 +406,16 @@ namespace {
             return;
         }
 
+        if (auto* switch_stmt = dynamic_cast<AST::SwitchCaseStatement*>(stmt.get())) {
+            resolve_condition_references(switch_stmt->condition.get());
+
+            for (AST::SwitchCaseStatement::Clause& clause : switch_stmt->clauses) {
+                resolve_condition_references(clause.condition.get());
+                process_statement_list(clause.statements);
+            }
+            return;
+        }
+
         if (auto* decl = dynamic_cast<AST::VariableDeclaration*>(stmt.get())) {
             transform_initializer(decl->initializer);
             transform_expression(decl->array_size_expr);

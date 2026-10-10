@@ -6,6 +6,7 @@
 #include <deque>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 namespace gallt {
@@ -64,6 +65,7 @@ namespace gallt {
         std::unordered_map<std::string, unsigned> debug_type_ids_;
         std::unordered_map<std::string, unsigned> debug_location_ids_;
         std::unordered_map<std::string, unsigned> debug_subroutine_ids_;
+        std::vector<unsigned> debug_global_expression_ids_;
         std::string ir_;
         std::vector<std::string> link_libraries_;
         std::vector<AST::StructDefinition*> struct_defs_;
@@ -100,7 +102,9 @@ namespace gallt {
         };
         bool emitting_lifecycle_body_ = false;
         const AST::StructDefinition* lifecycle_owner_ = nullptr;
-        std::unordered_set<std::string> lifecycle_symbols_;
+        std::unordered_map<std::string, std::pair<AST::StructDefinition*, LifecycleKind>>
+            lifecycle_catalog_;
+        std::unordered_set<const AST::StructDefinition*> instantiated_structs_;
         std::unordered_set<std::string> emitted_lifecycle_bodies_;
         std::vector<CleanupRecord> statement_temporaries_;
         std::unordered_map<std::string, LocalInfo> global_symbols_;
@@ -166,6 +170,8 @@ namespace gallt {
         void emit_functions();
         void emit_lifecycle_functions();
         void register_lifecycle_symbols();
+        void require_lifecycle_functions(const AST::Type& type);
+        void require_lifecycle_functions(const AST::StructDefinition* def);
         void emit_lifecycle_body(AST::StructDefinition* def, LifecycleKind kind,
             const std::string& name);
         std::string lifecycle_symbol(const AST::StructDefinition* def,
@@ -197,6 +203,15 @@ namespace gallt {
         AST::FunctionDefinition* current_function_ = nullptr;
         std::vector<std::string> break_labels_;
         std::vector<std::size_t> break_cleanup_depths_;
+        std::vector<std::string> continue_labels_;
+        std::vector<std::size_t> continue_cleanup_depths_;
+        struct SwitchContext {
+            std::string end_label;
+            std::vector<std::string> clause_labels;
+            std::size_t current_clause = 0;
+            std::size_t clause_cleanup_depth = 0;
+        };
+        std::vector<SwitchContext> switch_stack_;
         void emit_statement(AST::Statement* stmt);
         void destroy_statement_temporaries();
         void emit_block(AST::Block* block, bool new_scope);
@@ -278,7 +293,8 @@ namespace gallt {
         void emit_array_brace_initialization(const std::string& address,
             const AST::Type& array_type, AST::ArrayInitializer* init);
         void emit_aggregate_assign(const std::string& dest_address,
-            const AST::Type& dest_type, ExprValue& source, bool is_assignment = false);
+            const AST::Type& dest_type, ExprValue& source, bool is_assignment = false,
+            bool prefer_move = false);
         static bool aggregate_parameter_uses_pointer(const AST::Type& type);
         std::string parameter_ir_type(const AST::Type& type);
         std::string aggregate_argument_pointer(const AST::Type& type, ExprValue& value);
@@ -293,6 +309,14 @@ namespace gallt {
         bool type_is_copyable(const AST::Type& type) const;
         bool type_is_movable(const AST::Type& type) const;
         std::string operand_address(AST::Expression* expr, AST::Type* out_type = nullptr);
+        bool type_needs_cleanup(const AST::Type& type);
+        std::string transfer_parameter_object(const AST::Type& type,
+            ExprValue& value, bool move);
+        static bool expression_is_lvalue(const AST::Expression* expr);
+        static AST::Expression* unwrap_copy_move_argument(AST::Expression* argument,
+            bool& explicit_move, bool& explicit_copy);
+        std::string aggregate_call_argument(const AST::Type& want, ExprValue& value,
+            bool move);
         void collect_constructor_defaults(const std::string& ctor_name,
             std::vector<AST::Expression*>& args);
         int default_constructor_index(const AST::StructDefinition* def);
@@ -305,6 +329,7 @@ namespace gallt {
 
         std::string convert_value(const std::string& value, const AST::Type& from, const AST::Type& to);
         std::string truth_condition(const std::string& value, const AST::Type& type);
+        std::string equality_predicate(const ExprValue& left, const ExprValue& right);
         std::string to_i64_value(const std::string& value, const AST::Type& type);
         AST::Type resolved_type(const AST::Expression* expr) const;
 

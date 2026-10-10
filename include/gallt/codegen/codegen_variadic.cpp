@@ -177,17 +177,25 @@ namespace gallt {
         heap_storage.clear();
 
         for (std::size_t i = 0; i < all_args.size() && i < fixed; ++i) {
-            ExprValue arg = gen_expr(all_args[i]);
+            AST::Expression* argument = all_args[i];
+            bool explicit_move = false;
+            bool explicit_copy = false;
+            AST::Expression* source = unwrap_copy_move_argument(argument,
+                explicit_move, explicit_copy);
+
+            ExprValue arg = gen_expr(source);
             if (!arg.owned_string.empty()) {
                 owned_args.push_back(arg.owned_string);
             }
+            const bool move_argument = !explicit_copy &&
+                (explicit_move || !expression_is_lvalue(source));
             const bool aggregate_argument =
                 aggregate_parameter_uses_pointer(params[i]) &&
                 (arg.type.kind == TypeKind::Struct ||
                     arg.type.kind == TypeKind::String);
 
             if (aggregate_argument) {
-                ir_args.push_back(aggregate_argument_pointer(params[i], arg));
+                ir_args.push_back(aggregate_call_argument(params[i], arg, move_argument));
             } else {
                 ir_args.push_back(convert_value(arg.value, arg.type, params[i]));
             }

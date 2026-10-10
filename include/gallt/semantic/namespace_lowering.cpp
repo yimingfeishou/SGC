@@ -157,10 +157,12 @@ namespace gallt {
 
         if (found != info.members.end()) {
             auto kind_it = info.member_kinds.find(name);
-            const bool same_generic_name = kind == "generic" &&
-                kind_it != info.member_kinds.end() && kind_it->second == "generic";
+            const bool same_kind = kind_it != info.member_kinds.end() &&
+                kind_it->second == kind;
+            const bool overloadable = same_kind &&
+                (kind == "function" || kind == "generic");
 
-            if (addition && !same_generic_name) {
+            if (addition && !overloadable) {
                 report(loc, ErrorCode::AdditionNamespaceMemberConflict, std::vector<std::string>{ name });
             }
             return;
@@ -302,6 +304,10 @@ namespace gallt {
 
         candidates.push_back(path);
 
+        ErrorCode pending_code = ErrorCode::ExpressionSyntaxError;
+        std::vector<std::string> pending_values;
+        bool has_pending = false;
+
         for (const std::vector<std::string>& candidate : candidates) {
             if (candidate.size() < 2) { continue; }
 
@@ -326,13 +332,22 @@ namespace gallt {
                         return found->second;
                     }
 
-                    report(loc, ErrorCode::NamespaceMemberNotFound, std::vector<std::string>{ member, ns_name });
-                    return std::nullopt;
+                    pending_code = ErrorCode::NamespaceMemberNotFound;
+                    pending_values = std::vector<std::string>{ member, ns_name };
+                    has_pending = true;
+                    break;
                 }
 
-                report(loc, ErrorCode::ScopeOperatorOperandInvalid, std::vector<std::string>{ candidate[cut] });
-                return std::nullopt;
+                pending_code = ErrorCode::ScopeOperatorOperandInvalid;
+                pending_values = std::vector<std::string>{ candidate[cut] };
+                has_pending = true;
+                break;
             }
+        }
+
+        if (has_pending) {
+            report(loc, pending_code, pending_values);
+            return std::nullopt;
         }
 
         if (auto type_text = declared_type_of(path[0])) {
@@ -788,6 +803,8 @@ namespace gallt {
                 owner_.rewrite_type(parameter);
             }
 
+            owner_.rewrite_type(node->conversion_target_type);
+
             for (std::unique_ptr<Expression>& value : node->param_defaults) {
                 owner_.rewrite_expression(value);
             }
@@ -835,6 +852,46 @@ namespace gallt {
         bool EnterWhileStatement(WhileStatement* node) override {
             owner_.rewrite_expression(node->condition);
             owner_.rewrite_statement(node->body.get());
+            return false;
+        }
+
+        bool EnterSwitchCaseStatement(SwitchCaseStatement* node) override {
+            owner_.rewrite_expression(node->condition);
+
+            for (SwitchCaseStatement::Clause& clause : node->clauses) {
+                owner_.rewrite_expression(clause.condition);
+                owner_.push_scope();
+
+                for (std::unique_ptr<Statement>& child : clause.statements) {
+                    if (auto* vd = dynamic_cast<VariableDeclaration*>(child.get())) {
+                        owner_.declare_name(vd->name, vd->type.to_string());
+                    } else if (auto* sd = dynamic_cast<StructDefinition*>(child.get())) {
+                        owner_.declare_name(sd->name, sd->name);
+                    } else if (auto* fd = dynamic_cast<FunctionDefinition*>(child.get())) {
+                        owner_.declare_name(fd->name,
+                            fd->return_type.to_string() + "(...)");
+                    }
+                }
+
+                for (std::unique_ptr<Statement>& child : clause.statements) {
+                    owner_.rewrite_statement(child.get());
+                }
+
+                std::vector<std::unique_ptr<Statement>> kept;
+                kept.reserve(clause.statements.size());
+
+                for (std::unique_ptr<Statement>& child : clause.statements) {
+                    if (dynamic_cast<AccessNamespaceStatement*>(child.get()) != nullptr) {
+                        continue;
+                    }
+
+                    kept.push_back(std::move(child));
+                }
+
+                clause.statements = std::move(kept);
+                owner_.pop_scope();
+            }
+
             return false;
         }
 

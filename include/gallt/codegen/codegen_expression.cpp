@@ -1,6 +1,8 @@
 #include "codegen.hpp"
 #include "codegen_detail.hpp"
 #include "../semantic/constant_folding.hpp"
+#include "../semantic/operator_resolution.hpp"
+#include "../semantic/lifecycle_transfer.hpp"
 #include <algorithm>
 #include <charconv>
 #include <cmath>
@@ -84,16 +86,9 @@ namespace gallt {
             if (operand == nullptr || i >= callee->parameters.size()) {
                 continue;
             }
-            if (callee->parameters[i].kind != TypeKind::Pointer) {
-                continue;
-            }
             AST::Type operand_type = resolved_type(operand);
-            if (operand_type.kind == TypeKind::Pointer ||
-                operand_type.kind == TypeKind::Array ||
-                operand_type.kind == TypeKind::Void) {
-                continue;
-            }
-            if (!operand->is_lvalue()) {
+            if (!operator_resolution::implicitly_takes_address(operand_type,
+                operand->is_lvalue(), callee->parameters[i])) {
                 continue;
             }
             auto wrapper = std::make_unique<AST::UnaryExpression>(operand->location,
@@ -158,8 +153,11 @@ namespace gallt {
             ExprValue left = gen_expr(assign->left.get());
             if (left.address.empty()) { return ExprValue{}; }
 
+            const bool prefer_move =
+                assign->op == AST::AssignmentExpression::Operator::Assign &&
+                lifecycle_transfer::is_move_source(assign->right.get());
+
             if (assign->op == AST::AssignmentExpression::Operator::Assign) {
-                bool is_move = false;
                 AST::Expression* source_expr = assign->right.get();
 
                 if (auto* cm = dynamic_cast<AST::PrimaryExpression*>(source_expr)) {
@@ -168,17 +166,10 @@ namespace gallt {
                     }
                 }
 
-                if (auto* cm = dynamic_cast<AST::PrimaryExpression*>(assign->right.get())) {
-                    if (cm->kind == AST::PrimaryExpression::Kind::CopyMove &&
-                        cm->copy_move_kind == AST::PrimaryExpression::CopyMoveKind::Move) {
-                        is_move = true;
-                    }
-                }
-
                 if (left.type.kind == AST::TypeKind::Struct && source_expr != nullptr) {
                     std::string source_address = operand_address(source_expr);
                     if (!source_address.empty()) {
-                        if (is_move) {
+                        if (prefer_move) {
                             emit_memberwise_move(left.type, left.address, source_address, true);
                         } else {
                             emit_memberwise_copy(left.type, left.address, source_address, true);
@@ -198,7 +189,7 @@ namespace gallt {
             ExprValue right = gen_expr(assign->right.get());
 
             if (assign->op == AST::AssignmentExpression::Operator::Assign) {
-                emit_aggregate_assign(left.address, left.type, right, true);
+                emit_aggregate_assign(left.address, left.type, right, true, prefer_move);
             } else {
                 std::string old_value = new_temp("old");
                 std::string type_text = llvm_type(left.type);
@@ -957,6 +948,69 @@ namespace gallt {
         return "true";
     }
 
+    std::string CodeGenerator::equality_predicate(const ExprValue& left,
+        const ExprValue& right) {
+        const AST::Type ltype = left.type;
+        const AST::Type rtype = right.type;
+
+        if (ltype.kind == TypeKind::Float || ltype.kind == TypeKind::Double ||
+            rtype.kind == TypeKind::Float || rtype.kind == TypeKind::Double) {
+            const AST::Type common = (ltype.kind == TypeKind::Double ||
+                rtype.kind == TypeKind::Double)
+                ? AST::Type::make_double() : AST::Type::make_float();
+            const std::string lv = convert_value(left.value, ltype, common);
+            const std::string rv = convert_value(right.value, rtype, common);
+            std::string result = new_temp("fcmp");
+            emit_line(result + " = fcmp oeq " +
+                std::string(common.kind == TypeKind::Double ? "double" : "float") +
+                " " + lv + ", " + rv);
+            return result;
+        }
+
+        const bool left_address = ltype.kind == TypeKind::Pointer ||
+            ltype.kind == TypeKind::File || ltype.kind == TypeKind::Function;
+        const bool right_address = rtype.kind == TypeKind::Pointer ||
+            rtype.kind == TypeKind::File || rtype.kind == TypeKind::Function;
+
+        if (left_address || right_address) {
+            std::string lv;
+            std::string rv;
+
+            if (left_address) {
+                lv = new_temp("ptrtoint_l");
+                emit_line(lv + " = ptrtoint ptr " + left.value + " to i64");
+            } else {
+                lv = to_i64_value(left.value, ltype);
+            }
+
+            if (right_address) {
+                rv = new_temp("ptrtoint_r");
+                emit_line(rv + " = ptrtoint ptr " + right.value + " to i64");
+            } else {
+                rv = to_i64_value(right.value, rtype);
+            }
+
+            std::string result = new_temp("icmp");
+            emit_line(result + " = icmp eq i64 " + lv + ", " + rv);
+            return result;
+        }
+
+        AST::Type common = AST::Type::make_int();
+        if (ltype.integer_bit_width() > 0 && rtype.integer_bit_width() > 0) {
+            common = (ltype.promotion_rank() >= rtype.promotion_rank())
+                ? ltype : rtype;
+            if (common.integer_bit_width() == 8) {
+                common = AST::Type::make_int();
+            }
+        }
+
+        const std::string lv = convert_value(left.value, ltype, common);
+        const std::string rv = convert_value(right.value, rtype, common);
+        std::string result = new_temp("icmp");
+        emit_line(result + " = icmp eq " + llvm_type(common) + " " + lv + ", " + rv);
+        return result;
+    }
+
     CodeGenerator::ExprValue CodeGenerator::gen_primary(AST::PrimaryExpression* expr) {
         ExprValue out;
         out.type = resolved_type(expr);
@@ -1114,6 +1168,7 @@ namespace gallt {
             return out;
         case AST::PrimaryExpression::Kind::Heap: {
             AST::Type alloc_type = expr->heap_type;
+            require_lifecycle_functions(alloc_type);
             std::string count = "1";
 
             if (expr->heap_size) {
@@ -1131,6 +1186,7 @@ namespace gallt {
         case AST::PrimaryExpression::Kind::Construct:
         case AST::PrimaryExpression::Kind::PlacementConstruct: {
             AST::Type constructed = expr->construct_type;
+            require_lifecycle_functions(constructed);
             std::string storage;
 
             if (expr->kind == AST::PrimaryExpression::Kind::PlacementConstruct) {
@@ -1170,7 +1226,11 @@ namespace gallt {
                     std::vector<std::string> owned_ctor_args;
 
                     for (std::size_t i = 0; i < ctor_args.size(); ++i) {
-                        ExprValue value = gen_expr(ctor_args[i]);
+                        bool explicit_move = false;
+                        bool explicit_copy = false;
+                        AST::Expression* argument = unwrap_copy_move_argument(ctor_args[i],
+                            explicit_move, explicit_copy);
+                        ExprValue value = gen_expr(argument);
                         AST::Type want = value.type;
                         const std::size_t parameter_index = i + 1;
 
@@ -1182,7 +1242,9 @@ namespace gallt {
                         if (aggregate_parameter_uses_pointer(want) &&
                             (value.type.kind == TypeKind::Struct ||
                                 value.type.kind == TypeKind::String)) {
-                            call_text += ", ptr " + aggregate_argument_pointer(want, value);
+                            call_text += ", ptr " + aggregate_call_argument(want, value,
+                                !explicit_copy &&
+                                    (explicit_move || !expression_is_lvalue(argument)));
                         } else {
                             call_text += ", " + llvm_type(value.type) + " " + value.value;
                         }
@@ -1680,6 +1742,7 @@ namespace gallt {
                     struct_it->second->constructor_names.empty() &&
                     expr->arguments.empty()) {
                     AST::StructDefinition* def = struct_it->second;
+                    require_lifecycle_functions(def);
                     AST::Type temp_type = AST::Type::make_struct(direct->identifier);
                     std::string storage = emit_alloca(llvm_type(temp_type), "value_temp");
                     std::string callee = function_reference("__sgc_ctor$" + def->name);
@@ -1704,6 +1767,7 @@ namespace gallt {
                 if (struct_it != struct_by_name_.end() && struct_it->second != nullptr &&
                     !struct_it->second->constructor_names.empty()) {
                     AST::StructDefinition* def = struct_it->second;
+                    require_lifecycle_functions(def);
                     AST::Type temp_type = AST::Type::make_struct(direct->identifier);
                     std::string storage = emit_alloca(llvm_type(temp_type), "value_temp");
                     std::string resolved_ctor_name;
@@ -1748,13 +1812,20 @@ namespace gallt {
                             def->constructor_param_types[index];
 
                         for (std::size_t i = 0; i < ctor_args.size(); ++i) {
-                            ExprValue value = gen_expr(ctor_args[i]);
+                            bool explicit_move = false;
+                            bool explicit_copy = false;
+                            AST::Expression* argument = unwrap_copy_move_argument(
+                                ctor_args[i], explicit_move, explicit_copy);
+                            ExprValue value = gen_expr(argument);
                             AST::Type want = i < params.size() ? params[i] : value.type;
                             if (aggregate_parameter_uses_pointer(want) &&
                                 (value.type.kind == TypeKind::Struct ||
                                     value.type.kind == TypeKind::String)) {
                                 call_text += ", ptr " +
-                                    aggregate_argument_pointer(want, value);
+                                    aggregate_call_argument(want, value,
+                                        !explicit_copy &&
+                                            (explicit_move ||
+                                                !expression_is_lvalue(argument)));
                             } else {
                                 call_text += ", " + llvm_type(want) + " " +
                                     convert_value(value.value, value.type, want);
@@ -1933,12 +2004,20 @@ namespace gallt {
                     owned_args, pack_heap);
             } else {
             for (size_t i = 0; i < all_args.size(); ++i) {
-                ExprValue arg = gen_expr(all_args[i]);
+                AST::Expression* argument = all_args[i];
+                bool explicit_move = false;
+                bool explicit_copy = false;
+                AST::Expression* source = unwrap_copy_move_argument(argument,
+                    explicit_move, explicit_copy);
+
+                ExprValue arg = gen_expr(source);
                 if (!arg.owned_string.empty()) {
                     owned_args.push_back(arg.owned_string);
                 }
                 AST::Type want = (i < params.size()) ? params[i] : arg.type;
                 bool extern_call = !direct_name.empty() && function_is_extern(direct_name);
+                const bool move_argument = !explicit_copy &&
+                    (explicit_move || !expression_is_lvalue(source));
                 const bool aggregate_argument =
                     aggregate_parameter_uses_pointer(want) &&
                     (arg.type.kind == TypeKind::Struct ||
@@ -1951,7 +2030,11 @@ namespace gallt {
                         ir_args.push_back(string_cstr_pointer(addr));
                     }
                 } else if (aggregate_argument) {
-                    ir_args.push_back(aggregate_argument_pointer(want, arg));
+                    if (extern_call) {
+                        ir_args.push_back(aggregate_argument_pointer(want, arg));
+                    } else {
+                        ir_args.push_back(aggregate_call_argument(want, arg, move_argument));
+                    }
                 } else {
                     ir_args.push_back(convert_value(arg.value, arg.type, want));
                 }

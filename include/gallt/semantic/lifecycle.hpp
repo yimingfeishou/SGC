@@ -19,6 +19,7 @@ namespace gallt {
     private:
         struct StructInfo {
             AST::StructDefinition* def = nullptr;
+            AST::TopLevel* anchor = nullptr;
             std::vector<AST::SpecialMemberFunction*> constructors;
             AST::SpecialMemberFunction* destructor = nullptr;
             AST::SpecialMemberFunction* copy_constructor = nullptr;
@@ -39,6 +40,7 @@ namespace gallt {
         AST::Program* program_ = nullptr;
         std::unordered_map<std::string, StructInfo> structs_;
         std::unordered_map<std::string, AST::StructDefinition*> struct_defs_;
+        std::vector<AST::StructDefinition*> struct_order_;
         bool had_error_ = false;
         std::unordered_map<std::string, AST::Type> local_types_;
         std::unordered_set<std::string> constructed_pointers_;
@@ -82,7 +84,7 @@ namespace gallt {
         class StatementRewriter;
 
         void collect_structs();
-        void register_struct_definition(AST::StructDefinition* def);
+        void register_struct_definition(AST::StructDefinition* def, AST::TopLevel* anchor);
         void validate_special_members();
         void check_copy_constructor_source(const StructInfo& info);
         void collect_declarations();
@@ -98,8 +100,6 @@ namespace gallt {
         void rewrite_declaration(AST::VariableDeclaration* decl,
             std::vector<std::unique_ptr<AST::Statement>>& insert_after);
         void rewrite_expression(AST::Expression* expr);
-        void rewrite_assignment_call(AST::ExpressionStatement* stmt,
-            AST::AssignmentExpression* assign, const std::string& func_name);
 
         void rewrite_member_references(AST::Statement* stmt,
             const std::unordered_set<std::string>& members,
