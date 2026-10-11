@@ -315,7 +315,7 @@ namespace {
             "                                compile time is not guaranteed and\n"
             "                                compilation may terminate)\n"
             "  --extended-semantics <bool>   enable extended semantics: some constructs\n"
-            "                                forbidden by the Gallt standard document\n"
+            "                                forbidden by the Gallt standard behavior\n"
             "                                are relaxed (true or false; default false)\n"
             "Conflicts:\n"
             "  --optimization-level and --debug-symbols cannot be combined\n"
