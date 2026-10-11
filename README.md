@@ -4,7 +4,7 @@
 
 ### Overview
 
-SGC is a compiler front-end for a brand-new language called Gallt. Its backend reuses LLVM's clang/lld and emits PE executables directly on Windows 11 x64 / Linux x64. This version is experimental.
+SGC is a compiler front-end for a brand-new language called Gallt. Its backend reuses LLVM's clang/lld and emits PE/ELF executables directly on Windows 11 x64 / Linux x64. This version is experimental.
 
 Current version: `0.5.0-1010 Preview`.
 
@@ -18,13 +18,7 @@ Current version: `0.5.0-1010 Preview`.
 
 ### Build
 
-The built `sgc` locates `clang.exe` through `SGC_LLVM_BIN` or `LLVM_BIN`. If neither is set, it also probes common LLVM build directories such as:
-
-- `C:/LLVM/build/Release/bin`
-- `D:/LLVM/build/Release/bin`
-- `E:/LLVM/build/Release/bin`
-
-Running `sgc` also requires LLVM's `clang.exe` and `lld`.
+The built `sgc` locates `clang.exe` through `SGC_LLVM_BIN` or `LLVM_BIN`. Running `sgc` also requires LLVM's `clang.exe` and `lld`.
 
 ### Usage examples
 
@@ -53,7 +47,7 @@ For more usage instructions, please enter `--help` within SGC to view them.
 
 ### 简介
 
-SGC 是一个全新语言 Gallt 编译器前端。后端复用 LLVM 的 clang/lld，在 Windows 11 x64 / Linux x64 上直接生成 PE 可执行文件，该版本是实验性的。
+SGC 是一个全新语言 Gallt 编译器前端。后端复用 LLVM 的 clang/lld，在 Windows 11 x64 / Linux x64 上直接生成 PE/ELF 可执行文件，该版本是实验性的。
 
 当前版本：`0.5.0-1010 Preview`。
 
@@ -67,13 +61,7 @@ SGC 是一个全新语言 Gallt 编译器前端。后端复用 LLVM 的 clang/ll
 
 ### 构建
 
-编译生成的 `sgc` 需要通过 `SGC_LLVM_BIN` 或 `LLVM_BIN` 找到 `clang.exe`。若未设置环境变量，还会探测常见 LLVM 构建目录，例如：
-
-- `C:/LLVM/build/Release/bin`
-- `D:/LLVM/build/Release/bin`
-- `E:/LLVM/build/Release/bin`
-
-运行 `sgc` 时还需要 LLVM 的 `clang.exe` 与 `lld`。
+编译生成的 `sgc` 需要通过 `SGC_LLVM_BIN` 或 `LLVM_BIN` 找到 `clang.exe`。运行 `sgc` 时还需要 LLVM 的 `clang.exe` 与 `lld`。
 
 ### 用法示例
 
