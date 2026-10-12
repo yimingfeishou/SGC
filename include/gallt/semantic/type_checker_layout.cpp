@@ -1,7 +1,6 @@
 #include "../semantic/type_checker.hpp"
 #include "../semantic/diagnosed_registry.hpp"
 #include "type_checker_detail.hpp"
-#include "expression_parameter_names.hpp"
 #include "lifecycle_transfer.hpp"
 #include "../parser/ast.hpp"
 #include "../semantic/constant_folding.hpp"
@@ -746,17 +745,6 @@ namespace gallt {
         default:
             return true;
         }
-    }
-
-    bool TypeChecker::is_expression_parameter_temp(const AST::Initializer* init) {
-        if (init == nullptr || !init->is_expression()) {
-            return false;
-        }
-        const auto* expr_init = static_cast<const AST::ExpressionInitializer*>(init);
-        const auto* prim = dynamic_cast<const AST::PrimaryExpression*>(
-            expr_init->expr.get());
-        return prim != nullptr && prim->kind == AST::PrimaryExpression::Kind::Identifier &&
-            expression_parameter_names::is_generated_name(prim->identifier);
     }
 
     bool TypeChecker::is_move_source(const AST::Expression* expr) {

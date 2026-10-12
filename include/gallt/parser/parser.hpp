@@ -108,7 +108,6 @@ namespace gallt {
         int generic_ct_depth_ = 0;
         int generic_block_depth_ = 0;
         int emit_content_depth_ = 0;
-        bool in_expr_argument_ = false;
 
         void advance();
         void peek_token();
@@ -144,7 +143,6 @@ namespace gallt {
         std::unique_ptr<AST::TopLevel> parse_operator_definition();
         bool looks_like_operator_definition() const;
         std::string operator_token_text() const;
-        std::string expression_argument_text(std::size_t from, std::size_t to) const;
         std::unique_ptr<AST::StructDefinition> parse_struct_definition();
         std::unique_ptr<AST::NamespaceDefinition> parse_namespace_definition();
         std::unique_ptr<AST::AccessNamespaceStatement> parse_access_namespace();
@@ -176,7 +174,6 @@ namespace gallt {
         bool at_special_member_keyword() const;
         bool looks_like_generic_instantiation() const;
         std::size_t scan_generic_instantiation_end() const;
-        std::size_t scan_expr_argument_instantiation_end() const;
         bool at_struct_attribute() const;
         bool at_declaration_start() const;
         std::unique_ptr<AST::VariableDeclaration> parse_variable_declaration_with_type(

@@ -46,57 +46,7 @@ namespace gallt {
             bool first_type_keyword = is_type_start_keyword(first);
 
             if (first_ident) {
-                if (lookahead(i).lexeme == "expr" &&
-                   (second == TokenType::Identifier ||
-                       second == TokenType::LeftParen)) {
-                    i += 1;
-                    if (lookahead_type(i) == TokenType::Identifier) {
-                        ++i;
-                    }
-
-                    if (lookahead_type(i) == TokenType::LeftParen) {
-                        int depth = 0;
-
-                        for (;;) {
-                            TokenType t = lookahead_type(i);
-                            if (t == TokenType::EndOfFile) { return false; }
-                            if (t == TokenType::LeftParen) { ++depth; ++i; continue; }
-                            if (t == TokenType::RightParen) {
-                                --depth;
-                                ++i;
-                                if (depth == 0) { break; }
-                                continue;
-                            }
-                            ++i;
-                        }
-                    }
-
-                    if (lookahead_type(i) != TokenType::Arrow) {
-                        return false;
-                    }
-                    ++i;
-
-                    if (is_type_start_keyword(lookahead_type(i)) ||
-                       lookahead_type(i) == TokenType::Identifier) {
-                        ++i;
-                        while (lookahead_type(i) == TokenType::ColonColon &&
-                           lookahead_type(i + 1) == TokenType::Identifier) {
-                            i += 2;
-                        }
-                    } else {
-                        return false;
-                    }
-
-                    while (true) {
-                        TokenType t = lookahead_type(i);
-                        if (t == TokenType::Star || t == TokenType::Power ||
-                           t == TokenType::Keyword_Const) {
-                            ++i;
-                            continue;
-                        }
-                        break;
-                    }
-                } else if (second == TokenType::Identifier) {
+                if (second == TokenType::Identifier) {
                     i += 2;
                 } else if (second == TokenType::Ellipsis) {
                     i += 2;
@@ -235,68 +185,8 @@ namespace gallt {
         }
     }
 
-    std::size_t Parser::scan_expr_argument_instantiation_end() const {
-        if (current_.type != TokenType::Identifier) { return std::string::npos; }
-        std::size_t i = 1;
-        while (lookahead_type(i) == TokenType::ColonColon &&
-            lookahead_type(i + 1) == TokenType::Identifier) {
-            i += 2;
-        }
-        if (lookahead_type(i) != TokenType::Less) { return std::string::npos; }
-
-        int angle = 0;
-        int paren = 0;
-        int brace = 0;
-        bool saw_expr_argument = false;
-        for (;; ++i) {
-            TokenType t = lookahead_type(i);
-            if (t == TokenType::EndOfFile) {
-                return std::string::npos;
-            }
-            if (t == TokenType::Identifier && lookahead(i).lexeme == "expr" &&
-                (lookahead_type(i + 1) == TokenType::Identifier ||
-                    lookahead_type(i + 1) == TokenType::LeftParen)) {
-                saw_expr_argument = true;
-            }
-            switch (t) {
-            case TokenType::Less:
-                ++angle;
-                break;
-            case TokenType::Greater:
-                if (paren == 0 && brace == 0) {
-                    --angle;
-                    if (angle == 0) {
-                        return saw_expr_argument ? i + 1 : std::string::npos;
-                    }
-                }
-                break;
-            case TokenType::LeftParen:
-                ++paren;
-                break;
-            case TokenType::RightParen:
-                if (paren == 0) { return std::string::npos; }
-                --paren;
-                break;
-            case TokenType::LeftBrace:
-                ++brace;
-                break;
-            case TokenType::RightBrace:
-                if (brace == 0) { return std::string::npos; }
-                --brace;
-                break;
-            case TokenType::Unknown:
-                return std::string::npos;
-            default:
-                break;
-            }
-        }
-    }
-
     bool Parser::looks_like_generic_instantiation() const {
-        std::size_t after = scan_expr_argument_instantiation_end();
-        if (after == std::string::npos) {
-            after = scan_generic_instantiation_end();
-        }
+        std::size_t after = scan_generic_instantiation_end();
         if (after == std::string::npos) { return false; }
         if (lookahead_type(after) == TokenType::Power) {
             return declaration_name_after_pointer_suffix(after);
@@ -766,157 +656,6 @@ namespace gallt {
             GenericArgument arg;
             bool parsed_type = false;
             TokenType tt = current_.type;
-            if (tt == TokenType::Identifier && current_.lexeme == "expr" &&
-                lookahead_type(1) == TokenType::Identifier) {
-                advance();
-                arg.is_type = false;
-                arg.is_expr = true;
-                arg.constant_actual_type = Type::make_void();
-                if (current_.type == TokenType::Identifier) {
-                    arg.expr_name = std::string(current_.lexeme);
-                    advance();
-                }
-
-                if (current_.type == TokenType::LeftParen) {
-                    advance();
-                    std::vector<std::unique_ptr<Expression>> defaults;
-                    bool expr_variadic = false;
-                    auto [types, names] = parse_parameter_list(&defaults,
-                        &expr_variadic);
-                    arg.expr_param_types = std::move(types);
-                    arg.expr_param_names = std::move(names);
-
-                    if (expr_variadic) {
-                        report_error_template(ErrorCode::ExpressionParameterVariadicNotAllowed,
-                            { arg.expr_name });
-                    }
-
-                    for (const std::unique_ptr<Expression>& default_value : defaults) {
-                        if (default_value != nullptr) {
-                            report_error_template(
-                                ErrorCode::ExprParameterDisallowedSyntax,
-                                { arg.expr_name });
-                            break;
-                        }
-                    }
-
-                    if (!expect(TokenType::RightParen,
-                        "expected ')' after expression parameter list")) {
-                        return args;
-                    }
-                } else {
-                    arg.expr_shorthand = true;
-                }
-
-                if (current_.type != TokenType::Arrow) {
-                    report_error(ErrorCode::ExpressionSyntaxError,
-                        "expected '->' and a return type in expression argument");
-                    return args;
-                }
-                advance();
-                arg.expr_return_type = parse_type(true, false);
-                std::size_t body_start = mark();
-                bool block_form = false;
-
-                if (current_.type == TokenType::Assign) {
-                    advance();
-                } else if (current_.type == TokenType::LeftBrace) {
-                    block_form = true;
-                    advance();
-                } else {
-                    report_error(ErrorCode::ExpressionSyntaxError,
-                        "expected '=' or '{' in expression argument");
-                    return args;
-                }
-
-                auto body = std::make_shared<ExpressionParameterBody>();
-                body->location = current_location();
-                const bool outer_expr_argument = in_expr_argument_;
-                in_expr_argument_ = !block_form;
-
-                if (block_form) {
-                    while (current_.type != TokenType::RightBrace &&
-                        current_.type != TokenType::EndOfFile) {
-                        skip_newlines();
-                        if (current_.type == TokenType::RightBrace) { break; }
-
-                        auto stmt = parse_statement();
-
-                        if (stmt != nullptr) {
-                            body->statements.push_back(std::move(stmt));
-                        } else {
-                            synchronize();
-                        }
-                    }
-                    if (!expect(TokenType::RightBrace,
-                        "expected '}' to close expression argument block")) {
-                        return args;
-                    }
-                } else {
-                    while (true) {
-                        skip_newlines();
-                        auto stmt = parse_statement();
-
-                        if (stmt != nullptr) {
-                            body->statements.push_back(std::move(stmt));
-                        } else {
-                            break;
-                        }
-                        skip_newlines();
-
-                        if (current_.type == TokenType::Comma ||
-                            current_.type == TokenType::Greater ||
-                            current_.type == TokenType::EndOfFile) {
-                            break;
-                        }
-
-                        if (current_.type == TokenType::Semicolon) {
-                            advance();
-                            skip_newlines();
-
-                            if (current_.type == TokenType::Comma ||
-                                current_.type == TokenType::Greater) {
-                                break;
-                            }
-
-                            if (current_.type == TokenType::RightBrace ||
-                                current_.type == TokenType::EndOfFile) {
-                                break;
-                            }
-                        }
-                    }
-
-                    while (current_.type == TokenType::Semicolon) {
-                        advance();
-                        skip_newlines();
-                    }
-                }
-
-                in_expr_argument_ = outer_expr_argument;
-                skip_newlines();
-
-                if (!block_form && !body->statements.empty()) {
-                    Statement* last = body->statements.back().get();
-                    if (auto* expr_stmt = dynamic_cast<ExpressionStatement*>(last)) {
-                        auto ret = std::make_unique<ReturnStatement>(
-                            expr_stmt->location, std::move(expr_stmt->expr));
-                        body->statements.pop_back();
-                        body->statements.push_back(std::move(ret));
-                    }
-                }
-
-                arg.expr_body = body;
-                arg.text = expression_argument_text(body_start, mark());
-                args.push_back(std::move(arg));
-
-                if (current_.type == TokenType::Comma) {
-                    advance();
-                    skip_newlines();
-                    continue;
-                }
-
-                break;
-            }
             bool type_start = (is_builtin_or_void_type_keyword(tt) ||
                 tt == TokenType::Identifier);
             const bool single_bare_identifier = tt == TokenType::Identifier &&
@@ -1187,52 +926,7 @@ namespace gallt {
                 if (!is_specialization) {
                     GenericParameter param;
                     param.location = current_location();
-                    if (current_.type == TokenType::Identifier &&
-                        current_.lexeme == "expr" &&
-                        lookahead_type(1) == TokenType::Identifier) {
-                        advance();
-                        param.is_type = false;
-                        param.is_expr = true;
-                        param.name = std::string(current_.lexeme);
-                        advance();
-                        if (current_.type == TokenType::LeftParen) {
-                            advance();
-                            std::vector<std::unique_ptr<Expression>> defaults;
-                            bool expr_variadic = false;
-                            auto [types, names] = parse_parameter_list(&defaults,
-                                &expr_variadic);
-                            param.expr_param_types = std::move(types);
-                            param.expr_param_names = std::move(names);
-                            if (expr_variadic) {
-                                report_error_template(
-                                    ErrorCode::ExpressionParameterVariadicNotAllowed,
-                                    { param.name });
-                            }
-                            for (const std::unique_ptr<Expression>& default_value : defaults) {
-                                if (default_value != nullptr) {
-                                    report_error_template(
-                                        ErrorCode::ExprParameterDisallowedSyntax,
-                                        { param.name });
-                                    break;
-                                }
-                            }
-                            if (!expect(TokenType::RightParen,
-                                "expected ')' after expression parameter list")) {
-                                skip_generic_definition_tail();
-                                return nullptr;
-                            }
-                        }
-                        if (current_.type != TokenType::Arrow) {
-                            report_error(ErrorCode::ExpressionSyntaxError,
-                                "expected '->' and a return type in expression parameter declaration");
-                            skip_generic_definition_tail();
-                            return nullptr;
-                        }
-
-                        advance();
-                        param.expr_return_type = parse_type(true, false);
-                        def->parameters.push_back(std::move(param));
-                    } else if (current_.type == TokenType::Identifier) {
+                    if (current_.type == TokenType::Identifier) {
                         std::string first(current_.lexeme);
 
                         if (lookahead_type(1) == TokenType::Ellipsis) {
@@ -1306,16 +1000,6 @@ namespace gallt {
                     }
                 } else {
                     GenericPatternArg pattern;
-
-                    if (current_.type == TokenType::Identifier &&
-                        current_.lexeme == "expr" &&
-                        (lookahead_type(1) == TokenType::Identifier ||
-                            lookahead_type(1) == TokenType::LeftParen)) {
-                        report_error_template(ErrorCode::ExprParameterInSpecializationPattern,
-                            { std::string(lookahead(1).lexeme) });
-                        skip_generic_definition_tail();
-                        return nullptr;
-                    }
 
                     bool type_like = (is_builtin_type_keyword(current_.type) ||
                         current_.type == TokenType::Identifier);

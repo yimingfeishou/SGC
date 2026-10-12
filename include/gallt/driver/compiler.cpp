@@ -427,19 +427,8 @@ namespace {
 
         lifecycle.run(&combined);
 
-        TypeChecker checker(diag, expander.expression_free_identifiers(),
-            expander.expression_argument_casts(), emit_entry_point,
+        TypeChecker checker(diag, emit_entry_point,
             options.extended_semantics);
-
-        {
-            std::unordered_map<const AST::Expression*, AST::Type> call_sites;
-
-            for (const auto& entry : expander.expression_call_sites()) {
-                call_sites[entry.first] = entry.second.declared_return_type;
-            }
-
-            checker.set_expression_call_sites(call_sites);
-        }
 
         checker.check_program(&combined);
 

@@ -1,7 +1,6 @@
 #include "../semantic/type_checker.hpp"
 #include "../semantic/diagnosed_registry.hpp"
 #include "type_checker_detail.hpp"
-#include "expression_parameter_names.hpp"
 #include "lifecycle_transfer.hpp"
 #include "../parser/ast.hpp"
 #include "../semantic/constant_folding.hpp"
@@ -751,16 +750,6 @@ namespace gallt {
                    !const_drop_reported) {
                     if (!can_implicit_convert(init_type, decl->type)) {
                         if (is_null && decl->type.kind == TypeKind::File) {
-                        } else if (is_expression_parameter_temp(decl->initializer.get())) {
-                            report_error_template(decl->location,
-                              ErrorCode::ExprParameterExpansionTypeError,
-                              { decl->name, decl->type.to_string(),
-                                init_type.to_string() });
-                        } else if (expression_parameter_names::is_generated_name(decl->name)) {
-                            report_error_template(decl->location,
-                              ErrorCode::ExprParameterExpansionTypeError,
-                              { decl->name, decl->type.to_string(),
-                                init_type.to_string() });
                         } else {
                             report_error(decl->location, ErrorCode::AssignmentTypeMismatch,
                            "cannot initialize variable '" + decl->name +

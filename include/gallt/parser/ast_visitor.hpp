@@ -319,18 +319,6 @@ namespace gallt {
                 if (!visit_type(argument.constant_actual_type)) {
                     return false;
                 }
-                for (const Type& parameter : argument.expr_param_types) {
-                    if (!visit_type(parameter)) {
-                        return false;
-                    }
-                }
-                if (!visit_type(argument.expr_return_type)) {
-                    return false;
-                }
-                if (argument.expr_body != nullptr &&
-                    !visit_statements(argument.expr_body->statements)) {
-                    return false;
-                }
                 return visit_expression_shared(argument.expression);
             }
 
@@ -504,10 +492,6 @@ namespace gallt {
                     if (!EnterGenericDefinition(node)) { return true; }
                     for (const GenericParameter& parameter : node->parameters) {
                         if (!visit_type(parameter.constant_type)) { return false; }
-                        for (const Type& declared : parameter.expr_param_types) {
-                            if (!visit_type(declared)) { return false; }
-                        }
-                        if (!visit_type(parameter.expr_return_type)) { return false; }
                     }
                     for (const GenericPatternArg& pattern : node->patterns) {
                         if (!visit_type(pattern.type)) { return false; }
@@ -1037,18 +1021,6 @@ namespace gallt {
                 if (!rewrite_type(argument.constant_actual_type)) {
                     return false;
                 }
-                for (Type& parameter : argument.expr_param_types) {
-                    if (!rewrite_type(parameter)) {
-                        return false;
-                    }
-                }
-                if (!rewrite_type(argument.expr_return_type)) {
-                    return false;
-                }
-                if (argument.expr_body != nullptr &&
-                    !rewrite_statements(argument.expr_body->statements)) {
-                    return false;
-                }
                 return rewrite_expression_shared(argument.expression);
             }
 
@@ -1242,10 +1214,6 @@ namespace gallt {
                     if (!EnterGenericDefinition(node)) { return true; }
                     for (GenericParameter& parameter : node->parameters) {
                         if (!rewrite_type(parameter.constant_type)) { return false; }
-                        for (Type& declared : parameter.expr_param_types) {
-                            if (!rewrite_type(declared)) { return false; }
-                        }
-                        if (!rewrite_type(parameter.expr_return_type)) { return false; }
                     }
                     for (GenericPatternArg& pattern : node->patterns) {
                         if (!rewrite_type(pattern.type)) { return false; }

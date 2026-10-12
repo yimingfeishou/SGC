@@ -195,8 +195,6 @@ namespace gallt {
             std::string to_source_string() const;
         };
 
-        struct ExpressionParameterBody;
-
         struct GenericArgument {
             bool is_type = true;
             bool is_ambiguous_name = false;
@@ -212,20 +210,7 @@ namespace gallt {
             Type constant_actual_type;
             std::shared_ptr<Expression> expression;
             bool expression_constant = false;
-            bool is_expr = false;
-            std::string expr_name;
-            std::vector<Type> expr_param_types;
-            std::vector<std::string> expr_param_names;
-            Type expr_return_type;
-            std::shared_ptr<ExpressionParameterBody> expr_body;
-            bool expr_shorthand = false;
-
             std::string normalize() const;
-        };
-
-        struct ExpressionParameterBody {
-            SourceLocation location;
-            std::vector<std::unique_ptr<Statement>> statements;
         };
 
         struct GenericRef {
@@ -244,17 +229,6 @@ namespace gallt {
         inline std::string GenericArgument::normalize() const {
             if (is_pack_expansion) {
                 return pack_name + "...";
-            }
-
-            if (is_expr) {
-                std::string out = "expr " + expr_name + "(";
-                for (std::size_t i = 0; i < expr_param_types.size(); ++i) {
-                    if (i != 0) { out += ","; }
-                    out += expr_param_types[i].to_string();
-                }
-                out += ")";
-                out += text;
-                return out;
             }
 
             if (is_type) {
@@ -572,10 +546,6 @@ namespace gallt {
             std::string constant_type_parameter;
             GenericConstraint constraint;
             SourceLocation location;
-            bool is_expr = false;
-            std::vector<Type> expr_param_types;
-            std::vector<std::string> expr_param_names;
-            Type expr_return_type;
         };
 
         struct GenericPatternArg {

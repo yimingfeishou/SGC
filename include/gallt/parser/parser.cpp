@@ -1658,22 +1658,12 @@ namespace gallt {
     }
 
     bool Parser::is_stmt_end() const {
-        if (in_expr_argument_ &&
-            (current_.type == TokenType::Greater || current_.type == TokenType::Comma)) {
-            return true;
-        }
-
         return current_.type == TokenType::Semicolon ||
             current_.type == TokenType::Newline ||
             current_.type == TokenType::EndOfFile;
     }
 
     bool Parser::expect_stmt_end(const std::string& context) {
-        if (in_expr_argument_ &&
-            (current_.type == TokenType::Greater || current_.type == TokenType::Comma)) {
-            return true;
-        }
-
         if (current_.type == TokenType::Semicolon) {
             advance();
             return true;

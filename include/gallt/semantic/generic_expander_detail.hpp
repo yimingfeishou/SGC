@@ -41,9 +41,7 @@ namespace gallt {
                 const GenericArgument& arg = ref.arguments[i];
                 out += "|";
 
-                if (arg.is_expr) {
-                    out += "E:" + arg.text;
-                } else if (arg.is_type) {
+                if (arg.is_type) {
                     out += "T:" + arg.type.to_string();
                 } else if (arg.is_string_constant) {
                     out += "CS";

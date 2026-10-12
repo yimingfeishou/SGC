@@ -16,13 +16,8 @@ namespace gallt {
 
     class TypeChecker {
     public:
-        TypeChecker(DiagnosticEngine& diag,
-            const std::unordered_map<const AST::Expression*, std::string>&
-                expression_free_identifiers = {},
-            const std::unordered_map<const AST::Expression*,
-                std::tuple<std::string, std::size_t, AST::Type>>&
-                expression_argument_casts = {},
-            bool require_main = true, bool extended_semantics = false);
+        TypeChecker(DiagnosticEngine& diag, bool require_main = true,
+            bool extended_semantics = false);
         ~TypeChecker() = default;
 
         TypeChecker(const TypeChecker&) = delete;
@@ -48,21 +43,10 @@ namespace gallt {
         const std::unordered_map<const AST::Expression*, AST::FunctionDefinition*>&
             resolved_operators() const { return resolved_operators_; }
 
-        void set_expression_call_sites(
-            const std::unordered_map<const AST::Expression*, AST::Type>& sites) {
-            expression_call_sites_ = sites;
-        }
-
     private:
         DiagnosticEngine& diag_;
-        const std::unordered_map<const AST::Expression*, std::string>&
-            expression_free_identifiers_;
-        const std::unordered_map<const AST::Expression*,
-            std::tuple<std::string, std::size_t, AST::Type>>&
-            expression_argument_casts_;
         SymbolTable sym_table_;
         AST::Program* program_ = nullptr;
-        std::unordered_map<const AST::Expression*, AST::Type> expression_call_sites_;
         std::unordered_map<std::string, AST::StructDefinition*> predeclared_structs_;
 
         AST::FunctionDefinition* current_function_ = nullptr;
@@ -248,7 +232,6 @@ namespace gallt {
         bool type_is_copyable(const AST::Type& type) const;
         bool type_is_movable(const AST::Type& type) const;
         static bool is_move_source(const AST::Expression* expr);
-        static bool is_expression_parameter_temp(const AST::Initializer* init);
         bool is_address_of_const_identifier(const AST::Expression* expr);
 
         bool switch_case_types_comparable(const AST::Type& left,

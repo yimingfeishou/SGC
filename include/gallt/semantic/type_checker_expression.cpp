@@ -1,7 +1,6 @@
 #include "../semantic/type_checker.hpp"
 #include "../semantic/diagnosed_registry.hpp"
 #include "type_checker_detail.hpp"
-#include "expression_parameter_names.hpp"
 #include "../parser/ast.hpp"
 #include "../semantic/constant_folding.hpp"
 #include <algorithm>
@@ -26,20 +25,6 @@ namespace gallt {
                 return cached->second;
             }
         }
-        {
-            auto site = expression_call_sites_.find(expr);
-            if (site != expression_call_sites_.end() &&
-                site->second.kind == TypeKind::Void) {
-                if (!allow_void) {
-                    report_error_template(expr->location,
-                        ErrorCode::ExprParameterExpansionTypeError,
-                        { expression_display_name(expr), "void", "value" });
-                }
-                expression_types_[expr] = AST::Type::make_void();
-                return AST::Type::make_void();
-            }
-        }
-
         AST::Type operator_result;
         if (try_user_defined_operator(expr, operator_result)) {
             expression_types_[expr] = operator_result;
@@ -213,17 +198,9 @@ namespace gallt {
 
         if (!ok && !const_address_assignment) {
             if (!operator_mismatch_reported) {
-                auto* target = dynamic_cast<AST::PrimaryExpression*>(expr->left.get());
-                if (target != nullptr && target->kind == AST::PrimaryExpression::Kind::Identifier &&
-                    expression_parameter_names::has_temporary_prefix(target->identifier)) {
-                    report_error_template(expr->location,
-                        ErrorCode::ExprParameterBlockReturnTypeMismatch,
-                        { left_type.to_string(), right_type.to_string() });
-                } else {
-                    report_error(expr->location, ErrorCode::AssignmentTypeMismatch,
-                        "cannot assign type '" + right_type.to_string() +
-                        "' to type '" + left_type.to_string() + "'");
-                }
+                report_error(expr->location, ErrorCode::AssignmentTypeMismatch,
+                    "cannot assign type '" + right_type.to_string() +
+                    "' to type '" + left_type.to_string() + "'");
             }
             return AST::Type::make_error();
         }
@@ -1348,19 +1325,9 @@ namespace gallt {
             }
 
             if (!allowed) {
-                auto argument = expression_argument_casts_.find(expr);
-                if (argument != expression_argument_casts_.end()) {
-                    report_error_template(expr->location,
-                        ErrorCode::ExprParameterCallArgTypeMismatch,
-                        { std::get<0>(argument->second),
-                          std::to_string(std::get<1>(argument->second) + 1),
-                          std::get<2>(argument->second).to_string(),
-                          base_type.to_string() });
-                } else {
-                    report_error(expr->location, ErrorCode::InvalidTypeCast,
-                        "cannot cast type '" + base_type.to_string() +
-                        "' to '" + expr->cast_type.to_string() + "'");
-                }
+                report_error(expr->location, ErrorCode::InvalidTypeCast,
+                    "cannot cast type '" + base_type.to_string() +
+                    "' to '" + expr->cast_type.to_string() + "'");
                 return AST::Type::make_error();
             }
 
@@ -1765,12 +1732,7 @@ namespace gallt {
                 return sym->type;
             }
 
-            auto from_expression = expression_free_identifiers_.find(expr);
-            if (from_expression != expression_free_identifiers_.end()) {
-                report_error_template(expr->location,
-                    ErrorCode::ExprParameterFreeIdentifierUndefined,
-                    { from_expression->second });
-            } else if (sym_table_.was_declared(expr->identifier)) {
+            if (sym_table_.was_declared(expr->identifier)) {
                 report_error_template(expr->location,
                     ErrorCode::IdentifierNotInScope, { expr->identifier });
             } else {

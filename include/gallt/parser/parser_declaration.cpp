@@ -146,10 +146,7 @@ namespace gallt {
         if (current_.type == TokenType::Identifier && current_.lexeme == "operator") {
             offset = 0;
         } else if (current_.type == TokenType::Identifier) {
-            std::size_t after = scan_expr_argument_instantiation_end();
-            if (after == std::string::npos) {
-                after = scan_generic_instantiation_end();
-            }
+            std::size_t after = scan_generic_instantiation_end();
 
             if (after != std::string::npos) {
                 offset = after;

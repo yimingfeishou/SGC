@@ -238,25 +238,6 @@ namespace gallt {
                 clone_expression(e->operand.get(), sub));
         }
         if (auto* e = dynamic_cast<const PostfixExpression*>(expr)) {
-            if (e->op == PostfixExpression::Operator::FunctionCall) {
-                if (auto* callee = dynamic_cast<const PrimaryExpression*>(e->base.get())) {
-                    if (callee->kind == PrimaryExpression::Kind::Identifier &&
-                        sub.expressions.count(callee->identifier) != 0) {
-                        std::vector<std::unique_ptr<Expression>> arg_clones;
-                        for (const auto& arg : e->arguments) {
-                            arg_clones.push_back(clone_expression(arg.get(), sub));
-                        }
-                        bool ok = true;
-                        auto expanded = expand_expression_call(current_function_, sub,
-                            callee->identifier, arg_clones, e->location, ok);
-                        if (ok) {
-                            return expanded;
-                        }
-                        return make_constant_literal(e->location,
-                            ConstantValue{ 0LL, 0.0, false, false, std::string() });
-                    }
-                }
-            }
             if (e->op == PostfixExpression::Operator::Cast) {
                 if (auto* prim = dynamic_cast<const PrimaryExpression*>(e->base.get())) {
                     if (prim->kind == PrimaryExpression::Kind::Identifier) {
@@ -296,58 +277,6 @@ namespace gallt {
                     return make_constant_literal(e->location,
                         ConstantValue{ 0LL, 0.0, false, false, std::string() });
                 }
-                if (sub.expressions.count(e->identifier) != 0 &&
-                    sub.expr_arguments.count(e->identifier) == 0) {
-                    report(e->location, ErrorCode::ExprParameterCannotBeUsedAsValue,
-                        std::vector<std::string>{ e->identifier });
-                    return make_constant_literal(e->location,
-                        ConstantValue{ 0LL, 0.0, false, false, std::string() });
-                }
-                auto argument = sub.expr_arguments.find(e->identifier);
-                if (argument != sub.expr_arguments.end() && argument->second != nullptr) {
-                    Substitution neutral;
-                    auto cloned_argument = clone_expression(argument->second, neutral);
-                    auto declared = sub.expr_argument_types.find(e->identifier);
-                    if (cloned_argument != nullptr && declared != sub.expr_argument_types.end()) {
-                        Type declared_type = declared->second;
-                        bool wrap = false;
-                        switch (declared_type.kind) {
-                        case TypeKind::Int:
-                        case TypeKind::Lint:
-                        case TypeKind::Uint:
-                        case TypeKind::Luint:
-                        case TypeKind::Float:
-                        case TypeKind::Double:
-                        case TypeKind::Char:
-                        case TypeKind::Uchar:
-                        case TypeKind::Bool:
-                            wrap = true;
-                            break;
-                        default:
-                            break;
-                        }
-                        if (wrap) {
-                            auto cast = std::make_unique<PostfixExpression>(e->location,
-                                std::move(cloned_argument),
-                                PostfixExpression::Operator::Cast);
-                            cast->cast_type = declared_type;
-                            auto index_it =
-                                expression_parameter_index_.find(e->identifier);
-                            if (index_it != expression_parameter_index_.end()) {
-                                expression_argument_casts_[cast.get()] =
-                                    std::make_tuple(e->identifier, index_it->second,
-                                        declared_type);
-                            }
-                            return cast;
-                        }
-                    }
-                    return cloned_argument;
-                }
-                auto renamed = sub.renames.find(e->identifier);
-                if (renamed != sub.renames.end()) {
-                    return std::make_unique<PrimaryExpression>(e->location,
-                        renamed->second);
-                }
                 auto found = sub.types.find(e->identifier);
                 if (found != sub.types.end()) {
                     return std::make_unique<PrimaryExpression>(e->location,
@@ -381,12 +310,8 @@ namespace gallt {
                     }
                 }
                 {
-                    auto plain = std::make_unique<PrimaryExpression>(e->location,
+                    return std::make_unique<PrimaryExpression>(e->location,
                         e->identifier);
-                    if (in_expression_body_) {
-                        expression_free_identifiers_[plain.get()] = e->identifier;
-                    }
-                    return plain;
                 }
             }
             case PrimaryExpression::Kind::Parens:
@@ -443,25 +368,7 @@ namespace gallt {
 
     std::unique_ptr<Statement> GenericExpander::clone_statement(
         const Statement* stmt, const Substitution& sub) {
-        bool outermost = pending_hoisted_ == nullptr;
-        std::vector<std::unique_ptr<Statement>> hoisted;
-
-        if (outermost) {
-            pending_hoisted_ = &hoisted;
-        }
-
-        auto cloned = clone_statement_impl(stmt, sub);
-
-        if (outermost) {
-            pending_hoisted_ = nullptr;
-
-            if (!hoisted.empty()) {
-                hoisted.push_back(std::move(cloned));
-                return std::make_unique<Block>(stmt->location, std::move(hoisted));
-            }
-        }
-
-        return cloned;
+        return clone_statement_impl(stmt, sub);
     }
 
     std::unique_ptr<Statement> GenericExpander::clone_substatement(
@@ -470,177 +377,7 @@ namespace gallt {
             return nullptr;
         }
 
-        if (pending_hoisted_ != nullptr) {
-            return clone_statement_impl(stmt, sub);
-        }
-
-        std::vector<std::unique_ptr<Statement>> hoisted;
-        pending_hoisted_ = &hoisted;
-        auto cloned = clone_statement_impl(stmt, sub);
-        pending_hoisted_ = nullptr;
-
-        if (hoisted.empty()) {
-            return cloned;
-        }
-
-        hoisted.push_back(std::move(cloned));
-        return std::make_unique<Block>(stmt->location, std::move(hoisted));
-    }
-
-    bool GenericExpander::body_always_returns(const Statement* stmt) const {
-        if (stmt == nullptr) {
-            return false;
-        }
-
-        if (dynamic_cast<const ReturnStatement*>(stmt) != nullptr) {
-            return true;
-        }
-
-        if (auto* block = dynamic_cast<const Block*>(stmt)) {
-            for (auto it = block->statements.rbegin(); it != block->statements.rend(); ++it) {
-                if (dynamic_cast<const EmptyStatement*>(it->get()) != nullptr) {
-                    continue;
-                }
-
-                return body_always_returns(it->get());
-            }
-
-            return false;
-        }
-
-        if (auto* if_stmt = dynamic_cast<const IfStatement*>(stmt)) {
-            return if_stmt->else_block != nullptr &&
-                body_always_returns(if_stmt->then_block.get()) &&
-                body_always_returns(if_stmt->else_block.get());
-        }
-
-        return false;
-    }
-
-    bool GenericExpander::emit_body_into_temp(
-        const std::vector<std::unique_ptr<Statement>>& stmts,
-        const Substitution& sub, const std::string& temp_name,
-        const Type& result_type,
-        std::vector<std::unique_ptr<Statement>>& out) {
-        if (stmts.empty()) {
-            return false;
-        }
-
-        std::size_t last_index = stmts.size();
-
-        while (last_index > 0 &&
-            dynamic_cast<const EmptyStatement*>(stmts[last_index - 1].get()) != nullptr) {
-            --last_index;
-        }
-
-        if (last_index == 0) {
-            return false;
-        }
-
-        for (std::size_t i = 0; i + 1 < last_index; ++i) {
-            const Statement* stmt = stmts[i].get();
-            if (dynamic_cast<const EmptyStatement*>(stmt) != nullptr) {
-                continue;
-            }
-
-            if (body_always_returns(stmt)) {
-                if (auto* if_stmt = dynamic_cast<const IfStatement*>(stmt)) {
-                    std::vector<std::unique_ptr<Statement>> then_body;
-                    std::vector<std::unique_ptr<Statement>> else_body;
-                    const Statement* then_stmt = if_stmt->then_block.get();
-                    if (auto* block = dynamic_cast<const Block*>(then_stmt)) {
-                        for (const auto& s : block->statements) {
-                            then_body.push_back(clone_statement(s.get(), sub));
-                        }
-                    } else {
-                        then_body.push_back(clone_statement(then_stmt, sub));
-                    }
-                    const Statement* else_stmt = if_stmt->else_block.get();
-                    else_body.push_back(std::make_unique<Block>(if_stmt->location,
-                        std::vector<std::unique_ptr<Statement>>{}));
-                    std::vector<std::unique_ptr<Statement>> rest;
-
-                    for (std::size_t k = i + 1; k < last_index; ++k) {
-                        rest.push_back(clone_statement(stmts[k].get(), sub));
-                    }
-                    std::vector<std::unique_ptr<Statement>> then_result;
-                    std::vector<std::unique_ptr<Statement>> rest_result;
-                    if (!emit_body_into_temp(then_body, sub, temp_name, result_type,
-                        then_result)) {
-                        return false;
-                    }
-
-                    if (!emit_body_into_temp(rest, sub, temp_name, result_type,
-                        rest_result)) {
-                        return false;
-                    }
-                    if (else_stmt != nullptr) {
-                        std::vector<std::unique_ptr<Statement>> explicit_else;
-                        if (auto* eb = dynamic_cast<const Block*>(else_stmt)) {
-                            for (const auto& s : eb->statements) {
-                                explicit_else.push_back(clone_statement(s.get(), sub));
-                            }
-                        } else {
-                            explicit_else.push_back(clone_statement(else_stmt, sub));
-                        }
-                        std::vector<std::unique_ptr<Statement>> else_result;
-                        if (!emit_body_into_temp(explicit_else, sub, temp_name, result_type,
-                            else_result)) {
-                            return false;
-                        }
-
-                        for (auto& s : else_result) { rest_result.push_back(std::move(s)); }
-                    }
-
-                    out.push_back(std::make_unique<IfStatement>(if_stmt->location,
-                        clone_expression(if_stmt->condition.get(), sub),
-                        std::make_unique<Block>(if_stmt->location, std::move(then_result)),
-                        std::make_unique<Block>(if_stmt->location, std::move(rest_result))));
-                    return true;
-                }
-                return false;
-            }
-
-            out.push_back(clone_statement(stmt, sub));
-        }
-
-        const Statement* tail = stmts[last_index - 1].get();
-        auto make_assign = [&](const Expression* value) -> std::unique_ptr<Statement> {
-            auto target = std::make_unique<PrimaryExpression>(tail->location, temp_name);
-            auto assignment = std::make_unique<AssignmentExpression>(tail->location,
-                std::move(target), AssignmentExpression::Operator::Assign,
-                clone_expression(value, sub));
-            return std::make_unique<ExpressionStatement>(tail->location,
-                std::move(assignment));
-        };
-
-        if (auto* ret = dynamic_cast<const ReturnStatement*>(tail)) {
-            if (ret->value == nullptr) {
-                return result_type.kind == TypeKind::Void;
-            }
-            if (result_type.kind != TypeKind::Void) {
-                out.push_back(make_assign(ret->value.get()));
-            }
-            return true;
-        }
-
-        if (auto* expr_stmt = dynamic_cast<const ExpressionStatement*>(tail)) {
-            if (result_type.kind != TypeKind::Void) {
-                out.push_back(make_assign(expr_stmt->expr.get()));
-            } else {
-                out.push_back(clone_statement(tail, sub));
-            }
-            return true;
-        }
-
-        if (auto* block = dynamic_cast<const Block*>(tail)) {
-            std::vector<std::unique_ptr<Statement>> tail_stmts;
-            for (const auto& s : block->statements) {
-                tail_stmts.push_back(clone_statement(s.get(), sub));
-            }
-            return emit_body_into_temp(tail_stmts, sub, temp_name, result_type, out);
-        }
-        return false;
+        return clone_statement_impl(stmt, sub);
     }
 
     std::unique_ptr<Statement> GenericExpander::clone_statement_impl(
@@ -658,14 +395,8 @@ namespace gallt {
         if (auto* s = dynamic_cast<const VariableDeclaration*>(stmt)) {
             Type type = Type::make_void();
             substitute_type(s->type, sub, type);
-            std::string declared_name = s->name;
-            auto renamed = sub.renames.find(s->name);
-            if (renamed != sub.renames.end()) {
-                declared_name = renamed->second;
-            }
-
             auto clone = std::make_unique<VariableDeclaration>(s->location, std::move(type),
-                declared_name, s->array_size, std::nullopt,
+                s->name, s->array_size, std::nullopt,
                 s->initializer ? clone_initializer(s->initializer.get(), sub) : nullptr);
             if (s->function_pointer_type.has_value()) {
                 Type fp = Type::make_void();
@@ -807,36 +538,6 @@ namespace gallt {
     std::unique_ptr<FunctionDefinition> GenericExpander::clone_function(
         const FunctionDefinition* func, const Substitution& sub, const std::string& name) {
         Substitution body_sub = sub;
-        if (!sub.expressions.empty()) {
-            std::unordered_set<std::string> free_names;
-
-            for (const auto& entry : sub.expressions) {
-                std::unordered_set<std::string> bound_names(
-                    entry.second.parameter_names.begin(),
-                    entry.second.parameter_names.end());
-                if (entry.second.body != nullptr) {
-                    for (const auto& stmt : entry.second.body->statements) {
-                        collect_free_identifiers_in_statement(stmt.get(), free_names);
-                    }
-                }
-
-                for (const std::string& bound_name : bound_names) {
-                    free_names.erase(bound_name);
-                }
-            }
-
-            if (!free_names.empty()) {
-                std::unordered_set<std::string> locals;
-                collect_declared_names(func->body.get(), locals);
-
-                for (const std::string& local : locals) {
-                    if (free_names.count(local) != 0) {
-                        body_sub.renames[local] = local + "$" + name;
-                    }
-                }
-            }
-        }
-
         Type ret = Type::make_void();
         substitute_type(func->return_type, sub, ret);
         std::vector<Type> params;

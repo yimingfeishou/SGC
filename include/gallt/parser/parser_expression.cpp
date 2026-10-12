@@ -14,26 +14,6 @@ using namespace gallt::AST;
 namespace gallt {
     using namespace parser_detail;
 
-    std::string Parser::expression_argument_text(std::size_t from, std::size_t to) const {
-        std::string out;
-        if (from >= tokens_.size()) {
-            return out;
-        }
-
-        std::size_t end = to < tokens_.size() ? to : tokens_.size();
-
-        for (std::size_t i = from; i < end; ++i) {
-            if (tokens_[i].type == TokenType::Newline) {
-                out += ' ';
-                continue;
-            }
-
-            out += std::string(tokens_[i].lexeme);
-        }
-
-        return out;
-    }
-
     std::unique_ptr<Expression> Parser::parse_condition_expression() {
         if (current_.type != TokenType::LeftParen) {
             report_error(ErrorCode::ExpressionSyntaxError,
@@ -374,9 +354,6 @@ namespace gallt {
             current_.type == TokenType::NotEqual ||
             current_.type == TokenType::GreaterEqual ||
             current_.type == TokenType::LessEqual) {
-            if (in_expr_argument_ && current_.type == TokenType::Greater) {
-                break;
-            }
             if (at_shift_or_assign_head()) {
                 break;
             }
@@ -412,9 +389,6 @@ namespace gallt {
         while ((current_.type == TokenType::Less || current_.type == TokenType::Greater) &&
             lookahead_type(1) == current_.type &&
             !shift_followed_by_assign()) {
-            if (in_expr_argument_ && current_.type == TokenType::Greater) {
-                break;
-            }
             SourceLocation loc = current_.location;
             const bool is_left_shift = current_.type == TokenType::Less;
             advance();

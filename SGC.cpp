@@ -6,13 +6,13 @@
 #include <string>
 #include <vector>
 
-const std::string VERSION = "0.5.0-1010 Preview";
+const std::string VERSION = "0.5.0.1012 Preview";
 
 namespace gallt {
 
     int sgc_main(const std::vector<std::wstring>& arguments) {
         pal::enable_utf8_console();
-        std::cout << "Standard Gallt Compiler (sgc) " << VERSION << "\n";
+        std::cout << "Standard Gallt Compiler " << VERSION << "\n";
         std::cout << "Project repository address: https://github.com/yimingfeishou/SGC\n";
         std::cout << "Copyright (c) Yimingfeishou\n\n";
 

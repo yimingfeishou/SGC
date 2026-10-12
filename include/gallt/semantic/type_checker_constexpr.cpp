@@ -545,7 +545,7 @@ namespace gallt {
             diag_.error_count() == errors_before) {
             report_error_template(expr != nullptr ? expr->location
                                                   : SourceLocation(),
-                ErrorCode::ExprParameterRecursionLimitExceeded, {});
+                ErrorCode::ConstexprRecursionTooDeep, {});
         }
 
         return false;
@@ -563,7 +563,7 @@ namespace gallt {
             diag_.error_count() == errors_before) {
             report_error_template(function != nullptr ? function->location
                                                       : SourceLocation(),
-                ErrorCode::ExprParameterRecursionLimitExceeded, {});
+                ErrorCode::ConstexprRecursionTooDeep, {});
         }
 
         return false;
@@ -583,7 +583,7 @@ namespace gallt {
             diag_.error_count() == errors_before) {
             report_error_template(init != nullptr ? init->location
                                                   : SourceLocation(),
-                ErrorCode::ExprParameterRecursionLimitExceeded, {});
+                ErrorCode::ConstexprRecursionTooDeep, {});
         }
 
         return false;

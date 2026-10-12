@@ -16,16 +16,10 @@ using namespace gallt::AST;
 namespace gallt {
     using namespace type_checker_detail;
 
-    TypeChecker::TypeChecker(DiagnosticEngine& diag,
-        const std::unordered_map<const AST::Expression*, std::string>&
-            expression_free_identifiers,
-        const std::unordered_map<const AST::Expression*,
-            std::tuple<std::string, std::size_t, AST::Type>>&
-            expression_argument_casts,
-        bool require_main, bool extended_semantics)
-        : diag_(diag), expression_free_identifiers_(expression_free_identifiers),
-        expression_argument_casts_(expression_argument_casts),
-        require_main_(require_main), extended_semantics_(extended_semantics) {
+    TypeChecker::TypeChecker(DiagnosticEngine& diag, bool require_main,
+        bool extended_semantics)
+        : diag_(diag), require_main_(require_main),
+        extended_semantics_(extended_semantics) {
         configure_constexpr_host();
     }
 

@@ -92,17 +92,6 @@ namespace gallt {
         }
     }
 
-    std::string GenericExpander::signature_text(const std::vector<AST::Type>& types) {
-        std::string out;
-
-        for (std::size_t i = 0; i < types.size(); ++i) {
-            if (i != 0) { out += ", "; }
-            out += types[i].to_string();
-        }
-
-        return out;
-    }
-
     void GenericExpander::report(SourceLocation loc, ErrorCode code,
         const std::vector<std::string>& values) {
         if (!diagnosed_registry::reported_by_earlier_stage(diag_, loc,
@@ -364,13 +353,7 @@ namespace gallt {
 
                     for (const GenericParameter& p : def->parameters) {
                         if (p.name == member_name) {
-                            if (p.is_expr) {
-                                report(def->location,
-                                    ErrorCode::ExprParameterNameConflict,
-                                    std::vector<std::string>{ p.name });
-                            } else {
-                                report(def->location, ErrorCode::GenericMemberNameConflictsParameter, std::vector<std::string>{ member_name, p.name });
-                            }
+                            report(def->location, ErrorCode::GenericMemberNameConflictsParameter, std::vector<std::string>{ member_name, p.name });
                         }
                     }
                 }
@@ -519,150 +502,6 @@ namespace gallt {
         for (std::size_t i = 0; i < expected; ++i) {
             const GenericParameter& param = entry.primary->parameters[i];
             const GenericArgument& arg = ref.arguments[i];
-
-            if (param.is_expr) {
-                if (!arg.is_expr) {
-                    report(ref.location, ErrorCode::ExprParameterSignatureMismatch,
-                        std::vector<std::string>{ param.name, "expr", arg.normalize() });
-                    return std::nullopt;
-                }
-
-                if (!arg.expr_name.empty() && arg.expr_name != param.name) {
-                    report(ref.location, ErrorCode::ExprParameterUndefined,
-                        std::vector<std::string>{ arg.expr_name });
-                    return std::nullopt;
-                }
-
-                std::vector<AST::Type> declared_parameter_types;
-
-                for (const AST::Type& declared : param.expr_param_types) {
-                    AST::Type resolved = declared;
-                    AST::Type substituted = AST::Type::make_void();
-                    if (substitute_type(declared, primary_sub, substituted)) {
-                        resolved = substituted;
-                    }
-                    declared_parameter_types.push_back(resolved);
-                }
-
-                AST::Type declared_return_type = param.expr_return_type;
-                {
-                    AST::Type substituted = AST::Type::make_void();
-                    if (substitute_type(param.expr_return_type, primary_sub, substituted)) {
-                        declared_return_type = substituted;
-                    }
-                }
-
-                Substitution::ExpressionBinding binding;
-                binding.name = param.name;
-                binding.body = arg.expr_body;
-                binding.normalized = arg.text;
-
-                if (arg.expr_shorthand) {
-                    bool all_named = !declared_parameter_types.empty() &&
-                        param.expr_param_names.size() == declared_parameter_types.size();
-                    for (const std::string& pname : param.expr_param_names) {
-                        if (pname.empty()) { all_named = false; }
-                    }
-
-                    if (declared_parameter_types.empty()) {
-                        all_named = true;
-                    }
-
-                    if (!all_named) {
-                        report(ref.location, ErrorCode::ExprParameterShorthandRequiresParameterNames,
-                            std::vector<std::string>{ param.name });
-                        return std::nullopt;
-                    }
-
-                    binding.parameter_types = declared_parameter_types;
-                    binding.parameter_names = param.expr_param_names;
-                    binding.return_type = declared_return_type;
-                } else {
-                    if (arg.expr_param_types.size() != declared_parameter_types.size()) {
-                        report(ref.location, ErrorCode::ExprParameterSignatureMismatch,
-                            std::vector<std::string>{ param.name,
-                                signature_text(declared_parameter_types),
-                                signature_text(arg.expr_param_types) });
-                        return std::nullopt;
-                    }
-
-                    for (std::size_t k = 0; k < arg.expr_param_types.size(); ++k) {
-                        if (!(arg.expr_param_types[k] == declared_parameter_types[k])) {
-                            report(ref.location, ErrorCode::ExprParameterSignatureMismatch,
-                                std::vector<std::string>{ param.name,
-                                    signature_text(declared_parameter_types),
-                                    signature_text(arg.expr_param_types) });
-                            return std::nullopt;
-                        }
-                    }
-
-                    binding.parameter_types = declared_parameter_types;
-                    binding.parameter_names = arg.expr_param_names;
-
-                    if (binding.parameter_names.size() != binding.parameter_types.size()) {
-                        binding.parameter_names = param.expr_param_names;
-                    }
-
-                    binding.return_type = declared_return_type;
-
-                    if (!(arg.expr_return_type == declared_return_type)) {
-                        report(ref.location, ErrorCode::ExprParameterReturnTypeMismatch,
-                            std::vector<std::string>{ param.name,
-                                declared_return_type.to_string(),
-                                arg.expr_return_type.to_string() });
-                        return std::nullopt;
-                    }
-                }
-
-                if (!validate_expression_body(param, binding, ref.location)) {
-                    return std::nullopt;
-                }
-
-                if (primary_sub.types.count(param.name) != 0 ||
-                    primary_sub.constants.count(param.name) != 0 ||
-                    primary_sub.expressions.count(param.name) != 0) {
-                    report(ref.location, ErrorCode::ExprParameterNameConflict,
-                        std::vector<std::string>{ param.name });
-                    return std::nullopt;
-                }
-
-                {
-                    bool conflicts = false;
-
-                    for (std::size_t k = 0; k < entry.primary->parameters.size(); ++k) {
-                        const GenericParameter& other = entry.primary->parameters[k];
-                        if (k != i && other.name == param.name) {
-                            conflicts = true;
-                            break;
-                        }
-                    }
-
-                    if (!conflicts) {
-                        for (auto& member : entry.primary->members) {
-                            std::string member_name;
-
-                            if (auto* sd = dynamic_cast<StructDefinition*>(member.get())) {
-                                member_name = sd->name;
-                            } else if (auto* fd = dynamic_cast<FunctionDefinition*>(member.get())) {
-                                member_name = fd->name;
-                            }
-                            if (!member_name.empty() && member_name == param.name) {
-                                conflicts = true;
-                                break;
-                            }
-                        }
-                    }
-
-                    if (conflicts) {
-                        report(ref.location, ErrorCode::ExprParameterNameConflict,
-                            std::vector<std::string>{ param.name });
-                        return std::nullopt;
-                    }
-                }
-
-                primary_sub.expressions[param.name] = std::move(binding);
-                continue;
-            }
 
             if (param.is_type) {
                 if (!arg.is_type) {
@@ -892,27 +731,6 @@ namespace gallt {
             if (best >= 0) {
                 block = candidates[static_cast<std::size_t>(best)];
                 sub = candidate_subs[static_cast<std::size_t>(best)];
-                for (const auto& binding_entry : primary_sub.expressions) {
-                    if (sub.expressions.count(binding_entry.first) == 0) {
-                        sub.expressions[binding_entry.first] = binding_entry.second;
-                    }
-                }
-            }
-        }
-
-        for (const auto& binding_entry : sub.expressions) {
-            for (auto& member : block->members) {
-                std::string member_name;
-                if (auto* sd = dynamic_cast<StructDefinition*>(member.get())) {
-                    member_name = sd->name;
-                } else if (auto* fd = dynamic_cast<FunctionDefinition*>(member.get())) {
-                    member_name = fd->name;
-                }
-                if (!member_name.empty() && member_name == binding_entry.first) {
-                    report(ref.location, ErrorCode::ExprParameterNameConflict,
-                        std::vector<std::string>{ binding_entry.first });
-                    return std::nullopt;
-                }
             }
         }
 
@@ -924,22 +742,8 @@ namespace gallt {
         if (kind_it == instantiated_kind_signatures_.end()) {
             instantiated_kind_signatures_[instance_key] = kind_signature;
         } else if (kind_it->second != kind_signature) {
-            bool has_expression_argument = false;
-
-            for (const GenericArgument& arg : ref.arguments) {
-                if (arg.is_expr) {
-                    has_expression_argument = true;
-                    break;
-                }
-            }
-
-            if (has_expression_argument) {
-                report(ref.location, ErrorCode::ExprParameterNormalizationConflict,
-                    std::vector<std::string>{});
-            } else {
-                report(ref.location, ErrorCode::GenericNormalizationConflict,
-                    std::vector<std::string>{});
-            }
+            report(ref.location, ErrorCode::GenericNormalizationConflict,
+                std::vector<std::string>{});
 
             return std::nullopt;
         }
