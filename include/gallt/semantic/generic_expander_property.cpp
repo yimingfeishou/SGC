@@ -16,28 +16,6 @@ using namespace gallt::AST;
 namespace gallt {
     using namespace generic_expander_detail;
 
-    namespace {
-
-        bool text_contains_compile_time_condition(const std::string& text) {
-            std::string name = "<emit>";
-            std::string_view source_view(text);
-            std::string_view name_view(name);
-            DiagnosticEngine scratch;
-            Lexer lexer(source_view, name_view, scratch);
-            bool previous_is_const = false;
-
-            for (;;) {
-                Token token = lexer.next_token();
-                if (token.type == TokenType::EndOfFile) { return false; }
-                if (previous_is_const && token.type == TokenType::Keyword_If) {
-                    return true;
-                }
-                previous_is_const = token.type == TokenType::Keyword_Const;
-            }
-        }
-
-    }
-
     bool GenericExpander::decode_string_literal(std::string_view lexeme,
         std::string& out) const {
         if (is_literal_string_lexeme(lexeme)) {

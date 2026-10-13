@@ -225,13 +225,6 @@ namespace gallt {
         if (current_.type == TokenType::At && lookahead(1).lexeme == "else") {
             return nullptr;
         }
-        if (current_.type == TokenType::Keyword_Guide ||
-            current_.type == TokenType::Keyword_Clib) {
-            report_error(ErrorCode::ExpressionSyntaxError,
-                "guide and clib are not allowed inside a conditional block");
-            synchronize();
-            return nullptr;
-        }
         std::unique_ptr<TopLevel> item = parse_top_level();
         if (item == nullptr) {
             return nullptr;
@@ -259,13 +252,6 @@ namespace gallt {
                 break;
             }
             if (in_error_recovery_) {
-                synchronize();
-                continue;
-            }
-            if (current_.type == TokenType::Keyword_Guide ||
-                current_.type == TokenType::Keyword_Clib) {
-                report_error(ErrorCode::ExpressionSyntaxError,
-                    "guide and clib are not allowed inside a conditional block");
                 synchronize();
                 continue;
             }

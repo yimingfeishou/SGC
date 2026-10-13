@@ -16,20 +16,82 @@ namespace gallt {
 
     std::unique_ptr<Statement> Parser::parse_generic_compile_time_item() {
         if (current_.type == TokenType::Keyword_Emit) {
-            ++generic_ct_depth_;
             auto stmt = parse_emit_statement(true);
-            --generic_ct_depth_;
             return stmt;
         }
 
         if (at_const_if_statement()) {
-            ++generic_ct_depth_;
-            auto stmt = parse_if_statement(true);
-            --generic_ct_depth_;
+            auto stmt = parse_if_statement(true, true);
             return stmt;
         }
 
         return nullptr;
+    }
+
+    std::unique_ptr<Block> Parser::parse_generic_member_block() {
+        SourceLocation loc = current_location();
+        if (!expect(TokenType::LeftBrace, "expected '{' to start block")) {
+            return nullptr;
+        }
+
+        auto block = std::make_unique<Block>(loc,
+            std::vector<std::unique_ptr<Statement>>{});
+
+        while (current_.type != TokenType::RightBrace &&
+            current_.type != TokenType::EndOfFile) {
+            skip_newlines();
+
+            if (current_.type == TokenType::RightBrace ||
+                current_.type == TokenType::EndOfFile) {
+                break;
+            }
+
+            if (in_error_recovery_) {
+                synchronize();
+                continue;
+            }
+
+            std::unique_ptr<Statement> item;
+
+            if (current_.type == TokenType::Keyword_Emit || at_const_if_statement()) {
+                item = parse_generic_compile_time_item();
+            } else if (current_.type == TokenType::Keyword_Struct ||
+                at_struct_attribute() || is_type_start_keyword(current_.type) ||
+                current_.type == TokenType::Identifier) {
+                std::unique_ptr<TopLevel> member = parse_top_level();
+
+                if (member != nullptr) {
+                    if (auto* statement = dynamic_cast<Statement*>(member.get())) {
+                        member.release();
+                        item = std::unique_ptr<Statement>(statement);
+                    } else {
+                        auto wrapper = std::make_unique<TopLevelBlock>(member->location);
+                        wrapper->items.push_back(std::move(member));
+                        item = std::move(wrapper);
+                    }
+                }
+            } else {
+                item = parse_statement();
+            }
+
+            if (item != nullptr) {
+                block->statements.push_back(std::move(item));
+                continue;
+            }
+
+            if (!in_error_recovery_) {
+                report_error(ErrorCode::ExpressionSyntaxError,
+                    "failed to parse declaration in block");
+                synchronize();
+            }
+        }
+
+        if (!expect(TokenType::RightBrace, "expected '}' to close block")) {
+            return nullptr;
+        }
+
+        skip_newlines();
+        return block;
     }
 
     bool Parser::generic_param_list_is_primary_shaped() const {

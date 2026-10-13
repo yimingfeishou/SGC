@@ -105,7 +105,6 @@ namespace gallt {
         void reset_recovery_node();
 
         bool in_error_recovery_ = false;
-        int generic_ct_depth_ = 0;
         int generic_block_depth_ = 0;
         int emit_content_depth_ = 0;
 
@@ -163,6 +162,7 @@ namespace gallt {
         std::unique_ptr<AST::Expression> parse_property_argument();
         bool check_identifier_name(std::string& out, const char* context);
         std::unique_ptr<AST::TopLevel> parse_generic_definition();
+        std::unique_ptr<AST::Block> parse_generic_member_block();
         void skip_generic_definition_tail();
         bool generic_param_list_is_primary_shaped() const;
         std::vector<AST::GenericArgument> parse_generic_arguments();
@@ -182,7 +182,8 @@ namespace gallt {
         std::unique_ptr<AST::Statement> parse_statement();
         std::unique_ptr<AST::Statement> parse_declaration_or_statement();
         std::unique_ptr<AST::VariableDeclaration> parse_variable_declaration();
-        std::unique_ptr<AST::IfStatement> parse_if_statement(bool compile_time = false);
+        std::unique_ptr<AST::IfStatement> parse_if_statement(bool compile_time = false,
+            bool member_block = false);
         std::unique_ptr<AST::ForStatement> parse_for_statement();
         std::unique_ptr<AST::WhileStatement> parse_while_statement();
         std::unique_ptr<AST::SwitchCaseStatement> parse_switch_statement();

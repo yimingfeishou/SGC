@@ -381,32 +381,90 @@ namespace {
         }
 
         std::unordered_set<fs::path> expanded;
-        std::function<void(LoadedSource*)> append_in_guide_order =
-            [&](LoadedSource* current) {
-            if (current == nullptr) { return; }
-            if (!expanded.insert(current->canonical_path).second) { return; }
 
-            for (auto& node : current->program->top_levels) {
+        std::function<void(std::unique_ptr<AST::Statement>&, const fs::path&)>
+            append_branch;
+        std::function<void(std::vector<std::unique_ptr<AST::TopLevel>>&,
+            const fs::path&)> append_list;
+
+        append_branch = [&](std::unique_ptr<AST::Statement>& stmt,
+            const fs::path& dir) {
+            if (stmt == nullptr) { return; }
+
+            if (auto* block = dynamic_cast<AST::TopLevelBlock*>(stmt.get())) {
+                append_list(block->items, dir);
+                return;
+            }
+
+            if (auto* conditional = dynamic_cast<AST::ConditionalBlock*>(stmt.get())) {
+                append_branch(conditional->then_block, dir);
+                append_branch(conditional->else_block, dir);
+            }
+        };
+
+        append_list = [&](std::vector<std::unique_ptr<AST::TopLevel>>& nodes,
+            const fs::path& dir) {
+            std::vector<std::unique_ptr<AST::TopLevel>> kept;
+            kept.reserve(nodes.size());
+
+            for (std::unique_ptr<AST::TopLevel>& node : nodes) {
+                if (node == nullptr) { continue; }
+
                 if (auto* guide = dynamic_cast<AST::GuideStatement*>(node.get())) {
                     std::string gpath = normalize_library_reference(guide->path);
-                    std::optional<fs::path> resolved =
-                        resolve_guide_path(gpath, current->canonical_path.parent_path());
+                    std::optional<fs::path> resolved = resolve_guide_path(gpath, dir);
 
                     if (resolved.has_value()) {
                         auto found = by_path.find(*resolved);
 
-                        if (found != by_path.end()) {
-                            append_in_guide_order(found->second);
+                        if (found != by_path.end() &&
+                            expanded.insert(found->second->canonical_path).second) {
+                            LoadedSource* guided = found->second;
+                            append_list(guided->program->top_levels,
+                                guided->canonical_path.parent_path());
+
+                            for (std::unique_ptr<AST::TopLevel>& inner :
+                                guided->program->top_levels) {
+                                if (inner != nullptr) {
+                                    kept.push_back(std::move(inner));
+                                }
+                            }
                         }
                     }
-                } else {
-                    all_nodes.push_back(std::move(node));
+
+                    continue;
                 }
+
+                if (auto* member_block = dynamic_cast<AST::TopLevelBlock*>(node.get())) {
+                    append_list(member_block->items, dir);
+                    kept.push_back(std::move(node));
+                    continue;
+                }
+
+                if (auto* conditional = dynamic_cast<AST::ConditionalBlock*>(node.get())) {
+                    append_branch(conditional->then_block, dir);
+                    append_branch(conditional->else_block, dir);
+                    kept.push_back(std::move(node));
+                    continue;
+                }
+
+                kept.push_back(std::move(node));
             }
+
+            nodes = std::move(kept);
         };
 
         if (!sources.empty()) {
-            append_in_guide_order(&sources[main_index]);
+            LoadedSource* entry = &sources[main_index];
+
+            if (expanded.insert(entry->canonical_path).second) {
+                append_list(entry->program->top_levels,
+                    entry->canonical_path.parent_path());
+
+                for (std::unique_ptr<AST::TopLevel>& node : entry->program->top_levels) {
+                    if (node != nullptr) { all_nodes.push_back(std::move(node)); }
+                }
+            }
         }
 
         SourceLocation fake_start;

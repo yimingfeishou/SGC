@@ -384,11 +384,47 @@ namespace gallt {
         const Statement* stmt, const Substitution& sub) {
         if (stmt == nullptr) { return nullptr; }
 
+        if (auto* s = dynamic_cast<const StructDefinition*>(stmt)) {
+            return clone_struct_definition(s, sub);
+        }
+
+        if (auto* s = dynamic_cast<const EmitStatement*>(stmt)) {
+            std::vector<std::unique_ptr<Statement>> emitted;
+            std::vector<const EmitStatement*> emits{ s };
+
+            if (!expand_statement_emit_run(emits, sub, emitted)) {
+                return std::make_unique<Block>(s->location,
+                    std::vector<std::unique_ptr<Statement>>{});
+            }
+
+            return std::make_unique<Block>(s->location, std::move(emitted));
+        }
+
         if (auto* s = dynamic_cast<const Block*>(stmt)) {
             std::vector<std::unique_ptr<Statement>> statements;
-            for (const auto& child : s->statements) {
-                statements.push_back(clone_substatement(child.get(), sub));
+
+            for (std::size_t index = 0; index < s->statements.size();) {
+                std::vector<const EmitStatement*> emits;
+
+                while (index < s->statements.size() &&
+                    dynamic_cast<const EmitStatement*>(s->statements[index].get()) != nullptr) {
+                    emits.push_back(static_cast<const EmitStatement*>(
+                        s->statements[index].get()));
+                    ++index;
+                }
+
+                if (!emits.empty()) {
+                    if (!expand_statement_emit_run(emits, sub, statements)) {
+                        return std::make_unique<Block>(s->location,
+                            std::vector<std::unique_ptr<Statement>>{});
+                    }
+                    continue;
+                }
+
+                statements.push_back(clone_substatement(s->statements[index].get(), sub));
+                ++index;
             }
+
             return std::make_unique<Block>(s->location, std::move(statements));
         }
 
@@ -538,6 +574,7 @@ namespace gallt {
     std::unique_ptr<FunctionDefinition> GenericExpander::clone_function(
         const FunctionDefinition* func, const Substitution& sub, const std::string& name) {
         Substitution body_sub = sub;
+        register_local_struct_names(func->body.get(), body_sub);
         Type ret = Type::make_void();
         substitute_type(func->return_type, sub, ret);
         std::vector<Type> params;
@@ -625,6 +662,8 @@ namespace gallt {
 
     std::unique_ptr<SpecialMemberFunction> GenericExpander::clone_special_member(
         const SpecialMemberFunction* member, const Substitution& sub) {
+        Substitution body_sub = sub;
+        register_local_struct_names(member->body.get(), body_sub);
         auto clone = std::make_unique<SpecialMemberFunction>(member->location, member->kind);
         for (const Type& param : member->parameters) {
             Type substituted = Type::make_void();
@@ -647,8 +686,193 @@ namespace gallt {
         substitute_type(member->parameter_type, sub, source);
         clone->parameter_type = std::move(source);
         clone->parameter_name = member->parameter_name;
-        clone->body = clone_statement(member->body.get(), sub);
+        clone->body = clone_statement(member->body.get(), body_sub);
         return clone;
+    }
+
+    std::unique_ptr<StructDefinition> GenericExpander::clone_struct_definition(
+        const StructDefinition* def, const Substitution& sub) {
+        if (def == nullptr) { return nullptr; }
+
+        std::string name = def->name;
+        auto bound = sub.types.find(def->name);
+
+        if (bound != sub.types.end() && bound->second.kind == TypeKind::Struct) {
+            name = bound->second.struct_name;
+        }
+
+        auto clone = std::make_unique<StructDefinition>(def->location, name,
+            std::vector<StructDefinition::Member>{});
+        clone->no_copy = def->no_copy;
+        clone->no_move = def->no_move;
+
+        for (const auto& m : def->members) {
+            clone->members.push_back(clone_member(m, sub));
+        }
+
+        for (const auto& special : def->special_members) {
+            clone->special_members.push_back(clone_special_member(special.get(), sub));
+        }
+
+        return clone;
+    }
+
+    void GenericExpander::register_local_struct_names(const Statement* stmt,
+        Substitution& sub) const {
+        if (stmt == nullptr) { return; }
+
+        if (auto* def = dynamic_cast<const StructDefinition*>(stmt)) {
+            if (sub.types.find(def->name) == sub.types.end() &&
+                !sub.instance.generic_name.empty()) {
+                sub.types[def->name] = Type::make_struct(
+                    sub.instance.mangle() + "$" + def->name);
+            }
+            return;
+        }
+
+        if (auto* block = dynamic_cast<const Block*>(stmt)) {
+            for (const auto& inner : block->statements) {
+                register_local_struct_names(inner.get(), sub);
+            }
+            return;
+        }
+
+        if (auto* top_block = dynamic_cast<const TopLevelBlock*>(stmt)) {
+            for (const auto& item : top_block->items) {
+                register_local_struct_names(
+                    dynamic_cast<const Statement*>(item.get()), sub);
+            }
+            return;
+        }
+
+        if (auto* if_stmt = dynamic_cast<const IfStatement*>(stmt)) {
+            register_local_struct_names(if_stmt->then_block.get(), sub);
+            register_local_struct_names(if_stmt->else_block.get(), sub);
+            return;
+        }
+
+        if (auto* for_stmt = dynamic_cast<const ForStatement*>(stmt)) {
+            register_local_struct_names(for_stmt->init.get(), sub);
+            register_local_struct_names(for_stmt->body.get(), sub);
+            return;
+        }
+
+        if (auto* while_stmt = dynamic_cast<const WhileStatement*>(stmt)) {
+            register_local_struct_names(while_stmt->body.get(), sub);
+            return;
+        }
+
+        if (auto* switch_stmt = dynamic_cast<const SwitchCaseStatement*>(stmt)) {
+            for (const SwitchCaseStatement::Clause& clause : switch_stmt->clauses) {
+                for (const auto& child : clause.statements) {
+                    register_local_struct_names(child.get(), sub);
+                }
+            }
+        }
+    }
+
+    bool GenericExpander::expand_statement_emit_run(
+        const std::vector<const EmitStatement*>& emits, const Substitution& sub,
+        std::vector<std::unique_ptr<Statement>>& out) {
+        std::string text;
+        SourceLocation text_loc;
+
+        auto flush_text = [&]() -> bool {
+            if (text.empty()) { return true; }
+
+            std::vector<LineSplice> splices;
+            const std::string body_text = splice_line_continuations(text, splices);
+            text.clear();
+
+            if (text_contains_compile_time_condition(body_text)) {
+                report(text_loc, ErrorCode::CompileTimeConditionOutsideGenericBlock,
+                    std::vector<std::string>());
+                return false;
+            }
+
+            emit_source_pool_.push_back(
+                "void __glt_emit_body() {\n" + body_text + "\n}\n");
+            std::string& wrapper = emit_source_pool_.back();
+            std::string name = "<emit>";
+            std::string_view source_view(wrapper);
+            std::string_view name_view(name);
+            DiagnosticEngine emit_diag;
+            Lexer lexer(source_view, name_view, emit_diag);
+            Parser parser(lexer, emit_diag);
+            auto program = parser.parse();
+            auto* function = program != nullptr && program->top_levels.size() == 1
+                ? dynamic_cast<FunctionDefinition*>(program->top_levels.front().get())
+                : nullptr;
+            auto* body = function != nullptr
+                ? dynamic_cast<Block*>(function->body.get()) : nullptr;
+
+            if (emit_diag.has_errors() || body == nullptr) {
+                report(text_loc, ErrorCode::EmitBlockNotExpandable,
+                    std::vector<std::string>());
+                return false;
+            }
+
+            for (const auto& stmt : body->statements) {
+                auto clone = clone_statement(stmt.get(), sub);
+
+                if (clone == nullptr) {
+                    report(stmt->location, ErrorCode::EmitBlockNotExpandable,
+                        std::vector<std::string>());
+                    return false;
+                }
+
+                out.push_back(std::move(clone));
+            }
+
+            return true;
+        };
+
+        for (const EmitStatement* emit : emits) {
+            if (emit == nullptr) { continue; }
+
+            if (emit->is_block) {
+                if (!flush_text()) { return false; }
+
+                for (const auto& node : emit->block_items) {
+                    auto* statement = dynamic_cast<Statement*>(node.get());
+
+                    if (statement == nullptr) {
+                        report(node != nullptr ? node->location : SourceLocation(),
+                            ErrorCode::EmitBlockNotExpandable,
+                            std::vector<std::string>());
+                        return false;
+                    }
+
+                    auto clone = clone_statement(statement, sub);
+
+                    if (clone == nullptr) {
+                        report(statement->location, ErrorCode::EmitBlockNotExpandable,
+                            std::vector<std::string>());
+                        return false;
+                    }
+
+                    out.push_back(std::move(clone));
+                }
+
+                continue;
+            }
+
+            if (text.empty()) { text_loc = emit->location; }
+
+            for (const auto& piece : emit->pieces) {
+                std::string piece_text;
+
+                if (!eval_emit_piece(piece.get(), sub, piece_text)) {
+                    report(piece->location, ErrorCode::EmitStringNotConstant,
+                        std::vector<std::string>{ expression_text(piece.get()) });
+                    return false;
+                }
+
+                text += piece_text;
+            }
+        }
+
+        return flush_text();
     }
 
 }

@@ -180,6 +180,14 @@ namespace gallt {
             const AST::StructDefinition::Member& member, const Substitution& sub);
         std::unique_ptr<AST::SpecialMemberFunction> clone_special_member(
             const AST::SpecialMemberFunction* member, const Substitution& sub);
+        std::unique_ptr<AST::StructDefinition> clone_struct_definition(
+            const AST::StructDefinition* def, const Substitution& sub);
+        void register_local_struct_names(const AST::Statement* stmt,
+            Substitution& sub) const;
+        bool expand_statement_emit_run(
+            const std::vector<const AST::EmitStatement*>& emits,
+            const Substitution& sub,
+            std::vector<std::unique_ptr<AST::Statement>>& out);
 
         std::vector<AST::GenericPatternArg> parameters_as_free_patterns(
             AST::GenericDefinition* def) const;

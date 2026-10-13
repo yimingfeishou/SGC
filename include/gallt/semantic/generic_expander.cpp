@@ -1022,6 +1022,30 @@ namespace gallt {
                 continue;
             }
 
+            if (auto* function = dynamic_cast<const FunctionDefinition*>(item.get())) {
+                member_ptrs.push_back(const_cast<FunctionDefinition*>(function));
+                continue;
+            }
+
+            if (auto* struct_def = dynamic_cast<const StructDefinition*>(item.get())) {
+                member_ptrs.push_back(const_cast<StructDefinition*>(struct_def));
+                continue;
+            }
+
+            if (auto* member_block = dynamic_cast<const TopLevelBlock*>(item.get())) {
+                for (const auto& member : member_block->items) {
+                    if (dynamic_cast<const FunctionDefinition*>(member.get()) == nullptr &&
+                        dynamic_cast<const StructDefinition*>(member.get()) == nullptr) {
+                        report(member->location, ErrorCode::EmitBlockNotExpandable,
+                            std::vector<std::string>());
+                        return false;
+                    }
+
+                    member_ptrs.push_back(member.get());
+                }
+                continue;
+            }
+
             report(item->location, ErrorCode::EmitBlockNotExpandable, std::vector<std::string>());
             return false;
         }

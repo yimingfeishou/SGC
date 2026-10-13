@@ -1140,7 +1140,7 @@ namespace gallt {
             }
 
             if (tt == TokenType::Keyword_Emit) {
-                return parse_emit_statement(generic_ct_depth_ > 0);
+                return parse_emit_statement(generic_block_depth_ > 0);
             }
 
             if (tt == TokenType::Keyword_Access) {
@@ -1245,7 +1245,8 @@ namespace gallt {
         return nullptr;
     }
 
-    std::unique_ptr<IfStatement> Parser::parse_if_statement(bool compile_time) {
+    std::unique_ptr<IfStatement> Parser::parse_if_statement(bool compile_time,
+        bool member_block) {
         SourceLocation loc = current_location();
 
         if (compile_time) {
@@ -1273,7 +1274,7 @@ namespace gallt {
             return nullptr;
         }
 
-        auto then_block = parse_block();
+        auto then_block = member_block ? parse_generic_member_block() : parse_block();
 
         if (then_block == nullptr) {
             return nullptr;
@@ -1298,7 +1299,7 @@ namespace gallt {
                 return nullptr;
             }
 
-            else_block = parse_block();
+            else_block = member_block ? parse_generic_member_block() : parse_block();
 
             if (else_block == nullptr) {
                 return nullptr;

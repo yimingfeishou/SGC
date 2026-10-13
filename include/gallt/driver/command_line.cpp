@@ -58,7 +58,7 @@ namespace {
         for (int i = 1; i < argc; ++i) {
             std::wstring arg = argv[i];
 
-            if (arg == L"--help" || arg == L"-h" || arg == L"/?") {
+            if (arg == L"--help" || arg == L"-H" || arg == L"/?") {
                 out.mode = CommandMode::Help;
                 continue;
             }
@@ -98,11 +98,11 @@ namespace {
                 return &value;
             };
 
-            if (arg == L"--input" || arg == L"-i") {
+            if (arg == L"--input" || arg == L"-I") {
                 std::string* v = require_value(L"--input");
                 if (!v) { return false; }
                 out.input = *v;
-            } else if (arg == L"--output" || arg == L"-o") {
+            } else if (arg == L"--output" || arg == L"-O") {
                 std::string* v = require_value(L"--output");
                 if (!v) { return false; }
                 out.output = *v;
@@ -279,8 +279,8 @@ namespace {
             "  sgc --version\n"
             "Options:\n"
             "  --compile                     compile a Gallt source file\n"
-            "  --input,    -i <path>         input .glt file\n"
-            "  --output,   -o <path>         output executable\n"
+            "  --input,    -I <path>         input .glt file\n"
+            "  --output,   -O <path>         output executable\n"
             "  --optimization-level, -OL <n> optimization level:\n"
             "                                0 no optimization\n"
             "                                1 basic\n"
@@ -331,8 +331,8 @@ namespace {
 
     std::string version_text() {
         return
-        "Standard Gallt Compiler 0.5.0.1012 Preview (LLVM backend, x86-64 Windows and Linux)\n"
-        "Build date: 2026-10-12\n"
+        "Standard Gallt Compiler 0.5.0.1013 Preview (LLVM backend, x86-64 Windows and Linux)\n"
+        "Build date: 2026-10-13\n"
         "This version is experimental";
     }
 
