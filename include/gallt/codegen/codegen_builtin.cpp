@@ -223,11 +223,6 @@ namespace gallt {
     void CodeGenerator::emit_free_call(AST::PostfixExpression* call) {
         if (call->arguments.size() != 1) { return; }
         ExprValue arg = gen_expr(call->arguments[0].get());
-        if (arg.type.kind == TypeKind::Pointer && arg.type.pointee_type &&
-            type_contains_string(*arg.type.pointee_type)) {
-            emit_destroy_string_at(*arg.type.pointee_type, arg.value);
-        }
-
         emit_line("call void @gallt_free_ptr(ptr " + arg.value + ")");
     }
 
