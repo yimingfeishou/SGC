@@ -279,8 +279,8 @@ namespace {
             "  sgc --version\n"
             "Options:\n"
             "  --compile                     compile a Gallt source file\n"
-            "  --input,    -I <path>         input .glt file\n"
-            "  --output,   -O <path>         output executable\n"
+            "  --input,    -I <path>         input Gallt source file\n"
+            "  --output,   -O <path>         output file\n"
             "  --optimization-level, -OL <n> optimization level:\n"
             "                                0 no optimization\n"
             "                                1 basic\n"
@@ -331,8 +331,8 @@ namespace {
 
     std::string version_text() {
         return
-        "Standard Gallt Compiler 0.5.0.1014 Preview (LLVM backend, x86-64 Windows and Linux)\n"
-        "Build date: 2026-10-14\n"
+        "Standard Gallt Compiler 0.5.0-1017 Preview (LLVM backend, x86-64 Windows and Linux)\n"
+        "Build date: 2026-10-17\n"
         "This version is experimental";
     }
 

@@ -375,31 +375,33 @@ namespace gallt {
 
         if (auto* cast = dynamic_cast<AST::PostfixExpression*>(expr)) {
             if (cast->op == AST::PostfixExpression::Operator::Cast) {
+                std::string key = std::string("operator") + cast->cast_type.to_string();
+                auto found = operator_overloads_.find(key);
+
+                if (found == operator_overloads_.end()) {
+                    return false;
+                }
+
                 AST::Type operand_type = check_expression(cast->base.get());
                 if (is_custom_type(operand_type)) {
-                    std::string key = std::string("operator") + cast->cast_type.to_string();
-                    auto found = operator_overloads_.find(key);
+                    for (AST::FunctionDefinition* candidate : found->second) {
+                        if (candidate->parameters.size() != 1) {
+                            continue;
+                        }
 
-                    if (found != operator_overloads_.end()) {
-                        for (AST::FunctionDefinition* candidate : found->second) {
-                            if (candidate->parameters.size() != 1) {
-                                continue;
-                            }
+                        if (!operator_associated_with_operands(candidate,
+                            std::vector<AST::Type>{ operand_type })) {
+                            continue;
+                        }
 
-                            if (!operator_associated_with_operands(candidate,
-                                std::vector<AST::Type>{ operand_type })) {
-                                continue;
-                            }
+                        AST::Type effective = operator_resolution::effective_operand_type(
+                            operand_type, cast->base->is_lvalue(),
+                            candidate->parameters[0]);
 
-                            AST::Type effective = operator_resolution::effective_operand_type(
-                                operand_type, cast->base->is_lvalue(),
-                                candidate->parameters[0]);
-
-                            if (conversion_rank(effective, candidate->parameters[0]) >= 0) {
-                                resolved_operators_[expr] = candidate;
-                                out = candidate->return_type;
-                                return true;
-                            }
+                        if (conversion_rank(effective, candidate->parameters[0]) >= 0) {
+                            resolved_operators_[expr] = candidate;
+                            out = candidate->return_type;
+                            return true;
                         }
                     }
                 }
@@ -506,6 +508,11 @@ namespace gallt {
             operands = { assign->left.get(), assign->right.get() };
         }
         if (symbol.empty()) {
+            return false;
+        }
+
+        auto overloads = operator_overloads_.find("operator" + symbol);
+        if (overloads == operator_overloads_.end()) {
             return false;
         }
 

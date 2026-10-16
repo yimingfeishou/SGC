@@ -184,8 +184,10 @@ namespace pal {
     }
 
     std::vector<std::string> linker_mode_arguments(bool static_link) {
-        if (!static_link) { return std::vector<std::string>(); }
-        return { "-static" };
+        if (static_link) {
+            return { "-fms-runtime-lib=static" };
+        }
+        return { "-fms-runtime-lib=dll" };
     }
 
     std::vector<std::string> dynamic_library_export_arguments(

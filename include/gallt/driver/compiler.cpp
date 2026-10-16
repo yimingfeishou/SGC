@@ -102,13 +102,18 @@ namespace {
     }
 
     std::string runtime_object_cache_key(const std::string& runtime_source,
-        const std::string& optimization_flag, int debug_symbols_level) {
+        const std::string& optimization_flag, int debug_symbols_level,
+        const std::optional<bool>& static_link) {
         std::uint64_t hash = 1469598103934665603ull;
+        const std::string linker_mode = static_link.has_value()
+            ? (*static_link ? "static" : "dynamic")
+            : "default";
         const std::string parts[] = {
             runtime_source,
             optimization_flag,
             std::to_string(debug_symbols_level),
             pal::target_triple(),
+            linker_mode,
         };
 
         for (const std::string& part : parts) {
@@ -135,7 +140,8 @@ namespace {
     std::string acquire_runtime_object(const std::string& clang_path,
         const std::string& temp_dir, const std::string& runtime_c_path,
         const std::string& runtime_source, const std::string& optimization_flag,
-        int debug_symbols_level, const std::string& unique) {
+        int debug_symbols_level, const std::optional<bool>& static_link,
+        const std::string& unique) {
         const std::string cache_dir = pal::join_path(temp_dir,
             "sgc_runtime_cache");
 
@@ -146,7 +152,7 @@ namespace {
 
         const std::string cached = pal::join_path(cache_dir,
             "crt_" + runtime_object_cache_key(runtime_source, optimization_flag,
-                debug_symbols_level) + ".obj");
+                debug_symbols_level, static_link) + ".obj");
 
         if (pal::file_exists(cached) && pal::file_size(cached) > 0) {
             return cached;
@@ -167,6 +173,12 @@ namespace {
         const std::vector<std::string> debug_arguments =
             pal::compile_debug_arguments(debug_symbols_level);
         args.insert(args.end(), debug_arguments.begin(), debug_arguments.end());
+        if (static_link.has_value()) {
+            const std::vector<std::string> linker_arguments =
+                pal::linker_mode_arguments(*static_link);
+            args.insert(args.end(), linker_arguments.begin(),
+                linker_arguments.end());
+        }
         std::string output;
 
         if (pal::run_process(clang_path, args, &output) != 0) {
@@ -283,12 +295,12 @@ namespace {
         if (!options.positional.empty()) {
             std::cerr << "sgc: unexpected positional argument '" <<
                 options.positional.front() <<
-                "'; use --input <file.glt> and --output <file.exe>\n";
+                "'; use --input <file> and --output <file>\n";
             return 2;
         }
 
         if (options.input.empty()) {
-            std::cerr << "sgc: no input file; use --input <file.glt>\n";
+            std::cerr << "sgc: no input file; use --input <file>\n";
             return pal::exit_failure_code();
         }
 
@@ -560,12 +572,17 @@ namespace {
         }
 
         std::string runtime_object;
+        std::optional<bool> runtime_static_link;
+
+        if (output_kind == OutputKind::Executable) {
+            runtime_static_link = options.linker_mode == LinkerMode::Static;
+        }
 
         if (attach_runtime &&
             !pal::environment_variable_defined("SGC_KEEP_TEMP")) {
             runtime_object = acquire_runtime_object(clang_path, temp_dir,
                 c_path_text, runtime_source, optimization_flag,
-                options.debug_symbols_level, unique);
+                options.debug_symbols_level, runtime_static_link, unique);
         }
 
         std::vector<std::string> runtime_arguments;

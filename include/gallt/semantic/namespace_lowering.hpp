@@ -100,6 +100,9 @@ namespace gallt {
         void rewrite_generic_ref(AST::GenericRef& ref);
         std::optional<std::string> resolve_namespace_path(
             const std::vector<std::string>& parts, SourceLocation loc);
+        std::optional<std::string> resolve_namespace_target(
+            const std::string& prefix,
+            const std::vector<std::string>& parts) const;
         void rewrite_type(AST::Type& type);
         void rewrite_expression(std::unique_ptr<AST::Expression>& expr);
         void rewrite_shared_expression(std::shared_ptr<AST::Expression>& expr);

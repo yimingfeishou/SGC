@@ -195,13 +195,14 @@ namespace gallt {
             }
 
             if (auto* ad = dynamic_cast<AdditionNamespaceStatement*>(node.get())) {
-                std::string full = join_path(prefix, ad->name);
-                if (namespaces_.count(full) == 0) {
-                    report(ad->location, ErrorCode::AdditionNamespaceTargetMissing, std::vector<std::string>{ ad->name });
+                auto full = resolve_namespace_target(prefix, ad->path);
+                if (!full.has_value()) {
+                    report(ad->location, ErrorCode::AdditionNamespaceTargetMissing,
+                        std::vector<std::string>{ join_parts(ad->path) });
                     continue;
                 }
 
-                collect_members(ad->members, full, true, ad->location);
+                collect_members(ad->members, *full, true, ad->location);
                 continue;
             }
 
@@ -356,6 +357,44 @@ namespace gallt {
         }
 
         report(loc, ErrorCode::NamespaceUndefined, std::vector<std::string>{ path[0] });
+        return std::nullopt;
+    }
+
+    std::optional<std::string> NamespaceLowering::resolve_namespace_target(
+        const std::string& prefix,
+        const std::vector<std::string>& parts) const {
+        std::vector<std::vector<std::string>> candidates;
+
+        if (!prefix.empty()) {
+            std::vector<std::string> with_prefix = split_qualified(prefix);
+            with_prefix.insert(with_prefix.end(), parts.begin(), parts.end());
+            candidates.push_back(std::move(with_prefix));
+        }
+
+        {
+            std::vector<std::string> expanded = parts;
+
+            if (!parts.empty()) {
+                if (auto target = lookup_alias(parts[0])) {
+                    if (namespaces_.count(*target) != 0) {
+                        expanded = split_qualified(*target);
+                        expanded.insert(expanded.end(), parts.begin() + 1, parts.end());
+                    }
+                }
+            }
+
+            candidates.push_back(std::move(expanded));
+        }
+
+        candidates.push_back(parts);
+
+        for (const std::vector<std::string>& candidate : candidates) {
+            if (candidate.empty()) { continue; }
+            std::string joined = join_parts(candidate);
+
+            if (namespaces_.count(joined) != 0) { return joined; }
+        }
+
         return std::nullopt;
     }
 
@@ -1073,68 +1112,64 @@ namespace gallt {
         PoisonGuard guard(*this, node);
         if (scopes_.empty()) { push_scope(); }
 
-        auto try_namespace = [&](const std::string& name) -> const NamespaceInfo* {
-            auto found = namespaces_.find(name);
-            return found == namespaces_.end() ? nullptr : &found->second;
-        };
+        auto import_namespace = [&](const std::string& full) {
+            auto found = namespaces_.find(full);
+            if (found == namespaces_.end()) { return; }
+            const NamespaceInfo& info = found->second;
 
-        if (path.size() == 1) {
-            std::string with_prefix = join_path(namespace_prefix_, path[0]);
-            const NamespaceInfo* info = try_namespace(with_prefix);
-            if (info == nullptr) { info = try_namespace(path[0]); }
-            if (info == nullptr) {
-                report(node->location, ErrorCode::AccessNamespaceTargetInvalid, std::vector<std::string>{ path[0] });
-                return;
-            }
-
-            for (const auto& kv : info->members) {
+            for (const auto& kv : info.members) {
                 if (declared_in_current_scope(kv.first)) {
-                    report(node->location, ErrorCode::AccessNamespaceNameConflict, std::vector<std::string>{ kv.first });
+                    report(node->location, ErrorCode::AccessNamespaceNameConflict,
+                        std::vector<std::string>{ kv.first });
                     continue;
                 }
 
                 scopes_.back().aliases[kv.first] = kv.second;
             }
+
+            for (const std::string& child : info.child_namespaces) {
+                if (declared_in_current_scope(child)) {
+                    report(node->location, ErrorCode::AccessNamespaceNameConflict,
+                        std::vector<std::string>{ child });
+                    continue;
+                }
+
+                scopes_.back().aliases[child] = join_path(full, child);
+            }
+        };
+
+        auto namespace_target = resolve_namespace_target(namespace_prefix_, path);
+        if (namespace_target.has_value()) {
+            import_namespace(*namespace_target);
             return;
         }
 
-        std::vector<std::string> ns_parts(path.begin(), path.end() - 1);
-        std::string ns_name;
+        if (path.size() >= 2) {
+            std::vector<std::string> namespace_parts(path.begin(), path.end() - 1);
+            auto namespace_name = resolve_namespace_target(namespace_prefix_,
+                namespace_parts);
 
-        for (std::size_t i = 0; i < ns_parts.size(); ++i) {
-            if (i != 0) { ns_name += "::"; }
-            ns_name += ns_parts[i];
-        }
+            if (namespace_name.has_value()) {
+                auto info = namespaces_.find(*namespace_name);
+                if (info != namespaces_.end()) {
+                    auto member = info->second.members.find(path.back());
+                    if (member != info->second.members.end()) {
+                        if (declared_in_current_scope(path.back())) {
+                            report(node->location,
+                                ErrorCode::AccessNamespaceNameConflict,
+                                std::vector<std::string>{ path.back() });
+                            return;
+                        }
 
-        std::string target_text;
-
-        for (const std::string& candidate : { join_path(namespace_prefix_, ns_name), ns_name }) {
-            const NamespaceInfo* info = try_namespace(candidate);
-            if (info == nullptr) { continue; }
-            auto member = info->members.find(path.back());
-
-            if (member == info->members.end()) {
-                target_text.clear();
-                break;
+                        scopes_.back().aliases[path.back()] = member->second;
+                        return;
+                    }
+                }
             }
-
-            if (declared_in_current_scope(path.back())) {
-                report(node->location, ErrorCode::AccessNamespaceNameConflict, std::vector<std::string>{ path.back() });
-                return;
-            }
-
-            scopes_.back().aliases[path.back()] = member->second;
-            return;
         }
 
-        std::string full;
-
-        for (std::size_t i = 0; i < path.size(); ++i) {
-            if (i != 0) { full += "::"; }
-            full += path[i];
-        }
-
-        report(node->location, ErrorCode::AccessNamespaceTargetInvalid, std::vector<std::string>{ full });
+        report(node->location, ErrorCode::AccessNamespaceTargetInvalid,
+            std::vector<std::string>{ join_parts(path) });
     }
 
     void NamespaceLowering::rename_namespace_member(TopLevel* node) {
@@ -1198,8 +1233,9 @@ namespace gallt {
 
     void NamespaceLowering::lower_addition_body(AdditionNamespaceStatement* def,
         std::vector<std::unique_ptr<TopLevel>>& out) {
-        std::string full = join_path(namespace_prefix_, def->name);
-        if (namespaces_.count(full) == 0) { return; }
+        auto resolved = resolve_namespace_target(namespace_prefix_, def->path);
+        if (!resolved.has_value()) { return; }
+        std::string full = *resolved;
         std::string saved = namespace_prefix_;
         namespace_prefix_ = full;
         push_scope();

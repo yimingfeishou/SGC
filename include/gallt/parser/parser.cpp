@@ -998,17 +998,31 @@ namespace gallt {
         SourceLocation loc = current_location();
         expect(TokenType::Keyword_Addition, "expected 'addition'");
         expect(TokenType::Keyword_Namespace, "expected 'namespace' after 'addition'");
-        std::string name;
+        std::vector<std::string> path;
+        std::string first;
 
-        if (!check_identifier_name(name, "namespace name after 'addition namespace'")) {
+        if (!check_identifier_name(first, "namespace name after 'addition namespace'")) {
             return nullptr;
+        }
+
+        path.push_back(first);
+
+        while (current_.type == TokenType::ColonColon) {
+            advance();
+            std::string part;
+
+            if (!check_identifier_name(part, "identifier after '::'")) {
+                return nullptr;
+            }
+
+            path.push_back(part);
         }
 
         if (!expect(TokenType::LeftBrace, "expected '{' after namespace name")) {
             return nullptr;
         }
 
-        auto def = std::make_unique<AdditionNamespaceStatement>(loc, name);
+        auto def = std::make_unique<AdditionNamespaceStatement>(loc, std::move(path));
         def->members = parse_namespace_members();
 
         if (!expect(TokenType::RightBrace, "expected '}' to close addition namespace")) {

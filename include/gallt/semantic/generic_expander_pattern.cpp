@@ -146,6 +146,13 @@ namespace gallt {
                 return true;
             }
 
+            auto member = sub.members.find(in.struct_name);
+            if (member != sub.members.end()) {
+                GenericRef dependency = sub.instance;
+                dependency.member = in.struct_name;
+                ensure_instantiation(dependency, false);
+            }
+
             auto found = sub.types.find(in.struct_name);
             if (found != sub.types.end()) {
                 out = found->second;

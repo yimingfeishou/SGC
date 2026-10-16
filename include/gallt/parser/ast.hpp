@@ -612,12 +612,13 @@ namespace gallt {
 
         class AdditionNamespaceStatement : public TopLevel, public Statement {
         public:
-            std::string name;
+            std::vector<std::string> path;
             std::vector<std::unique_ptr<TopLevel>> members;
             SourceLocation location;
 
-            AdditionNamespaceStatement(SourceLocation loc, std::string_view n)
-                : Node(loc), TopLevel(loc), Statement(loc), name(n), location(loc) {
+            AdditionNamespaceStatement(SourceLocation loc, std::vector<std::string> p)
+                : Node(loc), TopLevel(loc), Statement(loc), path(std::move(p)),
+                location(loc) {
             }
             virtual ~AdditionNamespaceStatement() noexcept = default;
         };

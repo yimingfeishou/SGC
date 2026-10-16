@@ -47,6 +47,8 @@ namespace gallt {
                 std::unique_ptr<Node> item;
                 if (current_.type == TokenType::Keyword_Struct || at_struct_attribute()) {
                     item = parse_struct_definition();
+                } else if (looks_like_operator_definition()) {
+                    item = parse_operator_definition();
                 } else if (emit_item_starts_with_function_definition()) {
                     item = parse_function_definition();
                 } else {

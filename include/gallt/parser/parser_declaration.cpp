@@ -133,12 +133,7 @@ namespace gallt {
         if (current_.type != TokenType::Identifier || current_.lexeme != "operator") {
             return false;
         }
-        if (at_operator_symbol(lookahead_type(1))) {
-            return true;
-        }
-        return (lookahead_type(1) == TokenType::Identifier ||
-            is_type_start_keyword(lookahead_type(1))) &&
-            lookahead_type(2) == TokenType::LeftParen;
+        return looks_like_operator_definition();
     }
 
     bool Parser::looks_like_operator_definition() const {
@@ -189,15 +184,29 @@ namespace gallt {
             return true;
         }
         std::size_t target = offset + 1;
-        if (lookahead_type(target) == TokenType::Identifier) {
-            while (lookahead_type(target + 1) == TokenType::ColonColon &&
-                lookahead_type(target + 2) == TokenType::Identifier) {
-                target += 2;
+        int depth = 0;
+
+        for (;;) {
+            TokenType t = lookahead_type(target);
+            if (t == TokenType::EndOfFile || t == TokenType::Newline ||
+                t == TokenType::Semicolon || t == TokenType::LeftBrace ||
+                t == TokenType::RightBrace || t == TokenType::Comma ||
+                t == TokenType::RightParen) {
+                return false;
             }
+            if (t == TokenType::LeftParen && depth == 0) {
+                return true;
+            }
+            if (t == TokenType::Less) {
+                ++depth;
+            } else if (t == TokenType::Greater) {
+                if (depth == 0) {
+                    return false;
+                }
+                --depth;
+            }
+            ++target;
         }
-        return (lookahead_type(target) == TokenType::Identifier ||
-            is_type_start_keyword(lookahead_type(target))) &&
-            lookahead_type(target + 1) == TokenType::LeftParen;
     }
 
     bool Parser::at_operator_parameter_list() const {
