@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-const std::string VERSION = "0.5.0-1020 Preview";
+const std::string VERSION = "0.5.0-1021 Preview";
 
 namespace gallt {
 
