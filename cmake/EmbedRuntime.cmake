@@ -40,7 +40,7 @@ function(sgc_embed_runtime)
 
     string(SHA256 _hash "${_combined}")
 
-    set(_prologue [=[// WARNING: embed_runtime.ps1 AUTO-GENERATED FILE - DO NOT EDIT BY HAND
+    set(_prologue [=[// WARNING: EmbedRuntime.cmake AUTO-GENERATED FILE - DO NOT EDIT BY HAND
 
 #ifndef GALLT_RUNTIME_CRT_EMBEDDED_HPP
 #define GALLT_RUNTIME_CRT_EMBEDDED_HPP
