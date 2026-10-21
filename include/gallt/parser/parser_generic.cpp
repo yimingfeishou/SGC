@@ -299,6 +299,12 @@ namespace gallt {
             case TokenType::Identifier: {
                 std::string id(current_.lexeme);
 
+                if (looks_like_generic_instantiation()) {
+                    GenericRef ref = parse_generic_reference(id);
+                    return std::make_unique<PrimaryExpression>(loc,
+                        std::move(ref));
+                }
+
                 if ((id == "size" || id == "align") &&
                     lookahead_type(1) == TokenType::LeftParen) {
                     advance();
@@ -510,6 +516,7 @@ namespace gallt {
         };
         auto greater_is_comparison = [&]() -> bool {
             if (current_.type != TokenType::Greater) { return false; }
+            if (generic_argument_depth_ > 0) { return false; }
             switch (lookahead_type(1)) {
             case TokenType::IntegerLiteral:
             case TokenType::FloatLiteral:
@@ -706,6 +713,18 @@ namespace gallt {
     }
 
     std::vector<GenericArgument> Parser::parse_generic_arguments() {
+        struct ArgumentDepthGuard {
+            explicit ArgumentDepthGuard(int& depth) : depth_(depth) {
+                ++depth_;
+            }
+
+            ~ArgumentDepthGuard() {
+                --depth_;
+            }
+
+            int& depth_;
+        } depth_guard(generic_argument_depth_);
+
         std::vector<GenericArgument> args;
         if (!expect(TokenType::Less, "expected '<' to start generic argument list")) {
             return args;
@@ -718,11 +737,15 @@ namespace gallt {
             GenericArgument arg;
             bool parsed_type = false;
             TokenType tt = current_.type;
-            bool type_start = (is_builtin_or_void_type_keyword(tt) ||
-                tt == TokenType::Identifier);
-            const bool single_bare_identifier = tt == TokenType::Identifier &&
-                (lookahead_type(1) == TokenType::Comma ||
-                    lookahead_type(1) == TokenType::Greater);
+              bool type_start = (is_builtin_or_void_type_keyword(tt) ||
+                  tt == TokenType::Identifier);
+              const bool single_bare_identifier = tt == TokenType::Identifier &&
+                  (lookahead_type(1) == TokenType::Comma ||
+                      lookahead_type(1) == TokenType::Greater);
+              if (single_bare_identifier &&
+                  declared_value_names_.count(std::string(current_.lexeme)) != 0) {
+                  type_start = false;
+              }
 
             if (tt == TokenType::Identifier &&
                 lookahead_type(1) == TokenType::Ellipsis) {
@@ -765,11 +788,18 @@ namespace gallt {
 
                 if ((current_.type == TokenType::Comma || current_.type == TokenType::Greater) &&
                     !t.to_string().empty()) {
-                    arg.is_type = true;
-                    arg.is_ambiguous_name = single_bare_identifier;
-                    arg.type = std::move(t);
-                    arg.text = arg.type.to_string();
-                    parsed_type = true;
+                      arg.is_type = true;
+                      arg.is_ambiguous_name = single_bare_identifier;
+                      arg.type = std::move(t);
+                      arg.text = arg.type.to_string();
+                      if (arg.type.kind == TypeKind::Struct &&
+                          arg.type.generic_ref &&
+                          !arg.type.generic_ref->member.empty()) {
+                          arg.expression = std::make_shared<PrimaryExpression>(
+                              arg.type.generic_ref->location,
+                              *arg.type.generic_ref);
+                      }
+                      parsed_type = true;
                 } else {
                     reset_to(m);
                 }
@@ -1184,7 +1214,8 @@ namespace gallt {
 
             if (member != nullptr) {
                 if (dynamic_cast<StructDefinition*>(member.get()) == nullptr &&
-                    dynamic_cast<FunctionDefinition*>(member.get()) == nullptr) {
+                    dynamic_cast<FunctionDefinition*>(member.get()) == nullptr &&
+                    dynamic_cast<VariableDeclaration*>(member.get()) == nullptr) {
                     report_error_at(member->location, ErrorCode::GenericStatementNotAllowed,
                         "executable statements are not allowed directly inside a generic block");
                     continue;

@@ -27,7 +27,6 @@ namespace gallt {
             { ErrorCode::FunctionArgCountMismatch, "function call argument count mismatch: expected '[num]', provided '[num2]'" },
             { ErrorCode::FunctionArgTypeMismatch, "function call argument type mismatch: argument '[index]' expects '[type1]', got '[type2]'" },
             { ErrorCode::SubscriptNotInteger, "array index must be of integer type, got '[type]'" },
-            { ErrorCode::SubscriptOutOfBounds, "array index out of bounds: index '[value]' is outside [0, '[size]')" },
             { ErrorCode::EmptyArrayInitializer, "empty array initializer; the array length cannot be inferred" },
             { ErrorCode::ArrayLengthMismatch, "array initializer length does not match the declaration: declared '[size]', initialized '[size2]'" },
             { ErrorCode::IdentifierNotInScope, "identifier '[identifier]' is not in the current scope" },
@@ -52,7 +51,6 @@ namespace gallt {
             { ErrorCode::DerefNonPointer, "dereference requires a pointer operand, got '[type]'" },
             { ErrorCode::AddressOfNonLValue, "address-of requires an lvalue operand, got a non-lvalue expression" },
             { ErrorCode::PointerArithmeticInvalid, "invalid pointer arithmetic operands: expected a pointer and an integer, got '[type1]' and '[type2]'" },
-            { ErrorCode::NullPointerDereference, "dereference of a null pointer" },
             { ErrorCode::FreeNonPointer, "free() operand must be of pointer type, got '[type]'" },
             { ErrorCode::HeapFirstArgNotType, "heap() first argument must be a type name, got '[expr]'" },
             { ErrorCode::HeapSecondArgNotInteger, "heap() second argument must be of integer type, got '[type]'" },
@@ -67,9 +65,7 @@ namespace gallt {
             { ErrorCode::LibraryNotFound, "guide / clib() cannot find the library" },
             { ErrorCode::FileArgCountMismatch, "file function '[function]' argument count mismatch: expected '[num]', provided '[num2]'" },
             { ErrorCode::FileArgTypeMismatch, "file function '[function]' argument '[index]' type mismatch: expected '[type1]', got '[type2]'" },
-            { ErrorCode::FileOpenModeInvalid, "invalid file open mode: '[mode]'" },
             { ErrorCode::FileHandleRequired, "file operation requires a file* value, got '[type]'" },
-            { ErrorCode::FileSeekOriginInvalid, "fileseek() origin must be 0, 1 or 2, got '[value]'" },
             { ErrorCode::FileBufferNotPointer, "file read/write buffer must be of pointer type, got '[type]'" },
             { ErrorCode::FileSizeNotInt, "file read/write size must be of type int, got '[type]'" },
             { ErrorCode::FilePathOrModeNotString, "file path or mode must be of type string, got '[type]'" },
@@ -105,9 +101,6 @@ namespace gallt {
             { ErrorCode::SpecialMemberReturnValue, "a special member function may not return a value with 'return'" },
             { ErrorCode::NoCopyViolation, "type '[type]' is marked [nocopy]; copy construction and copy assignment are not allowed" },
             { ErrorCode::NoMoveViolation, "type '[type]' is marked [nomove]; move construction and move assignment are not allowed" },
-            { ErrorCode::DestructNonConstructed, "destruct called on an object that was not allocated by construct" },
-            { ErrorCode::DestructTwice, "destruct called twice on the same object" },
-            { ErrorCode::PlacementTargetInvalid, "placement construction target memory is too small or misaligned" },
             { ErrorCode::SpecialMemberDirectCall, "special member function '[function]' cannot be called directly through '.' or '->' (explicit destructor excepted)" },
             { ErrorCode::SpecialMemberAmbiguous, "special member function '[function]' overload resolution is ambiguous" },
             { ErrorCode::SpecialMemberOnNonStruct, "type '[type]' is not a struct; special member functions cannot be defined" },
@@ -172,6 +165,7 @@ namespace gallt {
             { ErrorCode::InstantiationDepthTooDeep, "generic instantiation recursion depth is too deep, the limit is '[depth]', the current depth is '[value]'" },
             { ErrorCode::FallthroughOutsideSwitch, "'fallthrough' statement may only appear inside a switch-case" },
             { ErrorCode::ConstexprRecursionTooDeep, "compile-time function expression recursion is too deep" },
+            { ErrorCode::ConstantInitializerSideEffect, "constant '[const]' initializer has a side effect" },
         };
 
         const char* const kUnknownErrorTemplate =

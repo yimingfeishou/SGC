@@ -72,6 +72,9 @@ namespace gallt {
             for (;;) {
                 Token token = lexer.next_token();
                 if (token.type == TokenType::EndOfFile) { return false; }
+                if (token.type == TokenType::At) {
+                    return true;
+                }
                 if (previous_is_const && token.type == TokenType::Keyword_If) {
                     return true;
                 }

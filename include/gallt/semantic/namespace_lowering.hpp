@@ -20,12 +20,18 @@ namespace gallt {
         bool run(AST::Program* program);
 
         bool lower_new_top_levels(std::vector<std::unique_ptr<AST::TopLevel>>& nodes);
+        bool rewrite_new_generated_top_level(AST::TopLevel* node);
+        bool rewrite_new_generated_statement(AST::Statement* node);
 
     private:
         struct NamespaceInfo {
             std::unordered_map<std::string, std::string> members;
             std::unordered_map<std::string, std::string> member_kinds;
+            std::unordered_map<std::string, std::size_t> member_orders;
+            std::unordered_map<std::string, bool> member_from_addition;
             std::unordered_set<std::string> child_namespaces;
+            std::unordered_map<std::string, std::size_t> child_orders;
+            std::unordered_map<std::string, bool> child_from_addition;
             SourceLocation location;
         };
 
@@ -40,6 +46,9 @@ namespace gallt {
         std::map<std::string, NamespaceInfo> namespaces_;
         std::vector<Scope> scopes_;
         std::string namespace_prefix_;
+        std::size_t next_declaration_order_ = 0;
+        std::unordered_map<const AST::AccessNamespaceStatement*, std::size_t>
+            access_orders_;
         bool had_error_ = false;
         SourceLocation type_location_hint_;
         std::unordered_set<const AST::Node*> poisoned_;

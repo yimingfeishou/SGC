@@ -28,11 +28,13 @@ namespace gallt {
             const AST::ExternDeclaration*>& resolved_externs,
         const std::unordered_map<const AST::Expression*,
             AST::FunctionDefinition*>& resolved_operators,
+        const std::unordered_set<std::string>& referenced_builtins,
         DiagnosticEngine* diagnostics, int debug_symbols_level,
         bool emit_entry_point, bool no_runtime, bool gallt_abi)
         : program_(program), expression_types_(expression_types),
         resolved_functions_(resolved_functions), resolved_externs_(resolved_externs),
-        resolved_operators_(resolved_operators), diagnostics_(diagnostics),
+        resolved_operators_(resolved_operators),
+        referenced_builtins_(referenced_builtins), diagnostics_(diagnostics),
         debug_level_(debug_symbols_level), emit_entry_point_(emit_entry_point),
         no_runtime_(no_runtime), gallt_abi_(gallt_abi) {
     }
@@ -105,7 +107,38 @@ namespace gallt {
     }
 
     std::string CodeGenerator::struct_type_name(const std::string& name) const {
-        return "%struct.gallt." + name;
+        const AST::StructDefinition* def = lookup_struct_definition(name);
+        return struct_type_name(def != nullptr ? def : nullptr);
+    }
+
+    std::string CodeGenerator::struct_type_name(
+        const AST::StructDefinition* def) const {
+        if (def != nullptr) {
+            auto found = struct_ir_names_.find(def);
+            if (found != struct_ir_names_.end()) {
+                return "%struct.gallt." + found->second;
+            }
+        }
+
+        return "%struct.gallt." +
+            (def != nullptr ? def->name : std::string("unknown"));
+    }
+
+    const AST::StructDefinition* CodeGenerator::lookup_struct_definition(
+        const std::string& name) const {
+        if (current_function_ != nullptr &&
+            current_function_->owning_struct != nullptr &&
+            current_function_->owning_struct->name == name) {
+            return current_function_->owning_struct;
+        }
+
+        for (auto it = struct_scopes_.rbegin(); it != struct_scopes_.rend(); ++it) {
+            auto found = it->find(name);
+            if (found != it->end()) { return found->second; }
+        }
+
+        auto found = struct_by_name_.find(name);
+        return found == struct_by_name_.end() ? nullptr : found->second;
     }
 
     std::string CodeGenerator::llvm_type(const AST::Type& type) {
@@ -193,6 +226,10 @@ namespace gallt {
         struct_by_name_.clear();
         struct_defs_.clear();
         instantiated_structs_.clear();
+        struct_scopes_.clear();
+        struct_name_scopes_.clear();
+        struct_ir_names_.clear();
+        local_struct_counter_ = 0;
 
         StructCollectRewriter visitor(*this);
 
@@ -203,8 +240,25 @@ namespace gallt {
 
     void CodeGenerator::collect_structs_in_statement(AST::Statement* stmt) {
         if (auto* st = dynamic_cast<AST::StructDefinition*>(stmt)) {
-            if (!struct_by_name_.count(st->name)) {
-                struct_by_name_[st->name] = st;
+            if (struct_ir_names_.find(st) == struct_ir_names_.end()) {
+                std::string ir_name = st->name;
+                bool used = false;
+                for (const auto& entry : struct_ir_names_) {
+                    if (entry.second == ir_name) {
+                        used = true;
+                        break;
+                    }
+                }
+                if (used) {
+                    ir_name += "$" + std::to_string(++local_struct_counter_);
+                }
+                struct_ir_names_[st] = std::move(ir_name);
+            }
+            if (std::find(struct_defs_.begin(), struct_defs_.end(), st) ==
+                struct_defs_.end()) {
+                if (!struct_by_name_.count(st->name)) {
+                    struct_by_name_[st->name] = st;
+                }
                 struct_defs_.push_back(st);
             }
         }
@@ -216,9 +270,10 @@ namespace gallt {
             return type_contains_string(*type.element_type);
         }
         if (type.kind == TypeKind::Struct) {
-            auto it = struct_by_name_.find(type.struct_name);
-            if (it != struct_by_name_.end()) {
-                for (const auto& m : it->second->members) {
+            const AST::StructDefinition* def =
+                lookup_struct_definition(type.struct_name);
+            if (def != nullptr) {
+                for (const auto& m : def->members) {
                     if (type_contains_string(m.type)) { return true; }
                 }
             }
@@ -262,6 +317,7 @@ namespace gallt {
         emit_preamble();
         emit_struct_types();
         emit_runtime_declarations();
+        emit_builtin_function_wrappers();
         emit_function_declarations();
         emit_global_variables();
         emit_functions();
@@ -596,17 +652,19 @@ namespace gallt {
     }
 
     void CodeGenerator::emit_struct_types() {
-        std::unordered_set<std::string> emitted;
+        std::unordered_set<const AST::StructDefinition*> emitted;
 
         std::function<void(AST::StructDefinition*)> visit = [&](AST::StructDefinition* def) {
-            if (emitted.count(def->name)) { return; }
-            emitted.insert(def->name);
+            if (emitted.count(def) != 0) { return; }
+            emitted.insert(def);
 
             for (const auto& m : def->members) {
                 std::function<void(const AST::Type&)> deps = [&](const AST::Type& t) {
                     if (t.kind == TypeKind::Struct) {
-                        auto it = struct_by_name_.find(t.struct_name);
-                        if (it != struct_by_name_.end()) { visit(it->second); }
+                        const AST::StructDefinition* def =
+                            lookup_struct_definition(t.struct_name);
+                        if (def != nullptr) { visit(
+                            const_cast<AST::StructDefinition*>(def)); }
                     } else if (t.kind == TypeKind::Array && t.element_type) {
                         deps(*t.element_type);
                     }
@@ -620,7 +678,7 @@ namespace gallt {
                 body += llvm_type(def->members[i].type);
             }
             body += " }";
-            emit_line(struct_type_name(def->name) + " = type " + body);
+            emit_line(struct_type_name(def) + " = type " + body);
         };
 
         for (AST::StructDefinition* def : struct_defs_) {
@@ -801,12 +859,16 @@ namespace gallt {
     void CodeGenerator::collect_global_variables() {
         global_vars_.clear();
         const_globals_.clear();
-        runtime_const_globals_.clear();
+        runtime_globals_.clear();
 
         for (const auto& top : program_->top_levels) {
             if (auto* var = dynamic_cast<AST::VariableDeclaration*>(top.get())) {
                 require_lifecycle_functions(var->type);
-                if (var->type.is_const) {
+                const bool is_const = var->type.is_const ||
+                    (var->type.kind == TypeKind::Array &&
+                        var->type.element_type &&
+                        var->type.element_type->is_const);
+                if (is_const) {
                     const_globals_.push_back(var);
                 } else {
                     global_vars_.push_back(var);
@@ -837,30 +899,12 @@ namespace gallt {
     void CodeGenerator::emit_global_variables() {
         global_symbols_.clear();
 
-        for (AST::VariableDeclaration* var : const_globals_) {
-            LocalInfo info;
-            if (fold_constant_declaration(var, info)) {
-                global_symbols_[var->name] = std::move(info);
-                continue;
-            }
-
-            runtime_const_globals_.push_back(var);
-            std::string address = "@glt_g_" + var->name;
-            emit_line(address + " = " + module_local_prefix() + "global " +
-                llvm_type(var->type) +
-                " zeroinitializer");
-
-            LocalInfo fallback;
-            fallback.type = var->type;
-            fallback.address = address;
-            global_symbols_[var->name] = std::move(fallback);
-        }
-
-        for (AST::VariableDeclaration* var : global_vars_) {
+        auto emit_definition = [&](AST::VariableDeclaration* var,
+            const std::string& initializer) {
             std::string address = "@glt_g_" + var->name;
             std::string type_text = llvm_type(var->type);
             std::string definition = address + " = " + module_local_prefix() +
-                "global " + type_text + " zeroinitializer";
+                "global " + type_text + " " + initializer;
 
             if (debug_level_ >= 2) {
                 const unsigned expression_id = next_debug_id();
@@ -888,17 +932,55 @@ namespace gallt {
             info.type = var->type;
             info.address = address;
             global_symbols_[var->name] = std::move(info);
+        };
+
+        for (const auto& top : program_->top_levels) {
+            auto* var = dynamic_cast<AST::VariableDeclaration*>(top.get());
+            if (var == nullptr) { continue; }
+
+            const bool is_const = var->type.is_const ||
+                (var->type.kind == TypeKind::Array &&
+                    var->type.element_type &&
+                    var->type.element_type->is_const);
+
+            if (is_const) {
+                if (var->initializer == nullptr) {
+                    ConstantNumeric zero;
+                    zero.is_float = var->type.is_floating();
+                    constant_values_[var->name] = zero;
+                    emit_definition(var, "zeroinitializer");
+                    continue;
+                }
+
+                LocalInfo info;
+                if (fold_constant_declaration(var, info)) {
+                    global_symbols_[var->name] = std::move(info);
+                    continue;
+                }
+            } else {
+                std::string initializer;
+                if (build_static_global_initializer(var, initializer)) {
+                    emit_definition(var, initializer);
+                    continue;
+                }
+            }
+
+            runtime_globals_.push_back(var);
+            emit_definition(var, "zeroinitializer");
         }
     }
 
     void CodeGenerator::emit_global_initializer() {
         emit_global_deinit_function();
-        if (global_vars_.empty() && runtime_const_globals_.empty()) { return; }
+        if (runtime_globals_.empty()) { return; }
 
         debug_subprogram_id_ = 0;
         debug_location_valid_ = false;
         scopes_.clear();
         cleanup_scopes_.clear();
+        constant_scopes_.clear();
+        struct_scopes_.clear();
+        struct_name_scopes_.clear();
         push_scope();
         emitted_labels_.clear();
         current_label_.clear();
@@ -910,19 +992,7 @@ namespace gallt {
         hoisted_allocas_.clear();
         hoist_insert_index_ = lines_.size();
 
-        for (AST::VariableDeclaration* var : global_vars_) {
-            if (var->initializer) {
-                emit_initializer_to_address(var, "@glt_g_" + var->name);
-            } else if (!var->constructed_by_lowering &&
-                var->type.kind == TypeKind::Struct) {
-                AST::ArrayInitializer empty_init(var->location,
-                    std::vector<std::unique_ptr<AST::Initializer>>{});
-                emit_struct_brace_initialization("@glt_g_" + var->name, var->type,
-                    &empty_init);
-            }
-        }
-
-        for (AST::VariableDeclaration* var : runtime_const_globals_) {
+        for (AST::VariableDeclaration* var : runtime_globals_) {
             if (var->initializer) {
                 emit_initializer_to_address(var, "@glt_g_" + var->name);
             } else if (!var->constructed_by_lowering &&
@@ -959,6 +1029,9 @@ namespace gallt {
         debug_location_valid_ = false;
         scopes_.clear();
         cleanup_scopes_.clear();
+        constant_scopes_.clear();
+        struct_scopes_.clear();
+        struct_name_scopes_.clear();
         push_scope();
         emitted_labels_.clear();
         current_label_.clear();
@@ -971,21 +1044,15 @@ namespace gallt {
         hoisted_allocas_.clear();
         hoist_insert_index_ = lines_.size();
 
-        for (auto it = global_vars_.rbegin(); it != global_vars_.rend(); ++it) {
-            AST::VariableDeclaration* var = *it;
-            bool destructible = false;
-            if (var->type.kind == TypeKind::Struct) {
-                auto def_it = struct_by_name_.find(var->type.struct_name);
-                destructible = def_it != struct_by_name_.end() &&
-                    def_it->second != nullptr && def_it->second->needs_destruction;
+        for (auto it = program_->top_levels.rbegin();
+            it != program_->top_levels.rend(); ++it) {
+            auto* var = dynamic_cast<AST::VariableDeclaration*>(it->get());
+            if (var == nullptr || var->constructed_by_lowering) { continue; }
+            auto symbol = global_symbols_.find(var->name);
+            if (symbol == global_symbols_.end() ||
+                symbol->second.address.rfind("@glt_g_", 0) != 0) {
+                continue;
             }
-            if (!destructible && !type_contains_string(var->type)) { continue; }
-            emit_destroy_string_at(var->type, "@glt_g_" + var->name);
-        }
-
-        for (auto it = runtime_const_globals_.rbegin();
-            it != runtime_const_globals_.rend(); ++it) {
-            AST::VariableDeclaration* var = *it;
             bool destructible = false;
             if (var->type.kind == TypeKind::Struct) {
                 auto def_it = struct_by_name_.find(var->type.struct_name);
@@ -1081,9 +1148,31 @@ namespace gallt {
         return nullptr;
     }
 
+    const CodeGenerator::ConstantNumeric* CodeGenerator::lookup_constant_numeric(
+        const std::string& name) const {
+        for (std::size_t i = constant_scopes_.size(); i > 0; --i) {
+            const auto& constants = constant_scopes_[i - 1];
+            auto found = constants.find(name);
+            if (found != constants.end()) {
+                return &found->second;
+            }
+
+            if (i - 1 < scopes_.size() &&
+                scopes_[i - 1].find(name) != scopes_[i - 1].end()) {
+                return nullptr;
+            }
+        }
+
+        auto global = constant_values_.find(name);
+        return global == constant_values_.end() ? nullptr : &global->second;
+    }
+
     void CodeGenerator::push_scope() {
         scopes_.emplace_back();
         cleanup_scopes_.emplace_back();
+        constant_scopes_.emplace_back();
+        struct_scopes_.emplace_back();
+        struct_name_scopes_.push_back(struct_by_name_);
     }
 
     void CodeGenerator::pop_scope() {
@@ -1096,6 +1185,19 @@ namespace gallt {
             }
             owned.clear();
             cleanup_scopes_.pop_back();
+        }
+
+        if (!constant_scopes_.empty()) {
+            constant_scopes_.pop_back();
+        }
+
+        if (!struct_scopes_.empty()) {
+            struct_scopes_.pop_back();
+        }
+
+        if (!struct_name_scopes_.empty()) {
+            struct_by_name_ = std::move(struct_name_scopes_.back());
+            struct_name_scopes_.pop_back();
         }
 
         scopes_.pop_back();
@@ -1148,6 +1250,9 @@ namespace gallt {
     void CodeGenerator::emit_function(AST::FunctionDefinition* func) {
         scopes_.clear();
         cleanup_scopes_.clear();
+        constant_scopes_.clear();
+        struct_scopes_.clear();
+        struct_name_scopes_.clear();
         push_scope();
         emitted_labels_.clear();
         current_label_.clear();
@@ -1692,7 +1797,14 @@ namespace gallt {
 
         bool EnterEmptyStatement(EmptyStatement*) override { return false; }
 
-        bool EnterStructDefinition(StructDefinition*) override { return false; }
+        bool EnterStructDefinition(StructDefinition* node) override {
+            if (owner_.struct_scopes_.empty()) {
+                owner_.struct_scopes_.emplace_back();
+            }
+            owner_.struct_scopes_.back()[node->name] = node;
+            owner_.struct_by_name_[node->name] = node;
+            return false;
+        }
 
         bool EnterGenericDefinition(GenericDefinition*) override { return false; }
 

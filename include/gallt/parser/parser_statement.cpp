@@ -40,17 +40,46 @@ namespace gallt {
             advance();
             skip_newlines();
             ++emit_content_depth_;
+            const bool generic_member_context =
+                (generic_block_depth_ > 0 || generated_emit_context_) &&
+                function_body_depth_ == 0;
             while (current_.type != TokenType::RightBrace &&
                 current_.type != TokenType::EndOfFile) {
                 skip_newlines();
                 if (current_.type == TokenType::RightBrace) { break; }
                 std::unique_ptr<Node> item;
-                if (current_.type == TokenType::Keyword_Struct || at_struct_attribute()) {
-                    item = parse_struct_definition();
-                } else if (looks_like_operator_definition()) {
-                    item = parse_operator_definition();
-                } else if (emit_item_starts_with_function_definition()) {
-                    item = parse_function_definition();
+                if (generic_member_context) {
+                    if (current_.type == TokenType::Keyword_Emit ||
+                        at_const_if_statement()) {
+                        std::unique_ptr<Statement> compile_time_item =
+                            parse_generic_compile_time_item();
+                        item = std::move(compile_time_item);
+                    } else {
+                        const TokenType item_type = current_.type;
+                        const bool top_level_item =
+                            item_type == TokenType::Keyword_Guide ||
+                            item_type == TokenType::Keyword_Clib ||
+                            item_type == TokenType::Keyword_Extern ||
+                            item_type == TokenType::Keyword_Generics ||
+                            item_type == TokenType::Keyword_Namespace ||
+                            item_type == TokenType::Keyword_Access ||
+                            item_type == TokenType::Keyword_Addition ||
+                            item_type == TokenType::At ||
+                            item_type == TokenType::Keyword_Export ||
+                            item_type == TokenType::Keyword_Struct ||
+                            at_struct_attribute() ||
+                            ((is_type_start_keyword(item_type) ||
+                                item_type == TokenType::Identifier) &&
+                                (at_declaration_start() ||
+                                    looks_like_operator_definition() ||
+                                    (item_type == TokenType::Identifier &&
+                                        looks_like_generic_instantiation())));
+                        if (top_level_item) {
+                            item = parse_top_level();
+                        } else {
+                            item = parse_statement();
+                        }
+                    }
                 } else {
                     item = parse_statement();
                 }

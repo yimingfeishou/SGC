@@ -76,7 +76,7 @@ namespace gallt {
         bool resolved = true;
         if (element_index != nullptr) {
             ConstantValue index_value;
-            resolved = evaluate_with_substitution(element_index, sub, index_value);
+            resolved = evaluate_constant_with_members(element_index, sub, index_value);
             if (resolved) {
                 const long long raw = index_value.is_float
                     ? static_cast<long long>(index_value.float_value)
@@ -173,7 +173,7 @@ namespace gallt {
                     ? expr->arguments[0].get() : nullptr);
             if (index_expr != nullptr) {
                 ConstantValue index;
-                if (evaluate_with_substitution(index_expr, sub, index)) {
+                if (evaluate_constant_with_members(index_expr, sub, index)) {
                     long long raw = index.is_float
                         ? static_cast<long long>(index.float_value)
                         : index.int_value;
@@ -260,7 +260,7 @@ namespace gallt {
                     ConstantValue{ 0LL, 0.0, false, false, std::string() });
             }
             ConstantValue index;
-            if (!evaluate_with_substitution(index_expr, sub, index)) {
+            if (!evaluate_constant_with_members(index_expr, sub, index)) {
                 report(index_expr->location, ErrorCode::PackSubscriptNotInteger,
                     std::vector<std::string>{ expression_text(index_expr) });
                 return make_constant_literal(expr->location,

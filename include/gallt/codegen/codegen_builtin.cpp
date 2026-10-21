@@ -15,6 +15,57 @@ using namespace gallt::AST;
 namespace gallt {
     using namespace codegen_detail;
 
+    std::string CodeGenerator::builtin_function_reference(
+        const std::string& name) {
+        static const std::unordered_map<std::string, std::string> references = {
+            { "output", "@gallt_output_string" },
+            { "free", "@gallt_free_ptr" },
+            { "fileopen", "@gallt_file_open" },
+            { "fileclose", "@gallt_file_close" },
+            { "fileflush", "@gallt_file_flush" },
+            { "fileread", "@gallt_file_read" },
+            { "filewrite", "@gallt_file_write" },
+            { "filewritebytes", "@gallt_file_write_bytes" },
+            { "filegetc", "@gallt_file_getc" },
+            { "fileputc", "@gallt_file_putc" },
+            { "filewriteline", "@gallt_file_writeline" },
+            { "fileseek", "@gallt_file_seek" },
+            { "filetell", "@gallt_file_tell" },
+            { "fileeof", "@gallt_file_eof" },
+            { "fileerror", "@gallt_file_error" },
+            { "fileremove", "@gallt_file_remove" },
+            { "filerename", "@gallt_file_rename" },
+            { "fileexists", "@gallt_file_exists" },
+            { "filesize", "@gallt_file_size" },
+            { "filecopy", "@gallt_file_copy" },
+            { "filemkdir", "@gallt_file_mkdir" },
+            { "fileremovedir", "@gallt_file_removedir" },
+            { "strlen", "@gallt_string_length" },
+            { "strcompare", "@gallt_string_compare" },
+            { "strcontains", "@gallt_string_contains" },
+            { "strfind", "@gallt_string_find" },
+            { "strcharat", "@gallt_string_char_at" },
+            { "strsetchar", "@gallt_string_set_char" },
+            { "strsplitcount", "@gallt_string_split_count" },
+            { "strwrite", "@gallt_string_write" },
+            { "strwritefile", "@gallt_string_write_file" },
+        };
+        static const std::unordered_set<std::string> wrappers = {
+            "input", "filereadline", "strconcat", "strcopy", "strmove",
+            "strsubstr", "strreplace", "strupper", "strlower", "strtrim",
+            "strsplitget", "strread",
+        };
+
+        auto direct = references.find(name);
+        if (direct != references.end()) {
+            return direct->second;
+        }
+        if (wrappers.find(name) != wrappers.end()) {
+            return "@sgc_builtin_" + name;
+        }
+        return std::string();
+    }
+
     std::string CodeGenerator::function_reference(const std::string& name) {
         if (name == "main") { return "@glt_main"; }
 
@@ -36,7 +87,74 @@ namespace gallt {
             return "@glt_" + name;
         }
 
-        return std::string();
+        return builtin_function_reference(name);
+    }
+
+    void CodeGenerator::emit_builtin_function_wrappers() {
+        auto emit_sret_wrapper = [&](const std::string& name,
+                                     const std::string& callee,
+                                     const std::vector<std::string>& params) {
+            std::string definition = "define void @sgc_builtin_" + name +
+                "(ptr %result";
+            std::string call = "call void @" + callee + "(ptr %result";
+            for (std::size_t i = 0; i < params.size(); ++i) {
+                definition += ", " + params[i] + " %arg" + std::to_string(i);
+                call += ", " + params[i] + " %arg" + std::to_string(i);
+            }
+            definition += ") {";
+            call += ")";
+            emit_line(definition);
+            emit_line("entry:");
+            emit_line(call);
+            emit_line("ret void");
+            emit_line("}");
+        };
+
+        if (referenced_builtins_.count("input") != 0) {
+            emit_line("define i32 @sgc_builtin_input() {");
+            emit_line("entry:");
+            emit_line("%input_slot = alloca i32");
+            emit_line("call void @gallt_input_i32(ptr %input_slot)");
+            emit_line("%input_value = load i32, ptr %input_slot");
+            emit_line("ret i32 %input_value");
+            emit_line("}");
+        }
+        if (referenced_builtins_.count("filereadline") != 0) {
+            emit_sret_wrapper("filereadline", "gallt_file_readline", { "ptr" });
+        }
+        if (referenced_builtins_.count("strconcat") != 0) {
+            emit_sret_wrapper("strconcat", "gallt_string_concat", { "ptr", "ptr" });
+        }
+        if (referenced_builtins_.count("strcopy") != 0) {
+            emit_sret_wrapper("strcopy", "gallt_string_copy", { "ptr" });
+        }
+        if (referenced_builtins_.count("strmove") != 0) {
+            emit_sret_wrapper("strmove", "gallt_string_move", { "ptr" });
+        }
+        if (referenced_builtins_.count("strsubstr") != 0) {
+            emit_sret_wrapper("strsubstr", "gallt_string_substr",
+                { "ptr", "i32", "i32" });
+        }
+        if (referenced_builtins_.count("strreplace") != 0) {
+            emit_sret_wrapper("strreplace", "gallt_string_replace",
+                { "ptr", "ptr", "ptr" });
+        }
+        if (referenced_builtins_.count("strupper") != 0) {
+            emit_sret_wrapper("strupper", "gallt_string_upper", { "ptr" });
+        }
+        if (referenced_builtins_.count("strlower") != 0) {
+            emit_sret_wrapper("strlower", "gallt_string_lower", { "ptr" });
+        }
+        if (referenced_builtins_.count("strtrim") != 0) {
+            emit_sret_wrapper("strtrim", "gallt_string_trim", { "ptr" });
+        }
+        if (referenced_builtins_.count("strsplitget") != 0) {
+            emit_sret_wrapper("strsplitget", "gallt_string_split_at",
+                { "ptr", "ptr", "i32" });
+        }
+        if (referenced_builtins_.count("strread") != 0) {
+            emit_sret_wrapper("strread", "gallt_string_read", {});
+        }
     }
 
     bool CodeGenerator::ast_function_exists(const std::string& name) const {

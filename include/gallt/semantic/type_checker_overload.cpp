@@ -254,11 +254,54 @@ namespace gallt {
         return false;
     }
 
+    std::vector<AST::FunctionDefinition*> TypeChecker::scoped_operator_candidates(
+        const std::string& key,
+        const std::vector<AST::Type>& operand_types) const {
+        std::vector<AST::FunctionDefinition*> result;
+        auto found = operator_overloads_.find(key);
+        if (found == operator_overloads_.end()) {
+            return result;
+        }
+
+        std::string scope = current_function_ != nullptr
+            ? name_namespace_prefix(current_function_->name) : std::string();
+
+        for (;;) {
+            for (AST::FunctionDefinition* candidate : found->second) {
+                auto candidate_scope = operator_namespaces_.find(candidate);
+                if (candidate_scope != operator_namespaces_.end() &&
+                    candidate_scope->second == scope) {
+                    result.push_back(candidate);
+                }
+            }
+
+            if (!result.empty() || scope.empty()) {
+                break;
+            }
+
+            const std::size_t separator = scope.rfind('$');
+            scope = separator == std::string::npos
+                ? std::string() : scope.substr(0, separator);
+        }
+
+        if (!result.empty()) {
+            return result;
+        }
+
+        for (AST::FunctionDefinition* candidate : found->second) {
+            if (operator_associated_with_operands(candidate, operand_types)) {
+                result.push_back(candidate);
+            }
+        }
+        return result;
+    }
+
     AST::FunctionDefinition* TypeChecker::resolve_user_operator(const std::string& op,
         const std::vector<AST::Expression*>& operands,
         const std::vector<AST::Type>& operand_types, SourceLocation loc) {
-        auto it = operator_overloads_.find("operator" + op);
-        if (it == operator_overloads_.end()) {
+        std::vector<AST::FunctionDefinition*> candidates =
+            scoped_operator_candidates("operator" + op, operand_types);
+        if (candidates.empty()) {
             return nullptr;
         }
 
@@ -273,12 +316,8 @@ namespace gallt {
         };
         std::vector<Candidate> viable;
 
-        for (AST::FunctionDefinition* candidate : it->second) {
+        for (AST::FunctionDefinition* candidate : candidates) {
             if (candidate->parameters.size() != operand_types.size()) {
-                continue;
-            }
-
-            if (!operator_associated_with_operands(candidate, operand_types)) {
                 continue;
             }
 
@@ -376,21 +415,13 @@ namespace gallt {
         if (auto* cast = dynamic_cast<AST::PostfixExpression*>(expr)) {
             if (cast->op == AST::PostfixExpression::Operator::Cast) {
                 std::string key = std::string("operator") + cast->cast_type.to_string();
-                auto found = operator_overloads_.find(key);
-
-                if (found == operator_overloads_.end()) {
-                    return false;
-                }
-
                 AST::Type operand_type = check_expression(cast->base.get());
                 if (is_custom_type(operand_type)) {
-                    for (AST::FunctionDefinition* candidate : found->second) {
+                    std::vector<AST::FunctionDefinition*> candidates =
+                        scoped_operator_candidates(key,
+                            std::vector<AST::Type>{ operand_type });
+                    for (AST::FunctionDefinition* candidate : candidates) {
                         if (candidate->parameters.size() != 1) {
-                            continue;
-                        }
-
-                        if (!operator_associated_with_operands(candidate,
-                            std::vector<AST::Type>{ operand_type })) {
                             continue;
                         }
 

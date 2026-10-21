@@ -42,6 +42,9 @@ namespace gallt {
 
         const std::unordered_map<const AST::Expression*, AST::FunctionDefinition*>&
             resolved_operators() const { return resolved_operators_; }
+        const std::unordered_set<std::string>& referenced_builtins() const {
+            return referenced_builtins_;
+        }
 
     private:
         DiagnosticEngine& diag_;
@@ -59,6 +62,8 @@ namespace gallt {
         bool builtins_declared_ = false;
 
         std::unordered_map<std::string, AST::StructDefinition*> struct_defs_;
+        std::vector<std::unordered_map<std::string, AST::StructDefinition*>>
+            struct_scopes_;
 
         std::unordered_map<const AST::Expression*, AST::Type> expression_types_;
         std::unordered_set<const AST::FunctionDefinition*> declared_functions_;
@@ -73,6 +78,7 @@ namespace gallt {
             resolved_externs_;
         std::unordered_map<const AST::Expression*, AST::FunctionDefinition*> resolved_operators_;
         std::unordered_set<const AST::PostfixExpression*> resolved_overload_calls_;
+        std::unordered_set<std::string> referenced_builtins_;
         std::unordered_map<std::string, std::vector<AST::FunctionDefinition*>> operator_overloads_;
         std::unordered_set<const AST::FunctionDefinition*> redefined_operators_;
 
@@ -107,6 +113,9 @@ namespace gallt {
         AST::FunctionDefinition* resolve_user_operator(const std::string& op,
             const std::vector<AST::Expression*>& operands,
             const std::vector<AST::Type>& operand_types, SourceLocation loc);
+        std::vector<AST::FunctionDefinition*> scoped_operator_candidates(
+            const std::string& key,
+            const std::vector<AST::Type>& operand_types) const;
         bool try_user_defined_operator(AST::Expression* expr, AST::Type& out);
         void preregister_generated_functions();
         bool register_function_symbol(AST::FunctionDefinition* node);
@@ -240,6 +249,7 @@ namespace gallt {
         void verify_main_function();
 
         void declare_builtin_functions();
+        void note_builtin_reference(const Symbol& symbol);
 
         bool is_complete_type(const AST::Type& type);
         void collect_local_structs(AST::Statement* stmt);
@@ -312,6 +322,11 @@ namespace gallt {
             AST::Expression* expr);
         void check_const_declaration(AST::VariableDeclaration* decl);
         bool is_compile_time_constant_expression(AST::Expression* expr);
+        bool expression_has_side_effect(const AST::Expression* expr);
+        bool initializer_has_side_effect(const AST::Initializer* init);
+        bool initializer_has_implicit_side_effect(
+            const AST::VariableDeclaration* decl);
+        bool call_has_side_effect(const AST::PostfixExpression* call);
         bool is_constexpr_call_expression(const AST::PostfixExpression* call);
         static std::string expression_display_name(const AST::Expression* expr);
 

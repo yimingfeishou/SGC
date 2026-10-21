@@ -455,7 +455,7 @@ namespace gallt {
             if (!is_complete_type(mem_type) && mem_type.kind != TypeKind::Void) {
                 if (!(mem_type.kind == TypeKind::Pointer && mem_type.pointee_type &&
                     mem_type.pointee_type->kind == TypeKind::Struct &&
-                    struct_defs_.find(mem_type.pointee_type->struct_name) == struct_defs_.end())) {
+                    get_struct_definition(mem_type.pointee_type->struct_name) == nullptr)) {
                     report_error(member.location, ErrorCode::ExpressionSyntaxError,
                         "incomplete type for struct member '" + member.name + "'");
                 }
@@ -556,16 +556,21 @@ namespace gallt {
     }
 
     void TypeChecker::check_variable_declaration(AST::VariableDeclaration* decl) {
+        const bool object_is_const = decl->type.is_const ||
+            (decl->type.kind == TypeKind::Array && decl->type.element_type &&
+                decl->type.element_type->is_const);
+        const std::size_t operators_before = resolved_operators_.size();
+
         if (type_has_unresolved_generic(decl->type)) {
             check_initializer_expressions(decl->initializer.get());
             Symbol sym = Symbol::make_variable(decl->name, decl->type, decl->location,
-                decl->initializer != nullptr);
-            if (decl->type.is_const) { sym.is_mutable = false; }
+                  decl->initializer != nullptr);
+            if (object_is_const) { sym.is_mutable = false; }
             sym_table_.declare(sym);
             return;
         }
 
-        if (decl->type.is_const) {
+        if (object_is_const) {
             check_const_declaration(decl);
         }
 
@@ -769,11 +774,20 @@ namespace gallt {
                 }
             }
         }
-        Symbol sym = Symbol::make_variable(decl->name, decl->type, decl->location,
-            decl->initializer != nullptr);
-        if (decl->type.is_const) {
-            sym.is_mutable = false;
-        }
+          if (object_is_const && decl->initializer &&
+              !initializer_has_side_effect(decl->initializer.get()) &&
+              (resolved_operators_.size() != operators_before ||
+                  initializer_has_implicit_side_effect(decl))) {
+              report_error_template(decl->location,
+                  ErrorCode::ConstantInitializerSideEffect,
+                  { decl->name });
+          }
+
+          Symbol sym = Symbol::make_variable(decl->name, decl->type, decl->location,
+              decl->initializer != nullptr);
+          if (object_is_const) {
+              sym.is_mutable = false;
+          }
 
         if (!sym_table_.declare(sym)) {
             report_error(decl->location, ErrorCode::RedefinedIdentifier,

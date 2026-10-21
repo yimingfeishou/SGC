@@ -94,10 +94,8 @@ namespace gallt {
                 if (pack != sub.type_packs.end()) {
                     const std::size_t index = *in.array_size;
                     if (index >= pack->second.size()) {
-                        report(SourceLocation{},
-                            ErrorCode::SubscriptOutOfBounds,
-                            std::vector<std::string>{ std::to_string(index),
-                                std::to_string(pack->second.size()) });
+                        report(SourceLocation{}, ErrorCode::ExpressionSyntaxError,
+                            std::string("type parameter pack index is out of bounds"));
                         out = Type::make_void();
                         return false;
                     }
@@ -167,17 +165,17 @@ namespace gallt {
         }
     }
 
-    void GenericExpander::resolve_type(Type& type) {
+    void GenericExpander::resolve_type(Type& type, SourceLocation loc) {
         switch (type.kind) {
         case TypeKind::Array:
-            if (type.element_type) { resolve_type(*type.element_type); }
+            if (type.element_type) { resolve_type(*type.element_type, loc); }
             break;
         case TypeKind::Pointer:
-            if (type.pointee_type) { resolve_type(*type.pointee_type); }
+            if (type.pointee_type) { resolve_type(*type.pointee_type, loc); }
             break;
         case TypeKind::Function:
-            if (type.return_type) { resolve_type(*type.return_type); }
-            for (Type& p : type.parameter_types) { resolve_type(p); }
+            if (type.return_type) { resolve_type(*type.return_type, loc); }
+            for (Type& p : type.parameter_types) { resolve_type(p, loc); }
             break;
         case TypeKind::Struct: {
             if (type.generic_ref) {
@@ -212,6 +210,10 @@ namespace gallt {
 
                 if (found != it->end()) {
                     if (found->second.is_type) {
+                        if (found->second.ambiguous) {
+                            report(loc, ErrorCode::GenericShortNameAmbiguous,
+                                std::vector<std::string>{ type.struct_name });
+                        }
                         type.struct_name = found->second.target;
                     }
 
@@ -227,7 +229,7 @@ namespace gallt {
 
     bool GenericExpander::resolve_constant_argument(const GenericArgument& arg,
         const Substitution* sub, ConstantValue& out) {
-        if (arg.is_type) { return false; }
+        if (arg.is_type && arg.expression == nullptr) { return false; }
 
         if (arg.constant_actual_type.kind == TypeKind::String) {
             if (arg.is_string_constant) {
@@ -271,7 +273,29 @@ namespace gallt {
             Substitution empty;
             const Substitution& env = sub != nullptr ? *sub : empty;
 
-            if (evaluate_with_substitution(arg.expression.get(), env, out)) {
+            if (auto* primary = dynamic_cast<const PrimaryExpression*>(
+                arg.expression.get())) {
+                if (primary->kind == PrimaryExpression::Kind::QualifiedName &&
+                    primary->generic_ref) {
+                    GenericRef reference = *primary->generic_ref;
+                    auto target = ensure_instantiation(reference, false);
+                    if (target.has_value()) {
+                        auto constant = constant_member_values_.find(*target);
+                        if (constant != constant_member_values_.end()) {
+                            out.is_string =
+                                constant->second.type.kind == TypeKind::String;
+                            out.is_float =
+                                constant->second.type.is_floating();
+                            out.string_value = constant->second.string_value;
+                            out.float_value = constant->second.as_floating();
+                            out.int_value = constant->second.as_integer();
+                            return true;
+                        }
+                    }
+                }
+            }
+
+            if (evaluate_constant_with_members(arg.expression.get(), env, out)) {
                 return true;
             }
 

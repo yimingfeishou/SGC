@@ -78,6 +78,7 @@ namespace {
 
         bool EnterVariableDeclaration(VariableDeclaration* node) override {
             rewrite_initializer(node->initializer);
+            declare_local(node->name);
             return false;
         }
 
@@ -88,12 +89,20 @@ namespace {
 
         void LeaveForStatement(ForStatement*) override { leave_scope(); }
 
-        bool EnterSwitchCaseStatement(SwitchCaseStatement*) override {
-            marks_.push_back(introduced_.size());
-            return true;
-        }
+        bool EnterSwitchCaseStatement(SwitchCaseStatement* node) override {
+            for (SwitchCaseStatement::Clause& clause : node->clauses) {
+                rewrite_expression(clause.condition);
+                marks_.push_back(introduced_.size());
 
-        void LeaveSwitchCaseStatement(SwitchCaseStatement*) override { leave_scope(); }
+                for (std::unique_ptr<Statement>& stmt : clause.statements) {
+                    rewrite_statement(stmt);
+                }
+
+                leave_scope();
+            }
+
+            return false;
+        }
 
         void LeaveVariableDeclaration(VariableDeclaration* node) override {
             declare_local(node->name);
@@ -145,6 +154,41 @@ namespace {
         holder.release();
     }
 
+    void LifecycleLowering::push_tracking_scope() {
+        tracking_scopes_.push_back(TrackingSnapshot{
+            local_types_,
+            constructed_pointers_,
+            destructed_pointers_,
+            non_construct_pointers_,
+            null_pointers_,
+            alias_group_
+        });
+    }
+
+    void LifecycleLowering::pop_tracking_scope() {
+        if (tracking_scopes_.empty()) { return; }
+
+        TrackingSnapshot snapshot = std::move(tracking_scopes_.back());
+        tracking_scopes_.pop_back();
+        local_types_ = std::move(snapshot.local_types);
+        constructed_pointers_ = std::move(snapshot.constructed_pointers);
+        destructed_pointers_ = std::move(snapshot.destructed_pointers);
+        non_construct_pointers_ = std::move(snapshot.non_construct_pointers);
+        null_pointers_ = std::move(snapshot.null_pointers);
+        alias_group_ = std::move(snapshot.alias_group);
+    }
+
+    void LifecycleLowering::clear_tracking_state() {
+        tracking_scopes_.clear();
+        local_types_.clear();
+        constructed_pointers_.clear();
+        destructed_pointers_.clear();
+        non_construct_pointers_.clear();
+        null_pointers_.clear();
+        alias_group_.clear();
+        destructed_groups_.clear();
+    }
+
     std::unique_ptr<FunctionDefinition> LifecycleLowering::lower_special_member(
         StructDefinition* def, SpecialMemberFunction* member, const std::string& name) {
         std::unordered_set<std::string> members;
@@ -188,6 +232,7 @@ namespace {
 
         auto func = std::make_unique<FunctionDefinition>(member->location,
             Type::make_void(), name, params, param_names, std::move(member->body));
+        func->owning_struct = def;
 
         if (member->kind == SpecialMemberFunction::Kind::Constructor) {
             func->param_defaults.push_back(nullptr);
@@ -718,18 +763,6 @@ namespace {
                     { "0", std::to_string(node->construct_args.size()) });
             }
 
-            if (node->kind == PrimaryExpression::Kind::PlacementConstruct) {
-                auto* target = dynamic_cast<PrimaryExpression*>(
-                    node->placement_target.get());
-
-                if (target != nullptr &&
-                    target->kind == PrimaryExpression::Kind::Null) {
-                    owner_.report_template(node->location,
-                        ErrorCode::PlacementTargetInvalid,
-                        std::vector<std::string>{});
-                }
-            }
-
             return false;
         }
 
@@ -906,6 +939,7 @@ namespace {
         }
 
         bool EnterBlock(Block* node) override {
+            owner_.push_tracking_scope();
             std::vector<std::unique_ptr<Statement>> rewritten;
 
             for (std::unique_ptr<Statement>& child : node->statements) {
@@ -935,6 +969,7 @@ namespace {
             }
 
             node->statements = std::move(rewritten);
+            owner_.pop_tracking_scope();
             return false;
         }
 
@@ -970,6 +1005,7 @@ namespace {
 
             for (SwitchCaseStatement::Clause& clause : node->clauses) {
                 owner_.rewrite_expression(clause.condition.get());
+                owner_.push_tracking_scope();
                 std::vector<std::unique_ptr<Statement>> rewritten;
 
                 for (std::unique_ptr<Statement>& child : clause.statements) {
@@ -999,6 +1035,7 @@ namespace {
                 }
 
                 clause.statements = std::move(rewritten);
+                owner_.pop_tracking_scope();
             }
 
             return false;
@@ -1090,37 +1127,6 @@ namespace {
 
         bool EnterDestructStatement(DestructStatement* node) override {
             owner_.rewrite_expression(node->target.get());
-
-            if (auto* prim = dynamic_cast<PrimaryExpression*>(node->target.get())) {
-                if (prim->kind == PrimaryExpression::Kind::Identifier) {
-                    const std::string& name = prim->identifier;
-
-                    if (owner_.null_pointers_.count(name) != 0) {
-                    } else if (owner_.non_construct_pointers_.count(name) != 0) {
-                        owner_.report_template(node->location,
-                            ErrorCode::DestructNonConstructed, {});
-                    } else if (owner_.constructed_pointers_.count(name) != 0) {
-                        auto group = owner_.alias_group_.find(name);
-
-                        if (group != owner_.alias_group_.end()) {
-                            if (owner_.destructed_groups_.count(group->second) != 0) {
-                                owner_.report_template(node->location,
-                                    ErrorCode::DestructTwice, {});
-                            } else {
-                                owner_.destructed_groups_.insert(group->second);
-                            }
-                        }
-                    }
-                } else if (prim->kind == PrimaryExpression::Kind::Null) {
-                } else {
-                    owner_.report_template(node->location,
-                        ErrorCode::DestructNonConstructed, {});
-                }
-            } else {
-                owner_.report_template(node->location,
-                    ErrorCode::DestructNonConstructed, {});
-            }
-
             return false;
         }
 
@@ -1142,11 +1148,16 @@ namespace {
 
             owner_.current_function_name_ = node->name;
             owner_.current_function_parameters_ = node->param_names;
+            owner_.clear_tracking_state();
+            owner_.next_alias_group_ = 0;
+            owner_.push_tracking_scope();
 
             if (node->body) {
                 owner_.rewrite_statement(node->body.get());
             }
 
+            owner_.pop_tracking_scope();
+            owner_.clear_tracking_state();
             owner_.current_function_name_.clear();
             owner_.current_function_parameters_.clear();
             return false;

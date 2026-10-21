@@ -170,6 +170,8 @@ namespace gallt {
 
         info.members[name] = internal_name(join_path(prefix, name));
         info.member_kinds[name] = kind;
+        info.member_orders[name] = next_declaration_order_++;
+        info.member_from_addition[name] = addition;
     }
 
     void NamespaceLowering::collect_members(
@@ -188,6 +190,9 @@ namespace gallt {
                 namespaces_[full].location = nd->location;
                 if (!prefix.empty()) {
                     namespaces_[prefix].child_namespaces.insert(nd->name);
+                    namespaces_[prefix].child_orders[nd->name] =
+                        next_declaration_order_++;
+                    namespaces_[prefix].child_from_addition[nd->name] = addition;
                 }
 
                 collect_members(nd->members, full, false, nd->location);
@@ -206,7 +211,9 @@ namespace gallt {
                 continue;
             }
 
-            if (dynamic_cast<AccessNamespaceStatement*>(node.get()) != nullptr) {
+            if (auto* access =
+                    dynamic_cast<AccessNamespaceStatement*>(node.get())) {
+                access_orders_[access] = next_declaration_order_++;
                 continue;
             }
 
@@ -1015,14 +1022,6 @@ namespace gallt {
                 owner_.rewrite_expression(piece);
             }
 
-            for (std::unique_ptr<Node>& item : node->block_items) {
-                if (auto* top = dynamic_cast<TopLevel*>(item.get())) {
-                    owner_.rewrite_top_level(top);
-                } else if (auto* inner = dynamic_cast<Statement*>(item.get())) {
-                    owner_.rewrite_statement(inner);
-                }
-            }
-
             return false;
         }
 
@@ -1111,6 +1110,9 @@ namespace gallt {
         if (poisoned_node(node)) { return; }
         PoisonGuard guard(*this, node);
         if (scopes_.empty()) { push_scope(); }
+        auto access_order = access_orders_.find(node);
+        const std::size_t visible_through = access_order != access_orders_.end()
+            ? access_order->second : next_declaration_order_;
 
         auto import_namespace = [&](const std::string& full) {
             auto found = namespaces_.find(full);
@@ -1118,7 +1120,27 @@ namespace gallt {
             const NamespaceInfo& info = found->second;
 
             for (const auto& kv : info.members) {
-                if (declared_in_current_scope(kv.first)) {
+                auto member_order = info.member_orders.find(kv.first);
+                auto member_addition = info.member_from_addition.find(kv.first);
+                if (member_order != info.member_orders.end() &&
+                    member_addition != info.member_from_addition.end() &&
+                    member_addition->second &&
+                    member_order->second > visible_through) {
+                    continue;
+                }
+
+                if (scopes_.back().declared.count(kv.first) != 0) {
+                    report(node->location, ErrorCode::AccessNamespaceNameConflict,
+                        std::vector<std::string>{ kv.first });
+                    continue;
+                }
+
+                auto existing_alias = scopes_.back().aliases.find(kv.first);
+                if (existing_alias != scopes_.back().aliases.end()) {
+                    if (existing_alias->second == kv.second) {
+                        continue;
+                    }
+
                     report(node->location, ErrorCode::AccessNamespaceNameConflict,
                         std::vector<std::string>{ kv.first });
                     continue;
@@ -1128,13 +1150,34 @@ namespace gallt {
             }
 
             for (const std::string& child : info.child_namespaces) {
-                if (declared_in_current_scope(child)) {
+                auto child_order = info.child_orders.find(child);
+                auto child_addition = info.child_from_addition.find(child);
+                if (child_order != info.child_orders.end() &&
+                    child_addition != info.child_from_addition.end() &&
+                    child_addition->second &&
+                    child_order->second > visible_through) {
+                    continue;
+                }
+
+                if (scopes_.back().declared.count(child) != 0) {
                     report(node->location, ErrorCode::AccessNamespaceNameConflict,
                         std::vector<std::string>{ child });
                     continue;
                 }
 
-                scopes_.back().aliases[child] = join_path(full, child);
+                const std::string alias = join_path(full, child);
+                auto existing_alias = scopes_.back().aliases.find(child);
+                if (existing_alias != scopes_.back().aliases.end()) {
+                    if (existing_alias->second == alias) {
+                        continue;
+                    }
+
+                    report(node->location, ErrorCode::AccessNamespaceNameConflict,
+                        std::vector<std::string>{ child });
+                    continue;
+                }
+
+                scopes_.back().aliases[child] = alias;
             }
         };
 
@@ -1154,7 +1197,34 @@ namespace gallt {
                 if (info != namespaces_.end()) {
                     auto member = info->second.members.find(path.back());
                     if (member != info->second.members.end()) {
-                        if (declared_in_current_scope(path.back())) {
+                        auto member_order =
+                            info->second.member_orders.find(path.back());
+                        auto member_addition =
+                            info->second.member_from_addition.find(path.back());
+                        if (member_order != info->second.member_orders.end() &&
+                            member_addition != info->second.member_from_addition.end() &&
+                            member_addition->second &&
+                            member_order->second > visible_through) {
+                            report(node->location,
+                                ErrorCode::AccessNamespaceTargetInvalid,
+                                std::vector<std::string>{ join_parts(path) });
+                            return;
+                        }
+
+                        if (scopes_.back().declared.count(path.back()) != 0) {
+                            report(node->location,
+                                ErrorCode::AccessNamespaceNameConflict,
+                                std::vector<std::string>{ path.back() });
+                            return;
+                        }
+
+                        auto existing_alias =
+                            scopes_.back().aliases.find(path.back());
+                        if (existing_alias != scopes_.back().aliases.end()) {
+                            if (existing_alias->second == member->second) {
+                                return;
+                            }
+
                             report(node->location,
                                 ErrorCode::AccessNamespaceNameConflict,
                                 std::vector<std::string>{ path.back() });
@@ -1253,6 +1323,8 @@ namespace gallt {
         namespaces_.clear();
         scopes_.clear();
         namespace_prefix_.clear();
+        next_declaration_order_ = 0;
+        access_orders_.clear();
 
         collect_members(program->top_levels, "", false, SourceLocation{});
 
@@ -1277,6 +1349,7 @@ namespace gallt {
         if (scopes_.empty()) { push_scope(); }
 
         const std::size_t errors_before = diag_.error_count();
+        collect_members(nodes, "", false, nodes.front()->location);
 
         for (auto& node : nodes) {
             std::string name = declaration_name(node.get());
@@ -1290,6 +1363,22 @@ namespace gallt {
         out.reserve(nodes.size());
         lower_top_levels(nodes, out, false);
         nodes = std::move(out);
+        return diag_.error_count() == errors_before;
+    }
+
+    bool NamespaceLowering::rewrite_new_generated_top_level(AST::TopLevel* node) {
+        if (node == nullptr) { return true; }
+
+        const std::size_t errors_before = diag_.error_count();
+        rewrite_top_level(node);
+        return diag_.error_count() == errors_before;
+    }
+
+    bool NamespaceLowering::rewrite_new_generated_statement(AST::Statement* node) {
+        if (node == nullptr) { return true; }
+
+        const std::size_t errors_before = diag_.error_count();
+        rewrite_statement(node);
         return diag_.error_count() == errors_before;
     }
 

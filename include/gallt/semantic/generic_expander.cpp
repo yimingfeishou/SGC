@@ -19,6 +19,89 @@ using namespace gallt::AST;
 namespace gallt {
     using namespace generic_expander_detail;
 
+    class EmitGeneratedValidator : public AST::AstVisitor {
+    public:
+        void set_root(const Node* node) { root_ = node; }
+        const Node* violation() const { return violation_; }
+        ErrorCode error_code() const { return error_code_; }
+
+    protected:
+        bool EnterGuideStatement(const GuideStatement* node) override {
+            return reject(node, ErrorCode::EmitBlockNotExpandable);
+        }
+
+        bool EnterClibStatement(const ClibStatement* node) override {
+            return reject(node, ErrorCode::EmitBlockNotExpandable);
+        }
+
+        bool EnterGenericDefinition(const GenericDefinition* node) override {
+            return reject(node, ErrorCode::EmitBlockNotExpandable);
+        }
+
+        bool EnterInstantiationStatement(const InstantiationStatement* node) override {
+            return reject(node, ErrorCode::EmitBlockNotExpandable);
+        }
+
+        bool EnterCondDefinition(const CondDefinition* node) override {
+            return reject(node, ErrorCode::CompileTimeConditionOutsideGenericBlock);
+        }
+
+        bool EnterUncondDefinition(const UncondDefinition* node) override {
+            return reject(node, ErrorCode::CompileTimeConditionOutsideGenericBlock);
+        }
+
+        bool EnterConditionalBlock(const ConditionalBlock* node) override {
+            return reject(node, ErrorCode::CompileTimeConditionOutsideGenericBlock);
+        }
+
+        bool EnterIfStatement(const IfStatement* node) override {
+            if (node->is_compile_time) {
+                return reject(node, ErrorCode::CompileTimeConditionOutsideGenericBlock);
+            }
+
+            return true;
+        }
+
+        bool EnterFunctionDefinition(const FunctionDefinition* node) override {
+            if (node->name == "main") {
+                return reject(node, ErrorCode::EmitBlockNotExpandable);
+            }
+
+            return true;
+        }
+
+        bool EnterPrimaryExpression(const PrimaryExpression* node) override {
+            if (node->generic_ref != nullptr) {
+                return reject(node, ErrorCode::EmitBlockNotExpandable);
+            }
+
+            return true;
+        }
+
+        bool EnterType(const Type& type) override {
+            if (type.generic_ref != nullptr) {
+                return reject(root_, ErrorCode::EmitBlockNotExpandable);
+            }
+
+            return true;
+        }
+
+    private:
+        bool reject(const Node* node, ErrorCode code) {
+            if (violation_ == nullptr) {
+                violation_ = node != nullptr ? node : root_;
+                error_code_ = code;
+            }
+
+            stop();
+            return false;
+        }
+
+        const Node* violation_ = nullptr;
+        const Node* root_ = nullptr;
+        ErrorCode error_code_ = ErrorCode::EmitBlockNotExpandable;
+    };
+
     GenericExpander::GenericExpander(DiagnosticEngine& diag, NamespaceLowering& namespaces,
         std::optional<std::uint64_t> instantiation_depth)
         : diag_(diag)
@@ -147,8 +230,9 @@ namespace gallt {
                 return;
             }
 
-            if (it->second.target != binding.target) {
-                report(loc, ErrorCode::GenericShortNameAmbiguous, std::vector<std::string>{ name });
+            if (it->second.target != binding.target ||
+                it->second.is_type != binding.is_type) {
+                it->second.ambiguous = true;
             }
             return;
         }
@@ -321,6 +405,7 @@ namespace gallt {
 
                 std::set<std::string> struct_member_names;
                 std::set<std::string> function_member_names;
+                std::set<std::string> value_member_names;
                 std::set<std::string> function_signatures;
 
                 for (auto& member : def->members) {
@@ -331,6 +416,9 @@ namespace gallt {
                         if (!struct_member_names.insert(member_name).second ||
                             function_member_names.count(member_name) != 0) {
                             report(def->location, ErrorCode::RedefinedFunction,
+                                std::vector<std::string>{ member_name });
+                        } else if (value_member_names.count(member_name) != 0) {
+                            report(def->location, ErrorCode::RedefinedIdentifier,
                                 std::vector<std::string>{ member_name });
                         }
                     } else if (auto* fd = dynamic_cast<FunctionDefinition*>(member.get())) {
@@ -345,6 +433,17 @@ namespace gallt {
                         if (struct_member_names.count(member_name) != 0 ||
                             !function_signatures.insert(signature).second) {
                             report(def->location, ErrorCode::RedefinedFunction,
+                                std::vector<std::string>{ member_name });
+                        } else if (value_member_names.count(member_name) != 0) {
+                            report(def->location, ErrorCode::RedefinedIdentifier,
+                                std::vector<std::string>{ member_name });
+                        }
+                    } else if (auto* vd = dynamic_cast<VariableDeclaration*>(member.get())) {
+                        member_name = vd->name;
+                        if (struct_member_names.count(member_name) != 0 ||
+                            function_member_names.count(member_name) != 0 ||
+                            !value_member_names.insert(member_name).second) {
+                            report(def->location, ErrorCode::RedefinedIdentifier,
                                 std::vector<std::string>{ member_name });
                         }
                     }
@@ -510,7 +609,9 @@ namespace gallt {
                 }
                 if (!constraint_satisfied(param.constraint, arg.type)) {
                     Type resolved_arg = arg.type;
-                    if (resolved_arg.generic_ref) { resolve_type(resolved_arg); }
+                    if (resolved_arg.generic_ref) {
+                        resolve_type(resolved_arg, ref.location);
+                    }
                     if (constraint_satisfied(param.constraint, resolved_arg)) {
                         primary_sub.types[param.name] = resolved_arg;
                         continue;
@@ -523,6 +624,51 @@ namespace gallt {
                 primary_sub.types[param.name] = arg.type;
             } else {
                 if (arg.is_type) {
+                    if (arg.expression != nullptr) {
+                        ConstantValue value;
+                        if (resolve_constant_argument(arg, nullptr, value)) {
+                            Type target = param.constant_type;
+                            if (param.constant_type_is_parameter) {
+                                auto found = primary_sub.types.find(
+                                    param.constant_type_parameter);
+                                if (found != primary_sub.types.end()) {
+                                    target = found->second;
+                                }
+                            }
+                            if (target.kind != TypeKind::Void) {
+                                const bool integral =
+                                    target.kind == TypeKind::Int ||
+                                    target.kind == TypeKind::Char ||
+                                    target.kind == TypeKind::Bool;
+                                if (integral && value.is_float) {
+                                    value.is_float = false;
+                                    value.int_value =
+                                        static_cast<long long>(
+                                            value.float_value);
+                                } else if (target.kind == TypeKind::Float ||
+                                    target.kind == TypeKind::Double) {
+                                    if (!value.is_float) {
+                                        value.float_value =
+                                            static_cast<double>(
+                                                value.int_value);
+                                        value.is_float = true;
+                                    }
+                                }
+                            }
+                            primary_sub.constants[param.name] = value;
+                            AST::Type declared = param.constant_type;
+                            if (param.constant_type_is_parameter) {
+                                auto found = primary_sub.types.find(
+                                    param.constant_type_parameter);
+                                if (found != primary_sub.types.end()) {
+                                    declared = found->second;
+                                }
+                            }
+                            primary_sub.constant_types[param.name] = declared;
+                            continue;
+                        }
+                    }
+
                     const std::string type_text = arg.type.to_string();
                     bool parameter_name = false;
                     if (entry.primary != nullptr) {
@@ -618,7 +764,9 @@ namespace gallt {
                         return std::nullopt;
                     }
                     AST::Type resolved = arg.type;
-                    if (resolved.generic_ref) { resolve_type(resolved); }
+                    if (resolved.generic_ref) {
+                        resolve_type(resolved, ref.location);
+                    }
                     if (!constraint_satisfied(pack_param.constraint, resolved)) {
                         report(ref.location, ErrorCode::GenericConstraintViolated,
                             std::vector<std::string>{ ref.generic_name,
@@ -749,14 +897,28 @@ namespace gallt {
         }
 
         sub.instance = key_ref;
+        instance_substitutions_[instance_key] = sub;
         std::vector<TopLevel*> block_member_ptrs;
-        std::vector<std::unique_ptr<TopLevel>> parsed_emit_members;
+        std::vector<std::unique_ptr<TopLevel>>& parsed_emit_members =
+            instance_emit_members_[instance_key];
 
         for (auto& member : block->members) {
             block_member_ptrs.push_back(member.get());
         }
 
-        if (!block->compile_time_items.empty()) {
+        for (TopLevel* member : instance_emit_member_ptrs_[instance_key]) {
+            if (std::find(block_member_ptrs.begin(), block_member_ptrs.end(),
+                member) == block_member_ptrs.end()) {
+                block_member_ptrs.push_back(member);
+            }
+        }
+
+        for (const auto& member : parsed_emit_members) {
+            block_member_ptrs.push_back(member.get());
+        }
+
+        if (!block->compile_time_items.empty() &&
+            processed_compile_time_instances_.insert(instance_key).second) {
             std::string emit_text;
             SourceLocation emit_loc = ref.location;
 
@@ -765,9 +927,27 @@ namespace gallt {
                 return std::nullopt;
             }
 
-            if (!flush_emit_string(emit_text, emit_loc, block_member_ptrs,
+            if (!flush_emit_string(emit_text, emit_loc, sub, block_member_ptrs,
                 parsed_emit_members)) {
                 return std::nullopt;
+            }
+        }
+
+        for (TopLevel* member : block_member_ptrs) {
+            bool from_block = false;
+            for (const auto& source_member : block->members) {
+                if (source_member.get() == member) {
+                    from_block = true;
+                    break;
+                }
+            }
+            if (from_block) { continue; }
+
+            std::vector<TopLevel*>& cached =
+                instance_emit_member_ptrs_[instance_key];
+            if (std::find(cached.begin(), cached.end(), member) ==
+                cached.end()) {
+                cached.push_back(member);
             }
         }
 
@@ -783,6 +963,8 @@ namespace gallt {
                     block_members.insert(sd->name);
                 } else if (auto* fd = dynamic_cast<FunctionDefinition*>(member.get())) {
                     block_members.insert(fd->name);
+                } else if (auto* vd = dynamic_cast<VariableDeclaration*>(member.get())) {
+                    block_members.insert(vd->name);
                 }
             }
 
@@ -793,6 +975,8 @@ namespace gallt {
                     member_name = sd->name;
                 } else if (auto* fd = dynamic_cast<FunctionDefinition*>(member.get())) {
                     member_name = fd->name;
+                } else if (auto* vd = dynamic_cast<VariableDeclaration*>(member.get())) {
+                    member_name = vd->name;
                 }
 
                 if (member_name.empty() || block_members.count(member_name) != 0) { continue; }
@@ -811,6 +995,19 @@ namespace gallt {
             }
         }
 
+        {
+            std::vector<std::string>& members = instance_value_members_[instance_key];
+            members.clear();
+
+            for (TopLevel* member : block_member_ptrs) {
+                if (auto* vd = dynamic_cast<VariableDeclaration*>(member)) {
+                    members.push_back(vd->name);
+                }
+            }
+
+            instance_member_counts_[instance_key] = block_member_ptrs.size();
+        }
+
         std::unordered_map<std::string, std::string> member_types;
         std::unordered_map<std::string, std::string> member_functions;
 
@@ -823,6 +1020,8 @@ namespace gallt {
             } else if (auto* fd = dynamic_cast<FunctionDefinition*>(member)) {
                 member_functions[fd->name] = instance_key + "$" + fd->name;
                 sub.members[fd->name] = instance_key + "$" + fd->name;
+            } else if (auto* vd = dynamic_cast<VariableDeclaration*>(member)) {
+                sub.members[vd->name] = instance_key + "$" + vd->name;
             }
         }
 
@@ -899,6 +1098,58 @@ namespace gallt {
                     if (!member_name.empty() && first_target.empty()) {
                         first_target = mangled;
                     }
+                } else if (auto* vd = dynamic_cast<VariableDeclaration*>(member)) {
+                    if (!member_name.empty() && vd->name != member_name) { continue; }
+                    std::string mangled = instance_key + "$" + vd->name;
+
+                    if (instantiated_members_.insert(mangled).second) {
+                        std::unique_ptr<Statement> cloned_statement =
+                            clone_statement(vd, sub);
+                        auto* cloned_variable = dynamic_cast<VariableDeclaration*>(
+                            cloned_statement.get());
+                        auto* cloned_top_level = dynamic_cast<TopLevel*>(
+                            cloned_statement.get());
+
+                        if (cloned_variable == nullptr ||
+                            cloned_top_level == nullptr) {
+                            continue;
+                        }
+
+                        cloned_variable->name = mangled;
+                        cloned_variable->type.is_const = vd->type.is_const;
+
+                        const bool is_const = cloned_variable->type.is_const ||
+                            (cloned_variable->type.kind == TypeKind::Array &&
+                                cloned_variable->type.element_type &&
+                                cloned_variable->type.element_type->is_const);
+                        if (is_const && cloned_variable->initializer) {
+                            ConstexprValue value;
+                            ConstexprInterpreter interpreter =
+                                make_constexpr_interpreter(sub);
+                            if (interpreter.evaluate_initializer(
+                                cloned_variable->initializer.get(),
+                                cloned_variable->type, value)) {
+                                constant_member_values_[mangled] = std::move(value);
+                            }
+                        }
+
+                        instance_variables_[mangled] = cloned_variable;
+                        cloned_statement.release();
+                        add_top_level(std::unique_ptr<TopLevel>(cloned_top_level));
+                    }
+
+                    if (register_short) {
+                        ShortBinding binding;
+                        binding.target = mangled;
+                        binding.is_type = false;
+                        binding.instance = instance_key;
+                        register_short_name(vd->name, binding, ref.generic_name,
+                            vd->location);
+                    }
+
+                    if (!member_name.empty() && first_target.empty()) {
+                        first_target = mangled;
+                    }
                 }
             }
             return first_target;
@@ -931,6 +1182,8 @@ namespace gallt {
                         member_name = sd->name;
                     } else if (auto* fd = dynamic_cast<FunctionDefinition*>(member.get())) {
                         member_name = fd->name;
+                    } else if (auto* vd = dynamic_cast<VariableDeclaration*>(member.get())) {
+                        member_name = vd->name;
                     }
 
                     if (member_name == ref.member) { in_primary = true; break; }
@@ -953,22 +1206,109 @@ namespace gallt {
         const std::vector<std::unique_ptr<AST::Statement>>& items,
         const Substitution& sub, std::string& text, SourceLocation& text_loc,
         std::vector<AST::TopLevel*>& member_ptrs,
-        std::vector<std::unique_ptr<AST::TopLevel>>& owner) {
-        for (const auto& item : items) {
-            if (auto* emit = dynamic_cast<const EmitStatement*>(item.get())) {
+        std::vector<std::unique_ptr<AST::TopLevel>>& owner,
+        bool generated) {
+        std::function<bool(Node*, bool)> process_item;
+        process_item = [&](Node* node, bool generated_item) -> bool {
+            if (node == nullptr) { return true; }
+
+            if (generated_item && !validate_emit_generated_node(node)) {
+                return false;
+            }
+
+            if (auto* emit = dynamic_cast<const EmitStatement*>(node)) {
                 if (emit->is_block) {
-                    if (!flush_emit_string(text, text_loc, member_ptrs, owner)) { return false; }
+                    if (!flush_emit_string(text, text_loc, sub, member_ptrs, owner)) {
+                        return false;
+                    }
                     text.clear();
 
-                    for (const auto& node : emit->block_items) {
-                        if (auto* fd = dynamic_cast<FunctionDefinition*>(node.get())) {
-                            member_ptrs.push_back(fd);
-                        } else if (auto* sd = dynamic_cast<StructDefinition*>(node.get())) {
-                            member_ptrs.push_back(sd);
-                        } else {
-                            report(node->location, ErrorCode::EmitBlockNotExpandable, std::vector<std::string>());
+                    std::vector<std::unique_ptr<TopLevel>> lowered;
+                    std::vector<Node*> deferred;
+
+                    auto flush_batch = [&]() -> bool {
+                        if (!adopt_emit_top_levels(
+                                lowered, sub, member_ptrs, owner)) {
                             return false;
                         }
+
+                        for (Node* deferred_item : deferred) {
+                            if (!process_item(deferred_item, true)) {
+                                return false;
+                            }
+                        }
+
+                        deferred.clear();
+                        return true;
+                    };
+
+                    for (const auto& block_item : emit->block_items) {
+                        if (!validate_emit_generated_node(block_item.get())) {
+                            return false;
+                        }
+
+                        if (auto* namespace_def =
+                                dynamic_cast<NamespaceDefinition*>(block_item.get())) {
+                            auto lowered_namespace =
+                                std::make_unique<NamespaceDefinition>(
+                                    namespace_def->location, namespace_def->name);
+                            lowered_namespace->members =
+                                std::move(namespace_def->members);
+                            lowered.push_back(std::move(lowered_namespace));
+                            continue;
+                        }
+
+                        if (auto* addition =
+                                dynamic_cast<AdditionNamespaceStatement*>(
+                                    block_item.get())) {
+                            auto lowered_addition =
+                                std::make_unique<AdditionNamespaceStatement>(
+                                    addition->location, addition->path);
+                            lowered_addition->members =
+                                std::move(addition->members);
+                            lowered.push_back(std::move(lowered_addition));
+                            continue;
+                        }
+
+                        if (auto* access =
+                                dynamic_cast<AccessNamespaceStatement*>(
+                                    block_item.get())) {
+                            lowered.push_back(
+                                std::make_unique<AccessNamespaceStatement>(
+                                    access->location, access->path));
+                            continue;
+                        }
+
+                        if (auto* external =
+                                dynamic_cast<ExternDeclaration*>(block_item.get())) {
+                            auto generated = std::make_unique<ExternDeclaration>(
+                                external->location, external->return_type,
+                                external->name, external->library,
+                                external->parameters, external->param_names);
+                            generated->c_symbol_name = external->c_symbol_name;
+                            generated->c_variadic = external->c_variadic;
+                            lowered.push_back(std::move(generated));
+                            continue;
+                        }
+
+                        if (dynamic_cast<TopLevelStatement*>(block_item.get()) !=
+                                nullptr ||
+                            (dynamic_cast<Statement*>(block_item.get()) != nullptr &&
+                                dynamic_cast<TopLevel*>(block_item.get()) == nullptr)) {
+                            if (!flush_batch()) {
+                                return false;
+                            }
+                            if (!process_item(block_item.get(), true)) {
+                                return false;
+                            }
+                            continue;
+                        }
+
+                        deferred.push_back(block_item.get());
+                    }
+
+                    if (!flush_batch()) {
+                        return false;
                     }
                 } else {
                     if (text.empty()) { text_loc = emit->location; }
@@ -984,10 +1324,10 @@ namespace gallt {
                         text += piece_text;
                     }
                 }
-                continue;
+                return true;
             }
 
-            if (auto* ifs = dynamic_cast<const IfStatement*>(item.get())) {
+            if (auto* ifs = dynamic_cast<const IfStatement*>(node)) {
                 if (!ifs->is_compile_time) {
                     report(ifs->location, ErrorCode::GenericStatementNotAllowed,
                         std::vector<std::string>());
@@ -1008,49 +1348,163 @@ namespace gallt {
                 const Statement* branch = condition ? ifs->then_block.get()
                                                     : ifs->else_block.get();
 
-                if (branch == nullptr) { continue; }
+                if (branch == nullptr) { return true; }
 
                 if (auto* block = dynamic_cast<const Block*>(branch)) {
-                    if (!process_compile_time_items(block->statements, sub, text, text_loc,
-                        member_ptrs, owner)) {
-                        return false;
+                    for (const auto& child : block->statements) {
+                        if (!process_item(child.get(), generated_item)) { return false; }
                     }
                 } else {
                     report(branch->location, ErrorCode::EmitBlockNotExpandable, std::vector<std::string>());
                     return false;
                 }
-                continue;
+                return true;
             }
 
-            if (auto* function = dynamic_cast<const FunctionDefinition*>(item.get())) {
-                member_ptrs.push_back(const_cast<FunctionDefinition*>(function));
-                continue;
+            if (auto* function = dynamic_cast<const FunctionDefinition*>(node)) {
+                FunctionDefinition* generated_function =
+                    const_cast<FunctionDefinition*>(function);
+                if (generated_item &&
+                    !namespaces_.rewrite_new_generated_top_level(generated_function)) {
+                    return false;
+                }
+                member_ptrs.push_back(generated_function);
+                return true;
             }
 
-            if (auto* struct_def = dynamic_cast<const StructDefinition*>(item.get())) {
-                member_ptrs.push_back(const_cast<StructDefinition*>(struct_def));
-                continue;
+            if (auto* struct_def = dynamic_cast<const StructDefinition*>(node)) {
+                StructDefinition* generated_struct =
+                    const_cast<StructDefinition*>(struct_def);
+                if (generated_item &&
+                    !namespaces_.rewrite_new_generated_top_level(generated_struct)) {
+                    return false;
+                }
+                member_ptrs.push_back(generated_struct);
+                return true;
             }
 
-            if (auto* member_block = dynamic_cast<const TopLevelBlock*>(item.get())) {
+            if (auto* variable = dynamic_cast<const VariableDeclaration*>(node)) {
+                VariableDeclaration* generated_variable =
+                    const_cast<VariableDeclaration*>(variable);
+                if (generated_item &&
+                    !namespaces_.rewrite_new_generated_top_level(generated_variable)) {
+                    return false;
+                }
+                member_ptrs.push_back(generated_variable);
+                return true;
+            }
+
+            if (auto* statement = dynamic_cast<const TopLevelStatement*>(node)) {
+                return process_item(statement->statement.get(), generated_item);
+            }
+
+            if (auto* member_block = dynamic_cast<const TopLevelBlock*>(node)) {
                 for (const auto& member : member_block->items) {
-                    if (dynamic_cast<const FunctionDefinition*>(member.get()) == nullptr &&
-                        dynamic_cast<const StructDefinition*>(member.get()) == nullptr) {
-                        report(member->location, ErrorCode::EmitBlockNotExpandable,
-                            std::vector<std::string>());
+                    if (!process_item(member.get(), generated_item)) {
                         return false;
                     }
-
-                    member_ptrs.push_back(member.get());
                 }
-                continue;
+                return true;
             }
 
-            report(item->location, ErrorCode::EmitBlockNotExpandable, std::vector<std::string>());
+            if (auto* namespace_def = dynamic_cast<NamespaceDefinition*>(node)) {
+                auto lowered_namespace = std::make_unique<NamespaceDefinition>(
+                    namespace_def->location, namespace_def->name);
+                lowered_namespace->members = std::move(namespace_def->members);
+                std::vector<std::unique_ptr<TopLevel>> lowered;
+                lowered.push_back(std::move(lowered_namespace));
+
+                return adopt_emit_top_levels(lowered, sub, member_ptrs, owner);
+            }
+
+            if (auto* addition = dynamic_cast<AdditionNamespaceStatement*>(node)) {
+                auto lowered_addition = std::make_unique<AdditionNamespaceStatement>(
+                    addition->location, addition->path);
+                lowered_addition->members = std::move(addition->members);
+                std::vector<std::unique_ptr<TopLevel>> lowered;
+                lowered.push_back(std::move(lowered_addition));
+
+                return adopt_emit_top_levels(lowered, sub, member_ptrs, owner);
+            }
+
+            if (auto* access = dynamic_cast<AccessNamespaceStatement*>(node)) {
+                std::vector<std::unique_ptr<TopLevel>> lowered;
+                lowered.push_back(std::make_unique<AccessNamespaceStatement>(
+                    access->location, access->path));
+
+                return namespaces_.lower_new_top_levels(lowered);
+            }
+
+            if (auto* external = dynamic_cast<ExternDeclaration*>(node)) {
+                if (!generated_item) {
+                    report(external->location, ErrorCode::EmitBlockNotExpandable,
+                        std::vector<std::string>());
+                    return false;
+                }
+
+                return materialize_emit_extern(external, sub);
+            }
+
+            report(node->location, ErrorCode::EmitBlockNotExpandable,
+                std::vector<std::string>());
             return false;
+        };
+
+        for (const auto& item : items) {
+            if (!process_item(item.get(), generated)) { return false; }
         }
 
         return true;
+    }
+
+    bool GenericExpander::materialize_emit_extern(
+        const ExternDeclaration* external, const Substitution& sub) {
+        if (external == nullptr) { return true; }
+
+        auto generated = std::make_unique<ExternDeclaration>(
+            external->location, Type::make_void(), external->name,
+            external->library, std::vector<Type>{}, external->param_names);
+
+        if (!substitute_type(external->return_type, sub, generated->return_type)) {
+            return false;
+        }
+
+        for (const Type& parameter : external->parameters) {
+            Type substituted = Type::make_void();
+            if (!substitute_type(parameter, sub, substituted)) {
+                return false;
+            }
+            generated->parameters.push_back(std::move(substituted));
+        }
+
+        generated->c_symbol_name = external->c_symbol_name;
+        generated->c_variadic = external->c_variadic;
+        add_top_level(std::move(generated));
+        return true;
+    }
+
+    bool GenericExpander::validate_emit_generated_node(const Node* node) {
+        if (node == nullptr) { return true; }
+
+        EmitGeneratedValidator validator;
+        validator.set_root(node);
+
+        if (const TopLevel* top_level = dynamic_cast<const TopLevel*>(node)) {
+            if (const TopLevelStatement* wrapper =
+                    dynamic_cast<const TopLevelStatement*>(top_level)) {
+                validator.visit_statement(wrapper->statement.get());
+            } else {
+                validator.visit_top_level(top_level);
+            }
+        } else if (const Statement* statement = dynamic_cast<const Statement*>(node)) {
+            validator.visit_statement(statement);
+        }
+
+        if (validator.violation() == nullptr) { return true; }
+
+        report(validator.violation()->location, validator.error_code(),
+            std::vector<std::string>());
+        return false;
     }
 
     class GenericExpander::ExpansionRewriter : public AST::AstRewriter {
@@ -1085,11 +1539,128 @@ namespace gallt {
             owner_.push_scope();
 
             for (std::unique_ptr<Statement>& child : node->statements) {
+                auto* variable = dynamic_cast<VariableDeclaration*>(child.get());
+
+                if (variable == nullptr || !variable->type.generic_ref ||
+                    !variable->type.generic_ref->member.empty()) {
+                    continue;
+                }
+
+                GenericRef reference = *variable->type.generic_ref;
+                auto instance = owner_.ensure_instantiation(reference, true);
+
+                if (!instance.has_value()) { continue; }
+
+                auto member_count = owner_.instance_member_counts_.find(*instance);
+                auto value_members = owner_.instance_value_members_.find(*instance);
+                auto struct_members = owner_.instance_struct_members_.find(*instance);
+
+                if (member_count == owner_.instance_member_counts_.end() ||
+                    member_count->second != 1 ||
+                    value_members == owner_.instance_value_members_.end() ||
+                    value_members->second.size() != 1 ||
+                    (struct_members != owner_.instance_struct_members_.end() &&
+                        !struct_members->second.empty())) {
+                    continue;
+                }
+
+                GenericRef member_reference = reference;
+                member_reference.member = value_members->second.front();
+                member_reference.member_scope_access = true;
+
+                std::string target_name = *instance + "$" +
+                    value_members->second.front();
+                auto target = owner_.instance_variables_.find(target_name);
+                const bool target_is_const =
+                    target != owner_.instance_variables_.end() &&
+                    target->second != nullptr &&
+                    (target->second->type.is_const ||
+                        (target->second->type.kind == TypeKind::Array &&
+                            target->second->type.element_type &&
+                            target->second->type.element_type->is_const));
+
+                auto apply_target_initializer = [&]() {
+                    if (target == owner_.instance_variables_.end() ||
+                        target->second == nullptr ||
+                        variable->initializer == nullptr) {
+                        return;
+                    }
+
+                    target->second->initializer =
+                        std::move(variable->initializer);
+
+                    auto substitution =
+                        owner_.instance_substitutions_.find(*instance);
+                    if (target_is_const && substitution !=
+                        owner_.instance_substitutions_.end()) {
+                        ConstexprValue value;
+                        ConstexprInterpreter interpreter =
+                            owner_.make_constexpr_interpreter(
+                                substitution->second);
+                        if (interpreter.evaluate_initializer(
+                            target->second->initializer.get(),
+                            target->second->type, value)) {
+                            owner_.constant_member_values_[target_name] =
+                                std::move(value);
+                        } else {
+                            owner_.constant_member_values_.erase(target_name);
+                        }
+                    }
+                };
+
+                auto* expression_initializer = dynamic_cast<ExpressionInitializer*>(
+                    variable->initializer.get());
+
+                if (expression_initializer != nullptr) {
+                    if (target_is_const) {
+                        apply_target_initializer();
+                        child = std::make_unique<InstantiationStatement>(
+                            variable->location, std::move(reference));
+                        continue;
+                    }
+
+                    auto assignment = std::make_unique<AssignmentExpression>(
+                        variable->location,
+                        std::make_unique<PrimaryExpression>(
+                            variable->location, std::move(member_reference)),
+                        AssignmentExpression::Operator::Assign,
+                        std::move(expression_initializer->expr));
+                    auto statement = std::make_unique<ExpressionStatement>(
+                        variable->location, std::move(assignment));
+                    std::vector<std::unique_ptr<Statement>> replacement;
+                    replacement.push_back(std::move(statement));
+                    child = std::make_unique<Block>(variable->location,
+                        std::move(replacement));
+                    continue;
+                }
+
+                apply_target_initializer();
+
+                child = std::make_unique<InstantiationStatement>(
+                    variable->location, std::move(reference));
+            }
+
+            for (std::unique_ptr<Statement>& child : node->statements) {
                 if (auto* vd = dynamic_cast<VariableDeclaration*>(child.get())) {
+                    if (owner_.short_scopes_.back().count(vd->name) != 0) {
+                        owner_.report(vd->location,
+                            ErrorCode::GenericShortNameConflict,
+                            std::vector<std::string>{ vd->name });
+                    }
                     owner_.declare_name(vd->name);
                 } else if (auto* sd = dynamic_cast<StructDefinition*>(child.get())) {
+                    if (owner_.short_scopes_.back().count(sd->name) != 0) {
+                        owner_.report(sd->location,
+                            ErrorCode::GenericShortNameConflict,
+                            std::vector<std::string>{ sd->name });
+                    }
                     owner_.declare_name(sd->name);
                 } else if (auto* def = dynamic_cast<FunctionDefinition*>(child.get())) {
+                    if (owner_.short_scopes_.back().count(def->name) != 0) {
+                        owner_.report(def->location,
+                            ErrorCode::GenericShortNameConflict,
+                            std::vector<std::string>{ def->name });
+                    }
                     owner_.declare_name(def->name);
                 }
             }
@@ -1115,7 +1686,7 @@ namespace gallt {
         }
 
         bool EnterVariableDeclaration(VariableDeclaration* node) override {
-            owner_.resolve_type(node->type);
+            owner_.resolve_type(node->type, node->location);
 
             if (top_level_entry_ > 0 && node->array_size_expr) {
                 owner_.expand_expression(node->array_size_expr);
@@ -1129,14 +1700,14 @@ namespace gallt {
             owner_.struct_defs_[node->name] = node;
 
             for (StructDefinition::Member& member : node->members) {
-                owner_.resolve_type(member.type);
+                owner_.resolve_type(member.type, node->location);
 
                 if (member.array_size_expr) {
                     owner_.expand_expression(member.array_size_expr);
                 }
 
                 if (member.function_pointer_type.has_value()) {
-                    owner_.resolve_type(*member.function_pointer_type);
+                    owner_.resolve_type(*member.function_pointer_type, node->location);
                 }
 
                 owner_.expand_initializer(member.initializer.get());
@@ -1144,10 +1715,10 @@ namespace gallt {
 
             for (std::unique_ptr<SpecialMemberFunction>& smf : node->special_members) {
                 for (Type& parameter : smf->parameters) {
-                    owner_.resolve_type(parameter);
+                    owner_.resolve_type(parameter, smf->location);
                 }
 
-                owner_.resolve_type(smf->parameter_type);
+                owner_.resolve_type(smf->parameter_type, smf->location);
 
                 if (top_level_entry_ > 0) {
                     for (std::unique_ptr<Expression>& value : smf->parameter_defaults) {
@@ -1181,10 +1752,10 @@ namespace gallt {
             }
 
             owner_.func_defs_[node->name] = node;
-            owner_.resolve_type(node->return_type);
+            owner_.resolve_type(node->return_type, node->location);
 
             for (Type& parameter : node->parameters) {
-                owner_.resolve_type(parameter);
+                owner_.resolve_type(parameter, node->location);
             }
 
             for (std::unique_ptr<Expression>& value : node->param_defaults) {
@@ -1296,10 +1867,10 @@ namespace gallt {
         }
 
         bool EnterExternDeclaration(ExternDeclaration* node) override {
-            owner_.resolve_type(node->return_type);
+            owner_.resolve_type(node->return_type, node->location);
 
             for (Type& parameter : node->parameters) {
-                owner_.resolve_type(parameter);
+                owner_.resolve_type(parameter, node->location);
             }
 
             return false;
@@ -1369,6 +1940,27 @@ namespace gallt {
         push_scope();
         collect_declarations();
         collect_generics();
+        Substitution empty_substitution;
+        for (const auto& top : program_->top_levels) {
+            auto* variable = dynamic_cast<VariableDeclaration*>(top.get());
+            if (variable == nullptr || variable->initializer == nullptr) {
+                continue;
+            }
+
+            const bool is_const = variable->type.is_const ||
+                (variable->type.kind == TypeKind::Array &&
+                    variable->type.element_type &&
+                    variable->type.element_type->is_const);
+            if (!is_const) { continue; }
+
+            ConstexprInterpreter interpreter =
+                make_constexpr_interpreter(empty_substitution);
+            ConstexprValue value;
+            if (interpreter.evaluate_initializer(variable->initializer.get(),
+                variable->type, value)) {
+                constant_member_values_[variable->name] = std::move(value);
+            }
+        }
         std::vector<std::unique_ptr<TopLevel>> output;
         output.reserve(program_->top_levels.size());
         output_ = &output;

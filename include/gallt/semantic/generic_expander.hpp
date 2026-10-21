@@ -61,6 +61,7 @@ namespace gallt {
             std::string target;
             bool is_type = false;
             std::string instance;
+            bool ambiguous = false;
         };
 
         DiagnosticEngine& diag_;
@@ -79,7 +80,19 @@ namespace gallt {
         const AST::FunctionDefinition* current_function_ = nullptr;
         std::unordered_set<std::string> instantiated_members_;
         std::unordered_set<std::string> instantiated_blocks_;
+        std::unordered_set<std::string> processed_compile_time_instances_;
+        std::unordered_map<std::string, std::vector<std::unique_ptr<AST::TopLevel>>>
+            instance_emit_members_;
+        std::unordered_map<std::string, std::vector<AST::TopLevel*>>
+            instance_emit_member_ptrs_;
+        std::vector<std::unique_ptr<AST::TopLevel>> emit_parse_transients_;
+        std::vector<std::vector<std::unique_ptr<AST::Statement>>>
+            emit_statement_transients_;
         std::unordered_map<std::string, std::vector<std::string>> instance_struct_members_;
+        std::unordered_map<std::string, std::vector<std::string>> instance_value_members_;
+        std::unordered_map<std::string, std::size_t> instance_member_counts_;
+        std::unordered_map<std::string, AST::VariableDeclaration*> instance_variables_;
+        std::unordered_map<std::string, Substitution> instance_substitutions_;
         std::unordered_map<std::string, std::unordered_set<std::string>> missing_members_;
         std::vector<std::unordered_set<std::string>> instance_scopes_;
 
@@ -90,6 +103,7 @@ namespace gallt {
         std::deque<std::string> lexeme_pool_;
         std::deque<std::string> emit_source_pool_;
         std::unordered_map<std::string, std::string> instantiated_kind_signatures_;
+        std::unordered_map<std::string, ConstexprValue> constant_member_values_;
 
         bool had_error_ = false;
 
@@ -156,7 +170,7 @@ namespace gallt {
 
         std::optional<std::string> ensure_instantiation(const AST::GenericRef& ref,
             bool whole_block);
-        void resolve_type(AST::Type& type);
+        void resolve_type(AST::Type& type, SourceLocation loc = SourceLocation{});
         bool substitute_type(const AST::Type& in, const Substitution& sub, AST::Type& out);
 
         std::unique_ptr<AST::Statement> clone_statement(const AST::Statement* stmt,
@@ -230,6 +244,8 @@ namespace gallt {
             const Substitution& sub, SourceLocation loc);
         bool evaluate_with_substitution(const AST::Expression* expr, const Substitution& sub,
             ConstantValue& out);
+        bool evaluate_constant_with_members(const AST::Expression* expr,
+            const Substitution& sub, ConstantValue& out);
         bool resolve_type_layout(const std::string& type_name, std::size_t& size,
             std::size_t& align, const Substitution& sub) const;
         bool layout_of_composite_type(const AST::Type& type, std::size_t& size,
@@ -251,10 +267,19 @@ namespace gallt {
             const std::vector<std::unique_ptr<AST::Statement>>& items,
             const Substitution& sub, std::string& text, SourceLocation& text_loc,
             std::vector<AST::TopLevel*>& member_ptrs,
-            std::vector<std::unique_ptr<AST::TopLevel>>& owner);
+            std::vector<std::unique_ptr<AST::TopLevel>>& owner,
+            bool generated = false);
+        bool validate_emit_generated_node(const AST::Node* node);
         bool flush_emit_string(const std::string& text, SourceLocation loc,
+            const Substitution& sub,
             std::vector<AST::TopLevel*>& member_ptrs,
             std::vector<std::unique_ptr<AST::TopLevel>>& owner);
+        bool adopt_emit_top_levels(std::vector<std::unique_ptr<AST::TopLevel>>& nodes,
+            const Substitution& sub,
+            std::vector<AST::TopLevel*>& member_ptrs,
+            std::vector<std::unique_ptr<AST::TopLevel>>& owner);
+        bool materialize_emit_extern(const AST::ExternDeclaration* external,
+            const Substitution& sub);
         bool eval_emit_piece(const AST::Expression* expr, const Substitution& sub,
             std::string& out);
         bool eval_constexpr_call(const AST::PostfixExpression* call,

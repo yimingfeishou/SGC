@@ -42,7 +42,7 @@ namespace gallt {
         if (member.array_size_expr) {
             ConstantValue value;
 
-            if (evaluate_with_substitution(member.array_size_expr.get(), sub, value)) {
+            if (evaluate_constant_with_members(member.array_size_expr.get(), sub, value)) {
                 long long length = value.is_float
                     ? static_cast<long long>(value.float_value) : value.int_value;
 
@@ -302,6 +302,10 @@ namespace gallt {
                 for (auto it = short_scopes_.rbegin(); it != short_scopes_.rend(); ++it) {
                     auto binding = it->find(e->identifier);
                     if (binding != it->end()) {
+                        if (binding->second.ambiguous) {
+                            report(e->location, ErrorCode::GenericShortNameAmbiguous,
+                                std::vector<std::string>{ e->identifier });
+                        }
                         if (binding->second.is_type) {
                             return std::make_unique<PrimaryExpression>(e->location,
                                 binding->second.target);
@@ -443,7 +447,7 @@ namespace gallt {
             if (s->array_size_expr) {
                 ConstantValue value;
 
-                if (evaluate_with_substitution(s->array_size_expr.get(), sub, value)) {
+                if (evaluate_constant_with_members(s->array_size_expr.get(), sub, value)) {
                     long long length = value.is_float
                         ? static_cast<long long>(value.float_value) : value.int_value;
 
@@ -568,6 +572,22 @@ namespace gallt {
             return std::make_unique<InstantiationStatement>(s->location, reference);
         }
 
+        if (auto* s = dynamic_cast<const CondDefinition*>(stmt)) {
+            return std::make_unique<CondDefinition>(s->location, s->name,
+                clone_expression(s->value.get(), sub));
+        }
+
+        if (auto* s = dynamic_cast<const UncondDefinition*>(stmt)) {
+            return std::make_unique<UncondDefinition>(s->location, s->name);
+        }
+
+        if (auto* s = dynamic_cast<const ConditionalBlock*>(stmt)) {
+            return std::make_unique<ConditionalBlock>(s->location,
+                clone_expression(s->condition.get(), sub),
+                clone_substatement(s->then_block.get(), sub),
+                clone_substatement(s->else_block.get(), sub));
+        }
+
         return nullptr;
     }
 
@@ -637,6 +657,7 @@ namespace gallt {
         clone->overloaded_operator = func->overloaded_operator;
         clone->is_conversion_operator = func->is_conversion_operator;
         clone->is_constexpr_function = func->is_constexpr_function;
+        clone->is_export = func->is_export;
 
         if (func->is_conversion_operator) {
             Type target = Type::make_void();
@@ -798,7 +819,7 @@ namespace gallt {
             std::string_view name_view(name);
             DiagnosticEngine emit_diag;
             Lexer lexer(source_view, name_view, emit_diag);
-            Parser parser(lexer, emit_diag);
+            Parser parser(lexer, emit_diag, true);
             auto program = parser.parse();
             auto* function = program != nullptr && program->top_levels.size() == 1
                 ? dynamic_cast<FunctionDefinition*>(program->top_levels.front().get())
@@ -813,6 +834,10 @@ namespace gallt {
             }
 
             for (const auto& stmt : body->statements) {
+                if (!namespaces_.rewrite_new_generated_statement(stmt.get())) {
+                    return false;
+                }
+
                 auto clone = clone_statement(stmt.get(), sub);
 
                 if (clone == nullptr) {
@@ -829,6 +854,7 @@ namespace gallt {
 
         for (const EmitStatement* emit : emits) {
             if (emit == nullptr) { continue; }
+            if (!validate_emit_generated_node(emit)) { return false; }
 
             if (emit->is_block) {
                 if (!flush_text()) { return false; }
@@ -840,6 +866,10 @@ namespace gallt {
                         report(node != nullptr ? node->location : SourceLocation(),
                             ErrorCode::EmitBlockNotExpandable,
                             std::vector<std::string>());
+                        return false;
+                    }
+
+                    if (!namespaces_.rewrite_new_generated_statement(statement)) {
                         return false;
                     }
 

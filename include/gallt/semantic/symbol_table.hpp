@@ -33,6 +33,7 @@ namespace gallt {
         bool is_variadic = false;
         AST::FunctionDefinition* function_node = nullptr;
         AST::ExternDeclaration* extern_node = nullptr;
+        bool is_builtin = false;
 
         AST::StructDefinition* struct_node = nullptr;
 

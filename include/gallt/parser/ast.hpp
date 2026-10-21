@@ -20,6 +20,7 @@ namespace gallt {
         class Type;
         class Initializer;
         class Program;
+        class StructDefinition;
 
         class Node {
         public:
@@ -427,6 +428,7 @@ namespace gallt {
             bool is_export = false;
             bool is_variadic = false;
             bool is_constexpr_function = false;
+            StructDefinition* owning_struct = nullptr;
 
             FunctionDefinition(SourceLocation loc, Type ret, std::string_view n,
                 std::vector<Type> params, std::vector<std::string> pnames,
@@ -672,6 +674,16 @@ namespace gallt {
                 : Node(loc), TopLevel(loc), Statement(loc) {
             }
             virtual ~TopLevelBlock() noexcept = default;
+        };
+
+        class TopLevelStatement : public TopLevelBlock {
+        public:
+            std::unique_ptr<Statement> statement;
+
+            TopLevelStatement(SourceLocation loc, std::unique_ptr<Statement> stmt)
+                : Node(loc), TopLevelBlock(loc), statement(std::move(stmt)) {
+            }
+            virtual ~TopLevelStatement() noexcept = default;
         };
 
         class Program : public Node {

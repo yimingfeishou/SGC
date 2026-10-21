@@ -14,8 +14,10 @@ using namespace gallt::AST;
 namespace gallt {
     using namespace parser_detail;
 
-    Parser::Parser(Lexer& lexer, DiagnosticEngine& diag)
-        : lexer_(lexer), diag_(diag) {
+    Parser::Parser(Lexer& lexer, DiagnosticEngine& diag,
+        bool generated_emit_context)
+        : lexer_(lexer), diag_(diag),
+          generated_emit_context_(generated_emit_context) {
         ensure_tokens(0);
         token_index_ = 0;
         current_ = tokens_[0];
@@ -538,7 +540,14 @@ namespace gallt {
             return parse_addition_namespace();
         case TokenType::At:
             return parse_condition_statement();
-        case TokenType::Keyword_Emit:
+        case TokenType::Keyword_Emit: {
+            if (generated_emit_context_) {
+                auto statement = parse_emit_statement(true);
+                auto wrapper = std::make_unique<TopLevelStatement>(
+                    statement != nullptr ? statement->location : current_location(),
+                    std::move(statement));
+                return wrapper;
+            }
             report_error_template(ErrorCode::EmitOutsideGenericBlock, {});
             while (current_.type != TokenType::Newline &&
                 current_.type != TokenType::Semicolon &&
@@ -547,6 +556,7 @@ namespace gallt {
             }
             advance();
             return nullptr;
+        }
         case TokenType::Keyword_Export:
             return parse_export_definition();
         case TokenType::Keyword_Struct:
@@ -624,11 +634,7 @@ namespace gallt {
                     return parse_variable_declaration_with_type(std::move(t));
                 }
                 if (tt == TokenType::Identifier) {
-                    const TokenType next = lookahead_type(1);
-                    const bool declaration_follows =
-                        next == TokenType::Identifier ||
-                        declaration_name_after_pointer_suffix(1);
-                    if (!declaration_follows) {
+                    if (!at_declaration_start()) {
                         report_error_template(ErrorCode::StatementInGlobalScope, {});
                         while (current_.type != TokenType::Newline &&
                             current_.type != TokenType::Semicolon &&
@@ -1154,7 +1160,8 @@ namespace gallt {
             }
 
             if (tt == TokenType::Keyword_Emit) {
-                return parse_emit_statement(generic_block_depth_ > 0);
+                return parse_emit_statement(generic_block_depth_ > 0 ||
+                    generated_emit_context_);
             }
 
             if (tt == TokenType::Keyword_Access) {

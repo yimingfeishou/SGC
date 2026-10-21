@@ -21,6 +21,7 @@ namespace gallt {
                 const AST::ExternDeclaration*>& resolved_externs = {},
             const std::unordered_map<const AST::Expression*,
                 AST::FunctionDefinition*>& resolved_operators = {},
+            const std::unordered_set<std::string>& referenced_builtins = {},
             DiagnosticEngine* diagnostics = nullptr,
             int debug_symbols_level = 0,
             bool emit_entry_point = true,
@@ -48,6 +49,7 @@ namespace gallt {
             resolved_externs_;
         const std::unordered_map<const AST::Expression*, AST::FunctionDefinition*>&
             resolved_operators_;
+        const std::unordered_set<std::string>& referenced_builtins_;
         DiagnosticEngine* diagnostics_ = nullptr;
         int debug_level_ = 0;
         bool emit_entry_point_ = true;
@@ -70,6 +72,13 @@ namespace gallt {
         std::vector<std::string> link_libraries_;
         std::vector<AST::StructDefinition*> struct_defs_;
         std::unordered_map<std::string, AST::StructDefinition*> struct_by_name_;
+        std::vector<std::unordered_map<std::string, AST::StructDefinition*>>
+            struct_scopes_;
+        std::vector<std::unordered_map<std::string, AST::StructDefinition*>>
+            struct_name_scopes_;
+        std::unordered_map<const AST::StructDefinition*, std::string>
+            struct_ir_names_;
+        unsigned local_struct_counter_ = 0;
         struct LocalInfo {
             AST::Type type;
             std::string address;
@@ -88,10 +97,12 @@ namespace gallt {
         };
         std::vector<AST::VariableDeclaration*> global_vars_;
         std::vector<AST::VariableDeclaration*> const_globals_;
-        std::vector<AST::VariableDeclaration*> runtime_const_globals_;
+        std::vector<AST::VariableDeclaration*> runtime_globals_;
         std::vector<std::string> constant_aggregate_globals_;
         unsigned constant_aggregate_counter_ = 0;
         std::unordered_map<std::string, ConstantNumeric> constant_values_;
+        std::vector<std::unordered_map<std::string, ConstantNumeric>>
+            constant_scopes_;
         enum class LifecycleKind {
             Constructor,
             Destructor,
@@ -144,6 +155,9 @@ namespace gallt {
         void start_block(const std::string& label);
         std::string llvm_type(const AST::Type& type);
         std::string struct_type_name(const std::string& name) const;
+        std::string struct_type_name(const AST::StructDefinition* def) const;
+        const AST::StructDefinition* lookup_struct_definition(
+            const std::string& name) const;
 
         void collect_structs();
         void collect_structs_in_statement(AST::Statement* stmt);
@@ -217,9 +231,11 @@ namespace gallt {
         void emit_block(AST::Block* block, bool new_scope);
         void emit_variable_declaration(AST::VariableDeclaration* decl);
         bool fold_constant_declaration(AST::VariableDeclaration* decl, LocalInfo& info);
+        bool build_static_global_initializer(AST::VariableDeclaration* decl,
+            std::string& initializer);
         bool fold_constant_aggregate(AST::VariableDeclaration* decl, LocalInfo& info);
         bool build_constant_initializer(const AST::Initializer* init,
-            const AST::Type& type, std::string& out);
+            const AST::Type& type, std::string& out, bool include_type = true);
         bool build_constant_scalar(const AST::Expression* expr,
             const AST::Type& type, std::string& out);
         void emit_constant_aggregate_globals();
@@ -228,6 +244,8 @@ namespace gallt {
         std::vector<std::unordered_map<std::string, LocalInfo>> scopes_;
         std::vector<std::vector<CleanupRecord>> cleanup_scopes_;
         LocalInfo* lookup_local(const std::string& name);
+        const ConstantNumeric* lookup_constant_numeric(
+            const std::string& name) const;
         void push_scope();
         void pop_scope();
         void register_string_cleanup(const std::string& address, const AST::Type& type);
@@ -341,6 +359,8 @@ namespace gallt {
             const std::string& name);
         ExprValue emit_string_builtin_call(AST::PostfixExpression* call,
             const std::string& name);
+        std::string builtin_function_reference(const std::string& name);
+        void emit_builtin_function_wrappers();
 
         std::size_t type_size(const AST::Type& type) const;
         std::size_t type_align(const AST::Type& type) const;

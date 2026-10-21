@@ -112,7 +112,9 @@ namespace gallt {
                 std::move(function_pointer_type), std::move(init));
         }
 
+        ++function_body_depth_;
         auto body = parse_block();
+        --function_body_depth_;
         if (body == nullptr) {
             report_error(ErrorCode::ExpressionSyntaxError, "expected function body");
             return nullptr;
@@ -343,7 +345,9 @@ namespace gallt {
                 { op_text.empty() ? conversion_target.to_string() : op_text });
         }
 
+        ++function_body_depth_;
         auto body = parse_block();
+        --function_body_depth_;
         if (body == nullptr) {
             report_error(ErrorCode::ExpressionSyntaxError, "expected operator body");
             return nullptr;
@@ -1439,7 +1443,9 @@ namespace gallt {
             return nullptr;
         }
 
+        ++function_body_depth_;
         member->body = parse_block();
+        --function_body_depth_;
         return member;
     }
 

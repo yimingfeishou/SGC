@@ -554,7 +554,7 @@ namespace gallt {
 
         ConstantValue value;
 
-        if (!evaluate_with_substitution(expr, sub, value)) { return false; }
+        if (!evaluate_constant_with_members(expr, sub, value)) { return false; }
         if (value.is_float || value.is_string) { return false; }
         out = value.int_value;
         return true;
@@ -660,22 +660,7 @@ namespace gallt {
             }
 
             auto string_operand = [&](const Expression* side, std::string& value) -> bool {
-                auto* prim = dynamic_cast<const PrimaryExpression*>(side);
-                if (prim == nullptr) { return false; }
-                if (prim->kind == PrimaryExpression::Kind::Literal &&
-                    prim->literal_token.type == TokenType::StringLiteral) {
-                    return decode_string_literal(prim->literal_token.lexeme, value);
-                }
-
-                if (prim->kind == PrimaryExpression::Kind::Identifier) {
-                    auto found = sub.constants.find(prim->identifier);
-                    if (found != sub.constants.end() && found->second.is_string) {
-                        value = found->second.string_value;
-                        return true;
-                    }
-                }
-
-                return false;
+                return constexpr_string_value(side, sub, value);
             };
             std::string left_text;
             std::string right_text;
@@ -824,7 +809,7 @@ namespace gallt {
                 return true;
             }
             ConstantValue value;
-            if (evaluate_with_substitution(expr, sub, value)) {
+            if (evaluate_constant_with_members(expr, sub, value)) {
                 if (value.is_float) {
                     char buffer[64];
                     std::snprintf(buffer, sizeof(buffer), "%g", value.float_value);
@@ -870,7 +855,23 @@ namespace gallt {
                     }
                     return true;
                 }
-                return false;
+            }
+
+            ConstexprValue interpreted;
+            if (evaluate_constexpr_with_substitution(expr, sub, interpreted)) {
+                if (interpreted.type.kind == TypeKind::String) {
+                    out += interpreted.string_value;
+                } else if (interpreted.type.is_floating()) {
+                    char buffer[64];
+                    std::snprintf(buffer, sizeof(buffer), "%g",
+                        interpreted.float_value);
+                    out += buffer;
+                } else if (interpreted.type.is_arithmetic()) {
+                    out += std::to_string(interpreted.int_value);
+                } else {
+                    return false;
+                }
+                return true;
             }
             return false;
         }
@@ -959,6 +960,7 @@ namespace gallt {
     }
 
     bool GenericExpander::flush_emit_string(const std::string& text, SourceLocation loc,
+        const Substitution& sub,
         std::vector<AST::TopLevel*>& member_ptrs,
         std::vector<std::unique_ptr<AST::TopLevel>>& owner) {
         if (text.empty()) { return true; }
@@ -979,7 +981,7 @@ namespace gallt {
         DiagnosticEngine emit_diag;
         Lexer lexer(source_view, name_view, emit_diag,
             splices.empty() ? nullptr : &splices);
-        Parser parser(lexer, emit_diag);
+        Parser parser(lexer, emit_diag, true);
         auto program = parser.parse();
 
         if (program == nullptr || emit_diag.has_errors()) {
@@ -987,20 +989,70 @@ namespace gallt {
             return false;
         }
 
-        if (!namespaces_.lower_new_top_levels(program->top_levels)) {
-            return false;
-        }
+        std::vector<std::unique_ptr<TopLevel>> pending;
+        auto flush_pending = [&]() -> bool {
+            return adopt_emit_top_levels(pending, sub, member_ptrs, owner);
+        };
 
         for (auto& top : program->top_levels) {
+            if (!validate_emit_generated_node(top.get())) {
+                return false;
+            }
+
+            if (auto* wrapped = dynamic_cast<TopLevelStatement*>(top.get())) {
+                if (!flush_pending()) { return false; }
+
+                std::vector<std::unique_ptr<Statement>> items;
+                items.push_back(std::move(wrapped->statement));
+                emit_parse_transients_.push_back(std::move(top));
+
+                std::string nested_text;
+                SourceLocation nested_loc = loc;
+
+                if (!process_compile_time_items(items, sub, nested_text,
+                    nested_loc, member_ptrs, owner, true)) {
+                    return false;
+                }
+
+                if (!flush_emit_string(nested_text, nested_loc, sub,
+                    member_ptrs, owner)) {
+                    return false;
+                }
+                emit_statement_transients_.push_back(std::move(items));
+                continue;
+            }
+
             if (dynamic_cast<GenericDefinition*>(top.get()) != nullptr) {
                 report(loc, ErrorCode::EmitBlockNotExpandable, std::vector<std::string>());
                 return false;
+            }
+
+            pending.push_back(std::move(top));
+        }
+
+        return flush_pending();
+    }
+
+    bool GenericExpander::adopt_emit_top_levels(
+        std::vector<std::unique_ptr<TopLevel>>& nodes, const Substitution& sub,
+        std::vector<TopLevel*>& member_ptrs,
+        std::vector<std::unique_ptr<TopLevel>>& owner) {
+        if (nodes.empty()) { return true; }
+        if (!namespaces_.lower_new_top_levels(nodes)) { return false; }
+
+        for (auto& top : nodes) {
+            if (auto* external = dynamic_cast<ExternDeclaration*>(top.get())) {
+                if (!materialize_emit_extern(external, sub)) {
+                    return false;
+                }
+                continue;
             }
 
             member_ptrs.push_back(top.get());
             owner.push_back(std::move(top));
         }
 
+        nodes.clear();
         return true;
     }
 
@@ -1034,7 +1086,7 @@ namespace gallt {
                 owner_.expand_expression(prim->paren_expr);
                 return false;
             case PrimaryExpression::Kind::Heap:
-                owner_.resolve_type(prim->heap_type);
+                owner_.resolve_type(prim->heap_type, prim->location);
                 owner_.expand_expression(prim->heap_size);
                 return false;
             case PrimaryExpression::Kind::QualifiedName: {
@@ -1046,7 +1098,7 @@ namespace gallt {
             }
             case PrimaryExpression::Kind::Construct:
             case PrimaryExpression::Kind::PlacementConstruct:
-                owner_.resolve_type(prim->construct_type);
+                owner_.resolve_type(prim->construct_type, prim->location);
 
                 for (std::unique_ptr<Expression>& arg : prim->construct_args) {
                     owner_.expand_expression(arg);
@@ -1066,6 +1118,11 @@ namespace gallt {
                     auto found = shorts.find(name);
 
                     if (found != shorts.end()) {
+                        if (found->second.ambiguous) {
+                            owner_.report(prim->location,
+                                ErrorCode::GenericShortNameAmbiguous,
+                                std::vector<std::string>{ name });
+                        }
                         node = std::make_unique<PrimaryExpression>(prim->location,
                             found->second.target);
                         resolved_short_name = true;
@@ -1178,7 +1235,7 @@ namespace gallt {
                 owner_.expand_expression(arg);
             }
 
-            owner_.resolve_type(node->cast_type);
+            owner_.resolve_type(node->cast_type, node->location);
             return false;
         }
 

@@ -55,6 +55,15 @@ namespace gallt {
         std::unordered_map<std::string, int> function_forwards_parameter_;
         int next_alias_group_ = 0;
         std::unordered_set<const AST::Node*> poisoned_;
+        struct TrackingSnapshot {
+            std::unordered_map<std::string, AST::Type> local_types;
+            std::unordered_set<std::string> constructed_pointers;
+            std::unordered_set<std::string> destructed_pointers;
+            std::unordered_set<std::string> non_construct_pointers;
+            std::unordered_set<std::string> null_pointers;
+            std::unordered_map<std::string, int> alias_group;
+        };
+        std::vector<TrackingSnapshot> tracking_scopes_;
 
         bool poisoned_node(const AST::Node* node) const {
             return node != nullptr && poisoned_.count(node) != 0;
@@ -79,6 +88,9 @@ namespace gallt {
         };
 
         bool resolve_pointer_origin(const AST::Expression* expr, int& group);
+        void push_tracking_scope();
+        void pop_tracking_scope();
+        void clear_tracking_state();
 
         class ExpressionRewriter;
         class StatementRewriter;

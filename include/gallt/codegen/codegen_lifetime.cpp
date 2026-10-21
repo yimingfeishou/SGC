@@ -603,6 +603,9 @@ namespace gallt {
         const AST::Type struct_type = AST::Type::make_struct(def->name);
         scopes_.clear();
         cleanup_scopes_.clear();
+        constant_scopes_.clear();
+        struct_scopes_.clear();
+        struct_name_scopes_.clear();
         push_scope();
         emitted_labels_.clear();
         current_label_.clear();

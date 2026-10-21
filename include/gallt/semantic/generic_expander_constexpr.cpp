@@ -1,4 +1,5 @@
 #include "generic_expander.hpp"
+#include "constant_folding.hpp"
 #include <cstdio>
 #include <string>
 #include <vector>
@@ -50,10 +51,15 @@ namespace gallt {
         const Substitution& sub) const {
         ConstexprInterpreter::Host host;
 
-        host.lookup_constant = [&sub](const std::string& name,
+        host.lookup_constant = [this, &sub](const std::string& name,
             ConstexprValue& out) {
             auto found = sub.constants.find(name);
-            if (found == sub.constants.end()) { return false; }
+            if (found == sub.constants.end()) {
+                auto member = constant_member_values_.find(name);
+                if (member == constant_member_values_.end()) { return false; }
+                out = member->second;
+                return true;
+            }
 
             const AST::Type* declared = nullptr;
             auto type = sub.constant_types.find(name);
@@ -152,12 +158,27 @@ namespace gallt {
             return true;
         }
 
+        if (auto* primary = dynamic_cast<const PrimaryExpression*>(expr)) {
+            const bool generic_value =
+                primary->kind == PrimaryExpression::Kind::QualifiedName ||
+                (primary->kind == PrimaryExpression::Kind::Identifier &&
+                    sub.members.count(primary->identifier) != 0);
+            if (generic_value) {
+                ConstexprValue interpreted;
+                if (evaluate_constexpr_with_substitution(expr, sub, interpreted) &&
+                    interpreted.type.kind == TypeKind::String) {
+                    out = interpreted.string_value;
+                    return true;
+                }
+            }
+        }
+
         return false;
     }
 
     bool GenericExpander::constexpr_numeric_value(const AST::Expression* expr,
         const Substitution& sub, ConstantValue& out) {
-        if (!evaluate_with_substitution(expr, sub, out)) { return false; }
+        if (!evaluate_constant_with_members(expr, sub, out)) { return false; }
         if (out.is_string) { return false; }
         return true;
     }
@@ -244,8 +265,57 @@ namespace gallt {
         const AST::Expression* expr, const Substitution& sub,
         ConstexprValue& out) {
         if (expr == nullptr) { return false; }
+        std::unique_ptr<Expression> rewritten = clone_expression(expr, sub);
+        if (rewritten == nullptr) { return false; }
         ConstexprInterpreter interpreter = make_constexpr_interpreter(sub);
-        return interpreter.evaluate(expr, out);
+        return interpreter.evaluate(rewritten.get(), out);
+    }
+
+    bool GenericExpander::evaluate_constant_with_members(
+        const AST::Expression* expr, const Substitution& sub, ConstantValue& out) {
+        if (expr == nullptr) { return false; }
+        std::unique_ptr<Expression> rewritten = clone_expression(expr, sub);
+        if (rewritten == nullptr) { return false; }
+
+        ConstantEvaluationContext context;
+        context.lookup_constant = [&](const std::string& name,
+            long long& int_value, double& float_value, bool& is_float) {
+            auto found = sub.constants.find(name);
+            if (found != sub.constants.end()) {
+                int_value = found->second.int_value;
+                float_value = found->second.float_value;
+                is_float = found->second.is_float;
+                return true;
+            }
+
+            auto member = constant_member_values_.find(name);
+            if (member == constant_member_values_.end() ||
+                !member->second.type.is_arithmetic()) {
+                return false;
+            }
+
+            is_float = member->second.type.is_floating();
+            float_value = member->second.as_floating();
+            int_value = member->second.as_integer();
+            return true;
+        };
+        context.type_layout = [&](const std::string& name, std::size_t& size,
+            std::size_t& align) {
+            return resolve_type_layout(name, size, align, sub);
+        };
+
+        long long int_value = 0;
+        double float_value = 0.0;
+        bool is_float = false;
+        if (!evaluate_constant_expression(rewritten.get(), int_value,
+            float_value, is_float, context)) {
+            return false;
+        }
+
+        out.int_value = int_value;
+        out.float_value = float_value;
+        out.is_float = is_float;
+        return true;
     }
 
     bool GenericExpander::eval_constexpr_call(const AST::PostfixExpression* call,

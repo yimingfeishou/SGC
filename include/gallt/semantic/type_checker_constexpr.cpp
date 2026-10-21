@@ -112,8 +112,7 @@ namespace gallt {
 
         host.lookup_struct = [this](const std::string& name)
             -> const AST::StructDefinition* {
-            auto found = struct_defs_.find(name);
-            return found == struct_defs_.end() ? nullptr : found->second;
+            return get_struct_definition(name);
         };
 
         constexpr_interpreter_.set_host(std::move(host));

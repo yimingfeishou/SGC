@@ -41,6 +41,10 @@ namespace gallt {
                         "struct '" + struct_def->name + "' already defined");
                 } else {
                     struct_defs_[struct_def->name] = struct_def;
+                    if (struct_scopes_.empty()) {
+                        struct_scopes_.emplace_back();
+                    }
+                    struct_scopes_.back()[struct_def->name] = struct_def;
                     Symbol sym = Symbol::make_struct(struct_def->name, struct_def->location, struct_def);
                     if (!sym_table_.declare(sym)) {
                         report_error(struct_def->location, ErrorCode::RedefinedIdentifier,
@@ -56,13 +60,6 @@ namespace gallt {
         for (auto& top : program->top_levels) {
             if (auto* func = dynamic_cast<AST::FunctionDefinition*>(top.get())) {
                 declared_functions_.insert(func);
-                collect_local_structs(func->body.get());
-            } else if (auto* strct = dynamic_cast<AST::StructDefinition*>(top.get())) {
-                for (auto& member : strct->special_members) {
-                    if (member != nullptr && member->body != nullptr) {
-                        collect_local_structs(member->body.get());
-                    }
-                }
             }
         }
 
@@ -140,13 +137,17 @@ namespace gallt {
                 return false;
             }
 
-            if (owner_.struct_defs_.find(def->name) != owner_.struct_defs_.end()) {
+            if (owner_.struct_scopes_.empty()) {
+                owner_.struct_scopes_.emplace_back();
+            }
+            if (owner_.struct_scopes_.back().find(def->name) !=
+                owner_.struct_scopes_.back().end()) {
                 owner_.report_error(def->location, ErrorCode::RedefinedIdentifier,
                     "struct '" + def->name + "' already defined in this scope");
                 return false;
             }
 
-            owner_.struct_defs_[def->name] = def;
+            owner_.struct_scopes_.back()[def->name] = def;
             Symbol sym = Symbol::make_struct(def->name, def->location, def);
 
             if (!owner_.sym_table_.declare(sym)) {
@@ -226,12 +227,6 @@ namespace gallt {
                     owner_.report_error(stmt->location, ErrorCode::FreeNonPointer,
                         "destruct requires a pointer, got '" +
                         target_type.to_string() + "'");
-                } else if (!is_null_literal_expr(stmt->target.get()) &&
-                    (!target_type.pointee_type ||
-                    target_type.pointee_type->kind != TypeKind::Struct)) {
-                    owner_.report_error_template(stmt->location,
-                        ErrorCode::DestructNonConstructed,
-                        std::vector<std::string>{});
                 }
             }
 
@@ -336,10 +331,20 @@ namespace gallt {
     }
 
     AST::StructDefinition* TypeChecker::get_struct_definition(const std::string& name) const {
+        if (current_function_ != nullptr &&
+            current_function_->owning_struct != nullptr &&
+            current_function_->owning_struct->name == name) {
+            return current_function_->owning_struct;
+        }
+
+        for (auto it = struct_scopes_.rbegin(); it != struct_scopes_.rend(); ++it) {
+            auto found = it->find(name);
+            if (found != it->end()) { return found->second; }
+        }
+
         auto it = struct_defs_.find(name);
         if (it != struct_defs_.end()) { return it->second; }
-        auto predeclared = predeclared_structs_.find(name);
-        return (predeclared != predeclared_structs_.end()) ? predeclared->second : nullptr;
+        return nullptr;
     }
 
     const AST::StructDefinition::Member* TypeChecker::get_struct_member(const AST::Type& struct_type,
@@ -445,28 +450,28 @@ namespace gallt {
 
         Symbol sym_input = Symbol::make_function("input", AST::Type::make_int(),
             {}, {}, SourceLocation{}, nullptr);
-        sym_input.function_node = reinterpret_cast<AST::FunctionDefinition*>(1);
+        sym_input.is_builtin = true;
         sym_table_.declare(sym_input);
 
         Symbol sym_output = Symbol::make_function("output", AST::Type::make_void(),
             { AST::Type::make_string() }, {}, SourceLocation{}, nullptr);
-        sym_output.function_node = reinterpret_cast<AST::FunctionDefinition*>(2);
+        sym_output.is_builtin = true;
         sym_table_.declare(sym_output);
 
         Symbol sym_size = Symbol::make_function("size", AST::Type::make_int(),
             { AST::Type::make_void() }, {}, SourceLocation{}, nullptr);
-        sym_size.function_node = reinterpret_cast<AST::FunctionDefinition*>(3);
+        sym_size.is_builtin = true;
         sym_table_.declare(sym_size);
 
         Symbol sym_align = Symbol::make_function("align", AST::Type::make_int(),
             { AST::Type::make_void() }, {}, SourceLocation{}, nullptr);
-        sym_align.function_node = reinterpret_cast<AST::FunctionDefinition*>(4);
+        sym_align.is_builtin = true;
         sym_table_.declare(sym_align);
 
         Symbol sym_free = Symbol::make_function("free", AST::Type::make_void(),
             { AST::Type::make_pointer(std::make_shared<AST::Type>(AST::Type::make_void())) },
             {}, SourceLocation{}, nullptr);
-        sym_free.function_node = reinterpret_cast<AST::FunctionDefinition*>(5);
+        sym_free.is_builtin = true;
         sym_table_.declare(sym_free);
 
         AST::Type file_handle = AST::Type::make_pointer(
@@ -478,7 +483,7 @@ namespace gallt {
                                         std::vector<AST::Type> params) {
             Symbol sym = Symbol::make_function(name, std::move(result),
                 params, {}, SourceLocation{}, nullptr);
-            sym.function_node = reinterpret_cast<AST::FunctionDefinition*>(100);
+            sym.is_builtin = true;
             sym_table_.declare(sym);
         };
 
@@ -522,7 +527,7 @@ namespace gallt {
                                            std::vector<AST::Type> params) {
             Symbol sym = Symbol::make_function(name, std::move(result),
                 params, {}, SourceLocation{}, nullptr);
-            sym.function_node = reinterpret_cast<AST::FunctionDefinition*>(101);
+            sym.is_builtin = true;
             sym_table_.declare(sym);
         };
 
@@ -554,10 +559,17 @@ namespace gallt {
         declare_string_builtin("strwritefile", int_value, { file_handle, str });
     }
 
+    void TypeChecker::note_builtin_reference(const Symbol& symbol) {
+        if (symbol.is_builtin) {
+            referenced_builtins_.insert(symbol.name);
+        }
+    }
+
     void TypeChecker::enter_scope() {
         sym_table_.enter_scope();
         const_values_.emplace_back();
         constexpr_values_.emplace_back();
+        struct_scopes_.emplace_back();
     }
 
     void TypeChecker::exit_scope() {
@@ -569,6 +581,10 @@ namespace gallt {
 
         if (!constexpr_values_.empty()) {
             constexpr_values_.pop_back();
+        }
+
+        if (!struct_scopes_.empty()) {
+            struct_scopes_.pop_back();
         }
     }
 

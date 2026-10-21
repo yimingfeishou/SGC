@@ -228,7 +228,7 @@ namespace gallt {
             named = AST::Type::make_file();
         } else if (name == "void") {
             named = AST::Type::make_void();
-        } else if (struct_defs_.find(name) != struct_defs_.end()) {
+        } else if (get_struct_definition(name) != nullptr) {
             named = AST::Type::make_struct(name);
         } else {
             const Symbol* symbol = sym_table_.lookup(name);
@@ -263,10 +263,7 @@ namespace gallt {
             return false;
         }
         if (type.kind == TypeKind::Struct) {
-            auto it = struct_defs_.find(type.struct_name);
-            if (it != struct_defs_.end()) { return true; }
-            return predeclared_structs_.find(type.struct_name) !=
-                predeclared_structs_.end();
+            return get_struct_definition(type.struct_name) != nullptr;
         }
         if (type.kind == TypeKind::Function) {
             if (type.return_type && !is_complete_type(*type.return_type) && type.return_type->kind != TypeKind::Void) {
@@ -613,11 +610,271 @@ namespace gallt {
         return false;
     }
 
+    bool TypeChecker::call_has_side_effect(const AST::PostfixExpression* call) {
+        if (call == nullptr) { return false; }
+
+        auto* callee = dynamic_cast<const PrimaryExpression*>(call->base.get());
+
+        if (callee != nullptr &&
+            callee->kind == PrimaryExpression::Kind::Identifier) {
+            if (callee->identifier == "size" || callee->identifier == "align") {
+                for (const auto& argument : call->arguments) {
+                    if (expression_has_side_effect(argument.get())) { return true; }
+                }
+
+                return false;
+            }
+
+            if (is_constexpr_call_expression(call)) {
+                for (const auto& argument : call->arguments) {
+                    if (expression_has_side_effect(argument.get())) { return true; }
+                }
+
+                for (const Expression* argument : call->appended_defaults) {
+                    if (expression_has_side_effect(argument)) { return true; }
+                }
+
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    bool TypeChecker::expression_has_side_effect(const AST::Expression* expr) {
+        using namespace AST;
+        if (expr == nullptr) { return false; }
+
+        if (dynamic_cast<const AssignmentExpression*>(expr) != nullptr) {
+            return true;
+        }
+
+        if (auto* primary = dynamic_cast<const PrimaryExpression*>(expr)) {
+            switch (primary->kind) {
+            case PrimaryExpression::Kind::Parens:
+                return expression_has_side_effect(primary->paren_expr.get());
+            case PrimaryExpression::Kind::Heap:
+            case PrimaryExpression::Kind::Construct:
+            case PrimaryExpression::Kind::PlacementConstruct:
+            case PrimaryExpression::Kind::CopyMove:
+                return true;
+            case PrimaryExpression::Kind::Literal:
+            case PrimaryExpression::Kind::Identifier:
+            case PrimaryExpression::Kind::Null:
+            case PrimaryExpression::Kind::QualifiedName:
+            case PrimaryExpression::Kind::NamespaceQualified:
+                return false;
+            }
+        }
+
+        if (auto* unary = dynamic_cast<const UnaryExpression*>(expr)) {
+            if (unary->op == UnaryExpression::Operator::Increment ||
+                unary->op == UnaryExpression::Operator::Decrement) {
+                return true;
+            }
+
+            return expression_has_side_effect(unary->operand.get());
+        }
+
+        if (auto* postfix = dynamic_cast<const PostfixExpression*>(expr)) {
+            if (postfix->op == PostfixExpression::Operator::Increment ||
+                postfix->op == PostfixExpression::Operator::Decrement) {
+                return true;
+            }
+
+            if (postfix->op == PostfixExpression::Operator::FunctionCall &&
+                call_has_side_effect(postfix)) {
+                return true;
+            }
+
+            if (expression_has_side_effect(postfix->base.get()) ||
+                expression_has_side_effect(postfix->subscript_expr.get())) {
+                return true;
+            }
+
+            for (const auto& argument : postfix->arguments) {
+                if (expression_has_side_effect(argument.get())) { return true; }
+            }
+
+            return false;
+        }
+
+        if (auto* binary = dynamic_cast<const AdditiveExpression*>(expr)) {
+            return expression_has_side_effect(binary->left.get()) ||
+                expression_has_side_effect(binary->right.get());
+        }
+
+        if (auto* binary = dynamic_cast<const MultiplicativeExpression*>(expr)) {
+            return expression_has_side_effect(binary->left.get()) ||
+                expression_has_side_effect(binary->right.get());
+        }
+
+        if (auto* binary = dynamic_cast<const PowerExpression*>(expr)) {
+            return expression_has_side_effect(binary->left.get()) ||
+                expression_has_side_effect(binary->right.get());
+        }
+
+        if (auto* binary = dynamic_cast<const ComparisonExpression*>(expr)) {
+            return expression_has_side_effect(binary->left.get()) ||
+                expression_has_side_effect(binary->right.get());
+        }
+
+        if (auto* binary = dynamic_cast<const BitwiseExpression*>(expr)) {
+            return expression_has_side_effect(binary->left.get()) ||
+                expression_has_side_effect(binary->right.get());
+        }
+
+        if (auto* binary = dynamic_cast<const ShiftExpression*>(expr)) {
+            return expression_has_side_effect(binary->left.get()) ||
+                expression_has_side_effect(binary->right.get());
+        }
+
+        if (auto* binary = dynamic_cast<const LogicalAndExpression*>(expr)) {
+            return expression_has_side_effect(binary->left.get()) ||
+                expression_has_side_effect(binary->right.get());
+        }
+
+        if (auto* binary = dynamic_cast<const LogicalOrExpression*>(expr)) {
+            return expression_has_side_effect(binary->left.get()) ||
+                expression_has_side_effect(binary->right.get());
+        }
+
+        if (auto* conditional = dynamic_cast<const ConditionalExpression*>(expr)) {
+            return expression_has_side_effect(conditional->condition.get()) ||
+                expression_has_side_effect(conditional->then_expr.get()) ||
+                expression_has_side_effect(conditional->else_expr.get());
+        }
+
+        if (auto* property = dynamic_cast<const CompileTimePropertyExpression*>(expr)) {
+            if (expression_has_side_effect(property->receiver.get())) { return true; }
+
+            for (const auto& argument : property->arguments) {
+                if (expression_has_side_effect(argument.get())) { return true; }
+            }
+        }
+
+        return false;
+    }
+
+    bool TypeChecker::initializer_has_side_effect(const AST::Initializer* init) {
+        using namespace AST;
+        if (init == nullptr) { return false; }
+
+        if (auto* expression = dynamic_cast<const ExpressionInitializer*>(init)) {
+            return expression_has_side_effect(expression->expr.get());
+        }
+
+        if (auto* array = dynamic_cast<const ArrayInitializer*>(init)) {
+            for (const auto& element : array->elements) {
+                if (initializer_has_side_effect(element.get())) { return true; }
+            }
+        }
+
+        return false;
+    }
+
+    bool TypeChecker::initializer_has_implicit_side_effect(
+        const AST::VariableDeclaration* decl) {
+        using namespace AST;
+        if (decl == nullptr || decl->type.kind != TypeKind::Struct) {
+            return false;
+        }
+
+        const StructDefinition* def =
+            get_struct_definition(decl->type.struct_name);
+        if (def == nullptr) {
+            return false;
+        }
+
+        auto default_initialization_has_side_effect =
+            [&](const Type& type, auto&& self) -> bool {
+            if (type.kind != TypeKind::Struct) { return false; }
+            const StructDefinition* nested =
+                get_struct_definition(type.struct_name);
+            if (nested == nullptr) {
+                return false;
+            }
+
+            if (!nested->constructor_names.empty()) { return true; }
+
+            for (const StructDefinition::Member& member : nested->members) {
+                if (member.initializer != nullptr &&
+                    initializer_has_side_effect(member.initializer.get())) {
+                    return true;
+                }
+                if (member.initializer == nullptr &&
+                    self(member.type, self)) {
+                    return true;
+                }
+            }
+            return false;
+        };
+
+        if (auto* array = dynamic_cast<const ArrayInitializer*>(
+            decl->initializer.get())) {
+            if (array->elements.empty() &&
+                !def->constructor_names.empty()) {
+                return true;
+            }
+
+            for (std::size_t i = array->elements.size();
+                i < def->members.size(); ++i) {
+                const StructDefinition::Member& member = def->members[i];
+                if (member.initializer != nullptr &&
+                    initializer_has_side_effect(member.initializer.get())) {
+                    return true;
+                }
+                if (member.initializer == nullptr &&
+                    default_initialization_has_side_effect(member.type,
+                        default_initialization_has_side_effect)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        if (auto* expression = dynamic_cast<const ExpressionInitializer*>(
+            decl->initializer.get())) {
+            if (auto* call = dynamic_cast<const PostfixExpression*>(
+                expression->expr.get())) {
+                if (is_constexpr_call_expression(call)) { return false; }
+            }
+
+            auto type = expression_types_.find(expression->expr.get());
+            if (type != expression_types_.end() &&
+                type->second.kind == TypeKind::Struct &&
+                type->second.struct_name == decl->type.struct_name) {
+                const bool moving = is_move_source(expression->expr.get());
+                for (const auto& special : def->special_members) {
+                    if (special == nullptr) { continue; }
+                    if ((!moving &&
+                        special->kind == SpecialMemberFunction::Kind::CopyConstructor) ||
+                        (moving &&
+                            special->kind == SpecialMemberFunction::Kind::MoveConstructor)) {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        return false;
+    }
+
     void TypeChecker::check_const_declaration(AST::VariableDeclaration* decl) {
         const std::string& name = decl->name;
         if (decl->initializer == nullptr) {
+            if (decl->type.is_arithmetic()) {
+                ConstValue value;
+                value.is_float = decl->type.is_floating();
+                if (const_values_.empty()) { const_values_.emplace_back(); }
+                const_values_.back()[name] = value;
+            }
+            return;
+        }
+
+        if (initializer_has_side_effect(decl->initializer.get())) {
             report_error_template(decl->location,
-                ErrorCode::ConstCannotStoreVariable, { name });
+                ErrorCode::ConstantInitializerSideEffect, { name });
             return;
         }
 
@@ -683,13 +940,14 @@ namespace gallt {
             return true;
         }
         case TypeKind::Struct: {
-            auto def = struct_defs_.find(type.struct_name);
-            if (def == struct_defs_.end() || def->second == nullptr) { return false; }
+            AST::StructDefinition* def =
+                get_struct_definition(type.struct_name);
+            if (def == nullptr) { return false; }
 
             std::size_t offset = 0;
             std::size_t max_align = 1;
 
-            for (const auto& member : def->second->members) {
+            for (const auto& member : def->members) {
                 std::size_t member_size = 0;
                 std::size_t member_align = 1;
                 if (!type_layout(member.type, member_size, member_align)) { return false; }
@@ -712,11 +970,12 @@ namespace gallt {
         case TypeKind::Array:
             return type.element_type ? type_is_copyable(*type.element_type) : true;
         case TypeKind::Struct: {
-            auto def = struct_defs_.find(type.struct_name);
-            if (def == struct_defs_.end() || def->second == nullptr) { return true; }
-            if (def->second->no_copy) { return false; }
+            AST::StructDefinition* def =
+                get_struct_definition(type.struct_name);
+            if (def == nullptr) { return true; }
+            if (def->no_copy) { return false; }
 
-            for (const auto& member : def->second->members) {
+            for (const auto& member : def->members) {
                 if (!type_is_copyable(member.type)) { return false; }
             }
 
@@ -732,11 +991,12 @@ namespace gallt {
         case TypeKind::Array:
             return type.element_type ? type_is_movable(*type.element_type) : true;
         case TypeKind::Struct: {
-            auto def = struct_defs_.find(type.struct_name);
-            if (def == struct_defs_.end() || def->second == nullptr) { return true; }
-            if (def->second->no_move) { return false; }
+            AST::StructDefinition* def =
+                get_struct_definition(type.struct_name);
+            if (def == nullptr) { return true; }
+            if (def->no_move) { return false; }
 
-            for (const auto& member : def->second->members) {
+            for (const auto& member : def->members) {
                 if (!type_is_movable(member.type)) { return false; }
             }
 

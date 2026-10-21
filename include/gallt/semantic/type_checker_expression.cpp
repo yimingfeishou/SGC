@@ -633,6 +633,7 @@ namespace gallt {
                             return AST::Type::make_error();
                         }
                         record_function_resolution(prim, *chosen);
+                        note_builtin_reference(*chosen);
                         return function_type_of(*chosen);
                     }
                 }
@@ -713,11 +714,6 @@ namespace gallt {
                 report_error(expr->location, ErrorCode::DerefNonPointer,
                     "dereference operator requires pointer type, got '" +
                     operand.to_string() + "'");
-                return AST::Type::make_error();
-            }
-            if (is_null_literal_expr(expr->operand.get())) {
-                report_error(expr->location, ErrorCode::NullPointerDereference,
-                    "cannot dereference a null pointer constant");
                 return AST::Type::make_error();
             }
             if (operand.pointee_type) {
@@ -856,23 +852,6 @@ namespace gallt {
                 if (!index_type.is_error() && !index_type.is_integer()) {
                     report_error(expr->subscript_expr->location, ErrorCode::SubscriptNotInteger,
                         "array index must be integer type, got '" + index_type.to_string() + "'");
-                } else if (index_type.is_integer() && base_type.kind == TypeKind::Array &&
-                    base_type.array_size.has_value()) {
-                    auto index_value =
-                        evaluate_signed_const_integer_expression(
-                            expr->subscript_expr.get());
-                    if (index_value.has_value()) {
-                        const bool negative = *index_value < 0;
-                        const bool too_large = !negative &&
-                            static_cast<std::size_t>(*index_value) >=
-                                *base_type.array_size;
-                        if (negative || too_large) {
-                            report_error_template(expr->subscript_expr->location,
-                                ErrorCode::SubscriptOutOfBounds,
-                                { std::to_string(*index_value),
-                                  std::to_string(*base_type.array_size) });
-                        }
-                    }
                 }
             }
 
@@ -985,7 +964,7 @@ namespace gallt {
                             name == "bool" || name == "string" || name == "file" ||
                             name == "void") {
                             is_type_name = true;
-                        } else if (struct_defs_.find(name) != struct_defs_.end()) {
+                        } else if (get_struct_definition(name) != nullptr) {
                             is_type_name = true;
                         }
                     }
@@ -1062,7 +1041,8 @@ namespace gallt {
                 return AST::Type::make_int();
             }
 
-            if (direct_primary != nullptr && struct_defs_.find(func_name) != struct_defs_.end()) {
+            if (direct_primary != nullptr &&
+                get_struct_definition(func_name) != nullptr) {
                 std::vector<AST::Type> arg_types;
                 std::vector<bool> arg_is_null;
 
@@ -1646,39 +1626,6 @@ namespace gallt {
                 break;
             }
 
-            if (func_name == "fileopen" && i == 1 && arg_type.kind == TypeKind::String) {
-                if (auto* prim = dynamic_cast<AST::PrimaryExpression*>(arg)) {
-                    if (prim->kind == AST::PrimaryExpression::Kind::Literal &&
-                        prim->literal_token.type == TokenType::StringLiteral) {
-                        std::string mode;
-                        if (string_literal_content(prim->literal_token.lexeme, mode) &&
-                            !is_valid_file_open_mode(mode)) {
-                            report_error(arg->location, ErrorCode::FileOpenModeInvalid,
-                                "invalid file open mode: '" + mode + "'");
-                            reported = true;
-                        }
-                    }
-                }
-            }
-
-            if (func_name == "fileseek" && i == 2) {
-                if (auto* prim = dynamic_cast<AST::PrimaryExpression*>(arg)) {
-                    if (prim->kind == AST::PrimaryExpression::Kind::Literal &&
-                        prim->literal_token.type == TokenType::IntegerLiteral) {
-                        long long origin = 0;
-                        std::string_view lexeme = prim->literal_token.lexeme;
-                        auto parsed = std::from_chars(lexeme.data(),
-                            lexeme.data() + lexeme.size(), origin);
-                        if (parsed.ec == std::errc() &&
-                            origin != 0 && origin != 1 && origin != 2) {
-                            report_error(arg->location, ErrorCode::FileSeekOriginInvalid,
-                                "fileseek() origin must be 0, 1 or 2, got " +
-                                std::to_string(origin));
-                            reported = true;
-                        }
-                    }
-                }
-            }
         }
         return reported ? AST::Type::make_error() : result_type;
     }
@@ -1727,6 +1674,7 @@ namespace gallt {
             if (sym) {
                 if (sym->kind == SymbolKind::Function) {
                     record_function_resolution(expr, *sym);
+                    note_builtin_reference(*sym);
                     return function_type_of(*sym);
                 }
                 return sym->type;
@@ -1845,32 +1793,9 @@ namespace gallt {
                 if (target_type.is_error()) {
                     return AST::Type::make_error();
                 }
-                bool invalid = false;
                 if (target_type.kind != TypeKind::Pointer) {
-                    invalid = true;
-                } else if (auto* target_prim =
-                    dynamic_cast<AST::PrimaryExpression*>(expr->placement_target.get())) {
-                    if (target_prim->kind == AST::PrimaryExpression::Kind::Null) { invalid = true; }
-                }
-
-                if (!invalid && target_type.pointee_type &&
-                    target_type.pointee_type->kind != TypeKind::Void) {
-                    std::size_t target_size = 0;
-                    std::size_t target_align = 1;
-                    std::size_t needed_size = 0;
-                    std::size_t needed_align = 1;
-
-                    if (type_layout(*target_type.pointee_type, target_size, target_align) &&
-                        type_layout(expr->construct_type, needed_size, needed_align)) {
-                        if (target_size < needed_size || target_align < needed_align) {
-                            invalid = true;
-                        }
-                    }
-                }
-
-                if (invalid) {
-                    report_error_template(expr->location,
-                        ErrorCode::PlacementTargetInvalid, std::vector<std::string>{});
+                    report_error(expr->location, ErrorCode::ExpressionSyntaxError,
+                        "placement construction target must be a pointer");
                 }
             }
 

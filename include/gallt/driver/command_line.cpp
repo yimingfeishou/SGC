@@ -68,7 +68,7 @@ namespace {
                 continue;
             }
 
-            if (arg == L"--compile") {
+            if (arg == L"--compile" || arg == L"-C") {
                 out.mode = CommandMode::Compile;
                 continue;
             }
@@ -278,9 +278,9 @@ namespace {
             "  sgc --help\n"
             "  sgc --version\n"
             "Options:\n"
-            "  --compile                     compile a Gallt source file\n"
-            "  --input,    -I <path>         input Gallt source file\n"
-            "  --output,   -O <path>         output file\n"
+            "  --compile, -C                 compile a Gallt source file\n"
+            "  --input, -I <path>            input Gallt source file\n"
+            "  --output, -O <path>           output file\n"
             "  --optimization-level, -OL <n> optimization level:\n"
             "                                0 no optimization\n"
             "                                1 basic\n"
@@ -329,11 +329,33 @@ namespace {
             "  by --no-runtime\n";
     }
 
-    std::string version_text() {
-        return
-        "Standard Gallt Compiler 0.5.0-1017 Preview (LLVM backend, x86-64 Windows and Linux)\n"
-        "Build date: 2026-10-17\n"
-        "This version is experimental";
-    }
+    #if defined(_WIN32)
+
+        std::string version_text() {
+            return
+            "Standard Gallt Compiler 0.5.0-1021 Preview (LLVM backend, x86-64 Windows)\n"
+            "Build date: 2026-10-21\n"
+            "This version is experimental";
+        }
+
+    #elif defined(__linux__)
+
+        std::string version_text() {
+            return
+            "Standard Gallt Compiler 0.5.0-1021 Preview (LLVM backend, x86-64 Linux)\n"
+            "Build date: 2026-10-21\n"
+            "This version is experimental";
+        }
+
+    #else
+    
+        std::string version_text() {
+            return
+            "Standard Gallt Compiler 0.5.0-1021 Preview (LLVM backend, x86-64 Unknown)\n"
+            "Build date: 2026-10-21\n"
+            "This version is experimental";
+        }
+
+    #endif
 
 }

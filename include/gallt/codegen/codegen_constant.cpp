@@ -56,11 +56,11 @@ namespace gallt {
         };
         ctx.lookup_constant = [this](const std::string& name, long long& int_value,
             double& float_value, bool& is_float) {
-            auto found = constant_values_.find(name);
-            if (found == constant_values_.end()) { return false; }
-            int_value = found->second.int_value;
-            float_value = found->second.float_value;
-            is_float = found->second.is_float;
+            const ConstantNumeric* value = lookup_constant_numeric(name);
+            if (value == nullptr) { return false; }
+            int_value = value->int_value;
+            float_value = value->float_value;
+            is_float = value->is_float;
             return true;
         };
         long long int_value = 0;
@@ -113,7 +113,11 @@ namespace gallt {
             info.constant_text = std::to_string(result);
         }
 
-        constant_values_[decl->name] = value;
+        if (scopes_.empty() || constant_scopes_.empty()) {
+            constant_values_[decl->name] = value;
+        } else {
+            constant_scopes_.back()[decl->name] = value;
+        }
         return true;
     }
 
@@ -155,11 +159,11 @@ namespace gallt {
         ConstantEvaluationContext ctx;
         ctx.lookup_constant = [this](const std::string& name, long long& int_value,
             double& float_value, bool& is_float) {
-            auto found = constant_values_.find(name);
-            if (found == constant_values_.end()) { return false; }
-            int_value = found->second.int_value;
-            float_value = found->second.float_value;
-            is_float = found->second.is_float;
+            const ConstantNumeric* value = lookup_constant_numeric(name);
+            if (value == nullptr) { return false; }
+            int_value = value->int_value;
+            float_value = value->float_value;
+            is_float = value->is_float;
             return true;
         };
         long long int_value = 0;
@@ -208,11 +212,21 @@ namespace gallt {
     }
 
     bool CodeGenerator::build_constant_initializer(const AST::Initializer* init,
-        const AST::Type& type, std::string& out) {
+        const AST::Type& type, std::string& out, bool include_type) {
         if (init == nullptr) { return false; }
 
         if (auto* expr_init = dynamic_cast<const AST::ExpressionInitializer*>(init)) {
-            return build_constant_scalar(expr_init->expr.get(), type, out);
+            if (!build_constant_scalar(expr_init->expr.get(), type, out)) {
+                return false;
+            }
+
+            if (!include_type) {
+                const std::string prefix = llvm_type(type) + " ";
+                if (out.rfind(prefix, 0) == 0) {
+                    out.erase(0, prefix.size());
+                }
+            }
+            return true;
         }
 
         auto* arr_init = dynamic_cast<const AST::ArrayInitializer*>(init);
@@ -237,12 +251,12 @@ namespace gallt {
 
                     text += element;
                 } else {
-                    text += "zeroinitializer";
+                    text += llvm_type(*type.element_type) + " zeroinitializer";
                 }
             }
 
             text += "]";
-            out = text;
+            out = include_type ? llvm_type(type) + " " + text : text;
             return true;
         }
 
@@ -259,7 +273,7 @@ namespace gallt {
                 const AST::Initializer* element = i < arr_init->elements.size()
                     ? arr_init->elements[i].get() : member.initializer.get();
                 if (element == nullptr) {
-                    text += "zeroinitializer";
+                    text += llvm_type(member.type) + " zeroinitializer";
                     continue;
                 }
 
@@ -272,7 +286,7 @@ namespace gallt {
             }
 
             text += "}";
-            out = text;
+            out = include_type ? llvm_type(type) + " " + text : text;
             return true;
         }
         return false;
@@ -286,7 +300,8 @@ namespace gallt {
         }
 
         std::string text;
-        if (!build_constant_initializer(decl->initializer.get(), decl->type, text)) {
+        if (!build_constant_initializer(decl->initializer.get(), decl->type, text,
+            false)) {
             return false;
         }
 
@@ -299,6 +314,82 @@ namespace gallt {
         info.is_constant = true;
         info.address = name;
         return true;
+    }
+
+    bool CodeGenerator::build_static_global_initializer(
+        AST::VariableDeclaration* decl, std::string& initializer) {
+        if (decl == nullptr) { return false; }
+
+        if (decl->type.kind == TypeKind::Struct) {
+            auto definition = struct_by_name_.find(decl->type.struct_name);
+            const bool has_user_constructor =
+                definition != struct_by_name_.end() &&
+                definition->second != nullptr &&
+                !definition->second->constructor_names.empty();
+            const bool empty_initializer =
+                decl->initializer == nullptr ||
+                (dynamic_cast<AST::ArrayInitializer*>(
+                    decl->initializer.get()) != nullptr &&
+                    static_cast<AST::ArrayInitializer*>(
+                        decl->initializer.get())->elements.empty());
+
+            if (has_user_constructor && empty_initializer) { return false; }
+        }
+
+        if (decl->initializer == nullptr) {
+            if (decl->type.kind == TypeKind::Struct) {
+                auto definition = struct_by_name_.find(decl->type.struct_name);
+                bool all_zero = definition != struct_by_name_.end() &&
+                    definition->second != nullptr;
+                if (all_zero) {
+                    for (const AST::StructDefinition::Member& member :
+                        definition->second->members) {
+                        if (member.initializer != nullptr) {
+                            all_zero = false;
+                            break;
+                        }
+                    }
+                }
+                if (all_zero) {
+                    initializer = "zeroinitializer";
+                    return true;
+                }
+
+                AST::ArrayInitializer empty(decl->location,
+                    std::vector<std::unique_ptr<AST::Initializer>>{});
+                return build_constant_initializer(&empty, decl->type,
+                    initializer, false);
+            }
+
+            initializer = "zeroinitializer";
+            return true;
+        }
+
+        if (decl->type.kind == TypeKind::Array ||
+            decl->type.kind == TypeKind::Struct) {
+            return build_constant_initializer(decl->initializer.get(),
+                decl->type, initializer, false);
+        }
+
+        LocalInfo info;
+        if (!fold_constant_declaration(decl, info)) { return false; }
+        if (!info.constant_text.empty()) {
+            initializer = info.constant_text;
+            return true;
+        }
+        if (info.constant_expr != nullptr) {
+            std::string value;
+            if (!build_constant_scalar(info.constant_expr, decl->type, value)) {
+                return false;
+            }
+            const std::string prefix = llvm_type(decl->type) + " ";
+            if (value.rfind(prefix, 0) == 0) {
+                value.erase(0, prefix.size());
+            }
+            initializer = std::move(value);
+            return true;
+        }
+        return false;
     }
 
     void CodeGenerator::emit_constant_aggregate_globals() {
@@ -315,7 +406,12 @@ namespace gallt {
     void CodeGenerator::emit_variable_declaration(AST::VariableDeclaration* decl) {
         require_lifecycle_functions(decl->type);
 
-        if (decl->type.is_const) {
+        const bool declaration_is_const = decl->type.is_const ||
+            (decl->type.kind == TypeKind::Array &&
+                decl->type.element_type &&
+                decl->type.element_type->is_const);
+
+        if (declaration_is_const) {
             LocalInfo constant;
             if (fold_constant_declaration(decl, constant)) {
                 if (scopes_.empty()) { push_scope(); }
@@ -347,6 +443,13 @@ namespace gallt {
         }
 
         if (!decl->initializer) {
+            if (declaration_is_const) {
+                std::string n = std::to_string(type_size(decl->type));
+                emit_line("call void @llvm.memset.p0.i64(ptr " + address +
+                    ", i8 0, i64 " + n + ", i1 false)");
+                return;
+            }
+
             if (!decl->constructed_by_lowering && decl->type.kind == TypeKind::Struct) {
                 AST::ArrayInitializer empty_init(decl->location,
                     std::vector<std::unique_ptr<AST::Initializer>>{});

@@ -206,10 +206,31 @@ namespace {
         std::string spliced = splice_line_continuations(*bytes, splices);
         Lexer lexer(spliced, *name_pool.back(), scratch,
             splices.empty() ? nullptr : &splices);
+        int emit_block_depth = 0;
+        bool awaiting_emit_block = false;
 
         for (;;) {
             Token token = lexer.next_token();
             if (token.type == TokenType::EndOfFile) { break; }
+            if (emit_block_depth > 0) {
+                if (token.type == TokenType::LeftBrace) {
+                    ++emit_block_depth;
+                } else if (token.type == TokenType::RightBrace) {
+                    --emit_block_depth;
+                }
+                continue;
+            }
+            if (awaiting_emit_block) {
+                awaiting_emit_block = false;
+                if (token.type == TokenType::LeftBrace) {
+                    emit_block_depth = 1;
+                    continue;
+                }
+            }
+            if (token.type == TokenType::Keyword_Emit) {
+                awaiting_emit_block = true;
+                continue;
+            }
             if (token.type != TokenType::Keyword_Guide) { continue; }
             Token literal = lexer.next_token();
             if (literal.type != TokenType::StringLiteral) { continue; }
@@ -355,6 +376,9 @@ namespace {
             LoadedSource ls;
             ls.canonical_path = canonical;
 
+            std::cout << "compiling "
+                      << pal::to_utf8(canonical.wstring()) << "\n";
+
             if (!load_one_file(canonical, diag, ls, &merged_generic_names)) {
                 return false;
             }
@@ -490,6 +514,7 @@ namespace {
         conditions.run(&combined);
         namespaces.run(&combined);
         expander.expand(&combined);
+        conditions.run(&combined);
 
         if (expander.stack_probe_triggered()) {
             return pal::exit_failure_code();
@@ -526,7 +551,8 @@ namespace {
 
         CodeGenerator generator(&combined, checker.expression_types(),
             checker.resolved_functions(), checker.resolved_externs(),
-            checker.resolved_operators(), &diag, options.debug_symbols_level,
+            checker.resolved_operators(), checker.referenced_builtins(),
+            &diag, options.debug_symbols_level,
             emit_entry_point, options.no_runtime, options.gallt_abi);
         generator.generate();
 

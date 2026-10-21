@@ -15,7 +15,8 @@ namespace gallt {
 
     class Parser {
     public:
-        Parser(Lexer& lexer, DiagnosticEngine& diag);
+        Parser(Lexer& lexer, DiagnosticEngine& diag,
+            bool generated_emit_context = false);
         ~Parser() = default;
 
         Parser(const Parser&) = delete;
@@ -107,6 +108,9 @@ namespace gallt {
         bool in_error_recovery_ = false;
         int generic_block_depth_ = 0;
         int emit_content_depth_ = 0;
+        int generic_argument_depth_ = 0;
+        int function_body_depth_ = 0;
+        bool generated_emit_context_ = false;
 
         void advance();
         void peek_token();

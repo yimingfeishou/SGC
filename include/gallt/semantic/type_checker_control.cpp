@@ -339,6 +339,17 @@ namespace gallt {
 
     void TypeChecker::check_expression_statement(AST::ExpressionStatement* expr_stmt) {
         if (expr_stmt->expr) {
+            auto* primary = dynamic_cast<AST::PrimaryExpression*>(expr_stmt->expr.get());
+            if (primary != nullptr &&
+                primary->kind == AST::PrimaryExpression::Kind::Identifier) {
+                Symbol* symbol = sym_table_.lookup(primary->identifier);
+                if (symbol != nullptr && symbol->kind == SymbolKind::Function &&
+                    symbol->is_builtin) {
+                    report_error(primary->location, ErrorCode::ExpressionSyntaxError,
+                        "expect '('");
+                    return;
+                }
+            }
             check_expression(expr_stmt->expr.get(), true);
         }
     }
