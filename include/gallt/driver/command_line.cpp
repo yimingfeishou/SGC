@@ -333,7 +333,7 @@ namespace {
 
         std::string version_text() {
             return
-            "Standard Gallt Compiler 0.5.0-1021 Preview (LLVM backend, x86-64 Windows)\n"
+            "Standard Gallt Compiler 0.5.0-1023 Preview (LLVM backend, x86-64 Windows)\n"
             "Build date: 2026-10-21\n"
             "This version is experimental";
         }
@@ -342,7 +342,7 @@ namespace {
 
         std::string version_text() {
             return
-            "Standard Gallt Compiler 0.5.0-1021 Preview (LLVM backend, x86-64 Linux)\n"
+            "Standard Gallt Compiler 0.5.0-1023 Preview (LLVM backend, x86-64 Linux)\n"
             "Build date: 2026-10-21\n"
             "This version is experimental";
         }
@@ -351,7 +351,7 @@ namespace {
     
         std::string version_text() {
             return
-            "Standard Gallt Compiler 0.5.0-1021 Preview (LLVM backend, x86-64 Unknown)\n"
+            "Standard Gallt Compiler 0.5.0-1023 Preview (LLVM backend, x86-64 Unknown)\n"
             "Build date: 2026-10-21\n"
             "This version is experimental";
         }

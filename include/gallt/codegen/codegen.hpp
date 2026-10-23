@@ -308,6 +308,8 @@ namespace gallt {
         void emit_string_assign(const std::string& dest_address, const ExprValue& source);
         void emit_struct_brace_initialization(const std::string& address,
             const AST::Type& struct_type, AST::ArrayInitializer* init);
+        void emit_constructor_member_defaults(const std::string& address,
+            const AST::StructDefinition* def);
         void emit_array_brace_initialization(const std::string& address,
             const AST::Type& array_type, AST::ArrayInitializer* init);
         void emit_aggregate_assign(const std::string& dest_address,
@@ -340,6 +342,9 @@ namespace gallt {
         int default_constructor_index(const AST::StructDefinition* def);
         bool emit_struct_default_constructor(const std::string& address,
             const AST::StructDefinition* def, SourceLocation loc);
+        AST::FunctionDefinition* constructor_function_for(
+            const AST::StructDefinition* def,
+            const std::vector<AST::Type>& user_parameters) const;
         void emit_struct_return(AST::Expression* expr, const AST::Type& type,
             const std::string& sret);
         bool is_struct_returning_call(AST::Expression* expr) const;

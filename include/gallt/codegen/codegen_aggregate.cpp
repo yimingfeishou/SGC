@@ -128,14 +128,50 @@ namespace gallt {
         for (std::size_t i = 0; i < def->constructor_names.size(); ++i) {
             const std::size_t user_params = i < def->constructor_param_types.size()
                 ? def->constructor_param_types[i].size() : 0;
+            AST::FunctionDefinition* ctor = constructor_function_for(def,
+                i < def->constructor_param_types.size()
+                    ? def->constructor_param_types[i]
+                    : std::vector<AST::Type>{});
             std::vector<AST::Expression*> supplied_defaults;
-            collect_constructor_defaults(def->constructor_names[i], supplied_defaults);
+            if (ctor != nullptr) {
+                collect_constructor_defaults(ctor->name, supplied_defaults);
+            }
             if (supplied_defaults.size() >= user_params) {
                 return static_cast<int>(i) + 1;
             }
         }
 
         return -1;
+    }
+
+    AST::FunctionDefinition* CodeGenerator::constructor_function_for(
+        const AST::StructDefinition* def,
+        const std::vector<AST::Type>& user_parameters) const {
+        if (def == nullptr) { return nullptr; }
+
+        for (const auto& top : program_->top_levels) {
+            auto* function = dynamic_cast<AST::FunctionDefinition*>(top.get());
+
+            if (function == nullptr || function->owning_struct != def ||
+                function->name.rfind("__sgc_ctor$", 0) != 0 ||
+                function->parameters.empty() ||
+                function->parameters.size() - 1 != user_parameters.size()) {
+                continue;
+            }
+
+            bool matches = true;
+
+            for (std::size_t i = 0; i < user_parameters.size(); ++i) {
+                if (!(function->parameters[i + 1] == user_parameters[i])) {
+                    matches = false;
+                    break;
+                }
+            }
+
+            if (matches) { return function; }
+        }
+
+        return nullptr;
     }
 
     bool CodeGenerator::emit_struct_default_constructor(const std::string& address,
@@ -174,13 +210,19 @@ namespace gallt {
 
         const std::size_t index = static_cast<std::size_t>(ctor_index - 1);
         const std::string& ctor_name = def->constructor_names[index];
-        std::string callee = function_reference(ctor_name);
-        if (callee.empty()) { return false; }
-        std::vector<AST::Expression*> ctor_args;
-        collect_constructor_defaults(ctor_name, ctor_args);
         const std::vector<AST::Type>* params =
             index < def->constructor_param_types.size()
                 ? &def->constructor_param_types[index] : nullptr;
+        AST::FunctionDefinition* ctor = constructor_function_for(def,
+            params != nullptr ? *params : std::vector<AST::Type>{});
+        std::string callee = ctor != nullptr ? function_reference(ctor->name)
+            : function_reference(ctor_name);
+        if (callee.empty()) {
+            callee = source_function_symbol(ctor != nullptr ? ctor->name : ctor_name);
+        }
+        std::vector<AST::Expression*> ctor_args;
+        collect_constructor_defaults(ctor != nullptr ? ctor->name : ctor_name,
+            ctor_args);
         std::string call_text = "call void " + callee + "(ptr " + address;
 
         for (std::size_t i = 0; i < ctor_args.size(); ++i) {
@@ -284,6 +326,48 @@ namespace gallt {
             if (!handled) {
                 emit_line("store " + llvm_type(member.type) +
                     " zeroinitializer, ptr " + field_ptr);
+            }
+        }
+    }
+
+    void CodeGenerator::emit_constructor_member_defaults(const std::string& address,
+        const AST::StructDefinition* def) {
+        if (def == nullptr) { return; }
+
+        const AST::Type struct_type = AST::Type::make_struct(def->name);
+        const std::string struct_ir_type = llvm_type(struct_type);
+
+        for (std::size_t i = 0; i < def->members.size(); ++i) {
+            const AST::StructDefinition::Member& member = def->members[i];
+            std::string field_ptr = new_temp("constructor_default");
+            emit_line(field_ptr + " = getelementptr " + struct_ir_type +
+                ", ptr " + address + ", i32 0, i32 " + std::to_string(i));
+
+            if (member.initializer != nullptr) {
+                if (auto* nested = dynamic_cast<AST::ArrayInitializer*>(
+                    member.initializer.get())) {
+                    if (member.type.kind == TypeKind::Array) {
+                        emit_array_brace_initialization(field_ptr, member.type, nested);
+                    } else if (member.type.kind == TypeKind::Struct) {
+                        emit_struct_brace_initialization(field_ptr, member.type, nested);
+                    }
+                } else if (auto* expression = dynamic_cast<AST::ExpressionInitializer*>(
+                    member.initializer.get())) {
+                    ExprValue value = gen_expr(expression->expr.get());
+                    emit_aggregate_assign(field_ptr, member.type, value, false,
+                        lifecycle_transfer::is_move_source(expression->expr.get()));
+                }
+                continue;
+            }
+
+            if (member.type.kind == TypeKind::Struct) {
+                auto found = struct_by_name_.find(member.type.struct_name);
+
+                if (found != struct_by_name_.end() &&
+                    default_constructor_index(found->second) >= 0) {
+                    emit_struct_default_constructor(field_ptr, found->second,
+                        member.location);
+                }
             }
         }
     }

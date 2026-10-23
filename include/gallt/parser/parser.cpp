@@ -1590,7 +1590,8 @@ namespace gallt {
 
         std::unique_ptr<Expression> value = nullptr;
         if (current_.type != TokenType::Semicolon && current_.type != TokenType::Newline &&
-            current_.type != TokenType::EndOfFile) {
+            current_.type != TokenType::EndOfFile &&
+            current_.type != TokenType::RightBrace) {
             value = parse_expression();
 
             if (value == nullptr) {

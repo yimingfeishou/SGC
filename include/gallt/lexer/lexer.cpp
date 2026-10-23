@@ -845,7 +845,7 @@ namespace gallt {
             return Token{ TokenType::At, start_loc, "@" };
 
         case '\\':
-            diag_.report_error_template(start_loc, ErrorCode::UndefinedIdentifier,
+            diag_.report_error_template(start_loc, ErrorCode::ExpressionSyntaxError,
                 { std::string(source_.substr(position_ - 1, 1)) });
             has_error_ = true;
             return Token{ TokenType::Identifier, start_loc,

@@ -457,6 +457,12 @@ namespace gallt {
             std::size_t offset = 0;
 
             for (const AST::StructDefinition::Member& member : def->members) {
+                const std::size_t alignment = type_align(member.type);
+
+                if (alignment > 1) {
+                    offset = (offset + alignment - 1) / alignment * alignment;
+                }
+
                 const unsigned member_id = next_debug_id();
                 const unsigned member_type = debug_type_id(member.type);
                 debug_metadata_.push_back("!" + std::to_string(member_id) +
@@ -469,11 +475,7 @@ namespace gallt {
                                       : std::string("null")) +
                     ", size: " + std::to_string(type_size(member.type) * 8) +
                     ", offset: " + std::to_string(offset * 8) + ")");
-                const std::size_t alignment = type_align(member.type);
                 offset += type_size(member.type);
-                if (alignment > 1) {
-                    offset = (offset + alignment - 1) / alignment * alignment;
-                }
                 member_ids.push_back(member_id);
             }
 
@@ -1354,6 +1356,20 @@ namespace gallt {
             emit_line("store ptr %" + pack_name + "$data, ptr " + pack.data_slot);
             emit_line("store i32 %" + pack_name + "$len, ptr " + pack.length_slot);
             variadic_locals_.push_back(std::move(pack));
+        }
+
+        if (func->owning_struct != nullptr &&
+            func->name.rfind("__sgc_ctor$", 0) == 0 &&
+            !func->param_names.empty()) {
+            LocalInfo* self = lookup_local(func->param_names.front());
+
+            if (self != nullptr && self->type.kind == TypeKind::Pointer &&
+                self->type.pointee_type &&
+                self->type.pointee_type->kind == TypeKind::Struct) {
+                std::string self_address = new_temp("constructor_this");
+                emit_line(self_address + " = load ptr, ptr " + self->address);
+                emit_constructor_member_defaults(self_address, func->owning_struct);
+            }
         }
 
         if (func->body) {
