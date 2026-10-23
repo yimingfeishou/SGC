@@ -278,6 +278,8 @@ namespace {
             "  sgc --help\n"
             "  sgc --version\n"
             "Options:\n"
+            "  --help, -H                    display help text\n"
+            "  --version, -V                 display version info\n"
             "  --compile, -C                 compile a Gallt source file\n"
             "  --input, -I <path>            input Gallt source file\n"
             "  --output, -O <path>           output file\n"
