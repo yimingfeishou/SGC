@@ -1,0 +1,2 @@
+*.glt text eol=lf
+tests/error/compiler__encoding__error__*.glt -text
