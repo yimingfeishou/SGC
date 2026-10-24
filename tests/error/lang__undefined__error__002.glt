@@ -1,0 +1,7 @@
+// lang__undefined__error__002.glt
+// expect error ER 0057
+
+int main() {
+    Unknown<int>
+    return 0
+}

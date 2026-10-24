@@ -1,0 +1,14 @@
+// lang__str_func__error__012.glt
+// expect error ER 0004
+
+const bool same(string a, string b) {
+    if (a == b) {
+        return true
+    }
+    return false
+}
+const bool flag = same("ab", "ab")
+int main() {
+    output(flag, "\n")
+    return 0
+}

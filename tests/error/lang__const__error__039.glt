@@ -1,0 +1,12 @@
+// lang__const__error__039.glt
+// expect error ER 0030
+
+const int N = 4
+int sum(int arr[N]) {
+    return arr[0]
+}
+int main() {
+    int a[4] = {1,2,3,4}
+    output(sum(a), "\n")
+    return 0
+}

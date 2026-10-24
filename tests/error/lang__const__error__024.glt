@@ -1,0 +1,12 @@
+// lang__const__error__024.glt
+// expect exit nonzero
+
+const int square(int x) {
+    return x ** 2
+}
+
+const int result = square(5)
+
+int main() {
+    return result
+}

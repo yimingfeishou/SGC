@@ -1,0 +1,12 @@
+// integ__export__error__008.glt
+// expect error ER 0128
+
+int counter = 5
+
+export int counter(int value) {
+    return value
+}
+
+int main() {
+    return 0
+}

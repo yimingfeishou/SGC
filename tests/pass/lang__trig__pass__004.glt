@@ -1,0 +1,129 @@
+// lang__trig__pass__004.glt
+// expect output
+// 0134|0134|c2|f1
+// fd
+// f2
+// |s33|d2|10200|023|n
+
+int counter = 0
+
+int nxt() {
+    counter = counter + 1
+    return counter
+}
+
+int jump_table(int v) {
+    switch (v) {
+        case (1) {
+            return 10
+        }
+        case (2) {
+            return 20
+        }
+        case (3) {
+            return 30
+        }
+    }
+    return 0
+}
+
+int main() {
+    for (int i = 0; i < 5; i++) {
+        if (i == 2) {
+            continue
+        }
+        output(i)
+    }
+    output("|")
+    int i = 0
+    while (i < 5) {
+        if (i == 2) {
+            i++
+            continue
+        }
+        output(i)
+        i++
+    }
+    output("|")
+    switch (2) {
+        case (1) {
+            output("c1")
+        } case (2) {
+            output("c2")
+        } case (3) {
+            output("c3")
+        }
+        output("dn")
+    }
+    output("|")
+    switch (1) {
+        case (1) {
+            output("f1\n")
+            fallthrough
+        }
+        output("fd\n")
+        fallthrough
+        case (2) {
+            output("f2\n")
+        }
+        output("fd2\n")
+    }
+    output("|")
+    counter = 0
+    switch (3) {
+        case (nxt()) {
+            output("s1")
+        }
+        case (nxt()) {
+            output("s2")
+        }
+        case (nxt()) {
+            output("s3")
+        }
+        case (nxt()) {
+            output("s4")
+        }
+    }
+    output(counter)
+    output("|")
+    switch (2) {
+        case (1) {
+            output("d1")
+        }
+        case (2) {
+            output("d2")
+        }
+        case (2) {
+            output("d3")
+        }
+    }
+    output("|")
+    output(jump_table(1))
+    output(jump_table(2))
+    output(jump_table(9))
+    output("|")
+    for (int j = 0; j < 6; j++) {
+        switch (j) {
+            case (1) {
+                continue
+            }
+            case (4) {
+                break
+            }
+        }
+        output(j)
+    }
+    output("|")
+    switch (0) {
+        case (0) {
+            switch (7) {
+                case (7) {
+                    output("n")
+                }
+            }
+        }
+        output("m")
+    }
+    output("\n")
+    return 0
+}

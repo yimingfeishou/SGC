@@ -1,0 +1,15 @@
+// lang__generics__error__002.glt
+// expect error ER 0011
+
+void sink(int value) {
+    output(value)
+}
+
+void forward_all(int... rest) {
+    sink(rest...)
+}
+
+int main() {
+    forward_all(1, 2)
+    return 0
+}

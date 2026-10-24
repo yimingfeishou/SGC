@@ -1,0 +1,53 @@
+// lang__lifecycle__pass__011.glt
+// expect output
+// alpha beta gamma delta epsilon
+
+generics Mover<T: string> {
+    struct Buffer {
+        T* data
+        int size
+
+        constructor () {
+            data = null
+            size = 0
+        }
+
+        destructor () {
+            if (data != null) {
+                for (int i = 0; i < size; i++) {
+                    T discarded = move(data[i])
+                }
+                free(data)
+                data = null
+            }
+            size = 0
+        }
+    }
+
+    void relocate(Buffer* target, Buffer* source) {
+        if (target == null || source == null) {
+            return
+        }
+        for (int i = 0; i < source->size; i++) {
+            target->data[i] = move(source->data[i])
+        }
+    }
+}
+
+int main() {
+    Mover<string>.Buffer a = Mover<string>.Buffer()
+    Mover<string>.Buffer b = Mover<string>.Buffer()
+    a.data = heap(string, 3)
+    a.size = 3
+    b.data = heap(string, 3)
+    b.size = 3
+    if (a.data == null || b.data == null) {
+        return 4
+    }
+    a.data[0] = "alpha"
+    a.data[1] = "beta gamma delta"
+    a.data[2] = "epsilon"
+    Mover<string>.relocate(&b, &a)
+    output(b.data[0], " ", b.data[1], " ", b.data[2])
+    return 0
+}

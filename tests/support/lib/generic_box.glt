@@ -1,0 +1,13 @@
+generics Box<T> {
+    struct Box {
+        T value
+    }
+
+    T get(Box b) {
+        return b.value
+    }
+}
+
+struct Custom {
+    int v
+}

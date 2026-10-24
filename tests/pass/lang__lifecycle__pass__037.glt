@@ -1,0 +1,65 @@
+// lang__lifecycle__pass__037.glt
+// expect output
+// 3 3 3 
+
+struct S {
+    int x
+    int tag
+
+    copy_constructor (S* other) {
+        x = other->x
+        tag = 1
+    }
+
+    move_constructor (S* other) {
+        x = other->x
+        tag = 2
+    }
+
+    copy_assignment (S* other) {
+        x = other->x
+        tag = 3
+    }
+
+    move_assignment (S* other) {
+        x = other->x
+        tag = 4
+    }
+
+    destructor () {
+        return
+    }
+}
+
+void show(int t) {
+    output(t, " ")
+}
+struct Outer {
+    S inner
+}
+
+int main() {
+    S a
+    a.x = 5
+    a.tag = 0
+
+    Outer o
+    o.inner.x = 0
+    o.inner.tag = 0
+    o.inner = a
+    show(o.inner.tag)
+
+    S arr[2]
+    arr[0].x = 0
+    arr[0].tag = 0
+    arr[0] = a
+    show(arr[0].tag)
+
+    S v
+    v.x = 0
+    v.tag = 0
+    S* q = &v
+    *q = a
+    show(v.tag)
+    return 0
+}

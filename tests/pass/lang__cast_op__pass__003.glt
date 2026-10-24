@@ -1,0 +1,16 @@
+// lang__cast_op__pass__003.glt
+// expect output
+// 42
+
+struct MyInt {
+    int v
+}
+operator int (MyInt x) {
+    return x.v
+}
+int main() {
+    MyInt m = {42}
+    int i = cast<int>(m)
+    output(i)
+    return 0
+}

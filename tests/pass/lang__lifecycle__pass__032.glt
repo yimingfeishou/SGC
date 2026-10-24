@@ -1,0 +1,20 @@
+// lang__lifecycle__pass__032.glt
+// expect output
+// 511
+
+struct Marker {
+    int value
+    constructor (int v) {
+        value = v
+    }
+}
+
+int main() {
+    int at = 5
+    Marker* p = construct Marker(1)
+    construct Marker(11) at p
+    output(at)
+    output(p->value)
+    destruct p
+    return 0
+}

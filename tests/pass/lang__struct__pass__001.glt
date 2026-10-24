@@ -1,0 +1,21 @@
+// lang__struct__pass__001.glt
+// expect output
+// 1042
+
+const int table[] = {1, 2, 3, 4}
+const int width = 4
+
+struct Point {
+    int x
+    int y
+}
+
+const Point origin = {0, 0}
+const Point unit = {1, 1}
+
+int main() {
+    int total = table[0] + table[1] + table[2] + table[3]
+    int offs = origin.x + origin.y + unit.x + unit.y
+    output(total, width, offs)
+    return 0
+}

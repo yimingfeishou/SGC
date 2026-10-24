@@ -1,0 +1,36 @@
+// lang__default_arg__pass__001.glt
+// expect output
+// 31 22 base 11 22 custom 11 22 base 7
+
+struct Settings {
+    int first = 11
+    int second = 22
+    string label = "base"
+
+    constructor (int value) {
+        first = value
+    }
+
+    constructor (string text) {
+        label = text
+    }
+
+    constructor () {
+    }
+}
+
+struct Nested {
+    Settings settings
+    int count = 7
+}
+
+int main() {
+    Settings numeric = Settings(31)
+    Settings named = Settings("custom")
+    Nested nested = Nested()
+    output(numeric.first, " ", numeric.second, " ", numeric.label, " ")
+    output(named.first, " ", named.second, " ", named.label, " ")
+    output(nested.settings.first, " ", nested.settings.second, " ")
+    output(nested.settings.label, " ", nested.count)
+    return 0
+}

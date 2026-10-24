@@ -1,0 +1,19 @@
+// lang__generics__error__005.glt
+// expect error ER 0019
+
+generics Inner<A> {
+    string tag() {
+        return A.typename
+    }
+}
+
+generics Project<T...> {
+    string inner() {
+        return Inner<T[3]>.tag()
+    }
+}
+
+int main() {
+    output(Project<int, double>.inner(), "\n")
+    return 0
+}

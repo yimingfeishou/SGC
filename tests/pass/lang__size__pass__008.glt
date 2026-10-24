@@ -1,0 +1,15 @@
+// lang__size__pass__008.glt
+// expect output
+// 16
+
+generics Sized<T, int N> {
+    int probe() {
+        int data[size(N)]
+        return size(data)
+    }
+}
+
+int main() {
+    output(Sized<int, 4>.probe())
+    return 0
+}

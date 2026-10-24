@@ -1,0 +1,63 @@
+// lang__lifecycle__pass__029.glt
+// expect output
+// 3 4 3 1
+
+struct S {
+    int x
+    int tag
+
+    copy_constructor (S* other) {
+        x = other->x
+        tag = 1
+    }
+
+    move_constructor (S* other) {
+        x = other->x
+        tag = 2
+    }
+
+    copy_assignment (S* other) {
+        x = other->x
+        tag = 3
+    }
+
+    move_assignment (S* other) {
+        x = other->x
+        tag = 4
+    }
+
+    destructor () {
+        return
+    }
+}
+
+S make(int v) {
+    S r
+    r.x = v
+    r.tag = 0
+    return r
+}
+
+S forward(int v) {
+    return make(v)
+}
+int main() {
+    S a
+    a.x = 5
+    a.tag = 0
+    S* p = &a
+
+    S b
+    b.x = 0
+    b.tag = 0
+    b = a
+    output(b.tag, " ")
+    b = move(a)
+    output(b.tag, " ")
+    b = copy(*p)
+    output(b.tag, " ")
+
+    S c = copy(*p)
+    output(c.tag)
+    return 0
+}

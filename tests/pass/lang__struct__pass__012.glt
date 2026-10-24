@@ -1,0 +1,16 @@
+// lang__struct__pass__012.glt
+// expect output
+// 0 0
+
+struct Pair {
+    int first
+    int second
+}
+
+int main() {
+    Pair source = {3, 4}
+    Pair* handle = &source
+    Pair converted = Pair(handle)
+    output(converted.first, " ", converted.second)
+    return 0
+}

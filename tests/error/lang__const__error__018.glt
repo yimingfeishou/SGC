@@ -1,0 +1,8 @@
+// lang__const__error__018.glt
+// expect error ER 0152
+
+int fn() { return 1 }
+const int k = fn()
+int main() {
+    return 0
+}

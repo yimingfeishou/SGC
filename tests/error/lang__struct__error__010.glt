@@ -1,0 +1,18 @@
+// lang__struct__error__010.glt
+// expect error ER 0107
+
+namespace ns {
+    struct A {
+        int x
+    }
+}
+
+addition namespace ns {
+    struct A {
+        int y
+    }
+}
+
+int main() {
+    return 0
+}

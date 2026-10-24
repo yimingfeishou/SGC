@@ -1,0 +1,42 @@
+// lang__if__pass__002.glt
+// expect output
+// 1531text7
+
+generics Conditional<T> {
+    const if (T.is_integer == true) {
+        struct Holder {
+            T value
+        }
+
+        T get() {
+            return 5
+        }
+
+        int generated() {
+            emit "    return 31\n"
+        }
+    } const else {
+        struct Holder {
+            T value
+        }
+
+        int get() {
+            return 7
+        }
+
+        int generated() {
+            emit "    return 0\n"
+        }
+    }
+}
+
+int main() {
+    Conditional<int>.Holder first = {1}
+    output(first.value)
+    output(Conditional<int>.get())
+    output(Conditional<int>.generated())
+    Conditional<string>.Holder second = {"text"}
+    output(second.value)
+    output(Conditional<string>.get())
+    return 0
+}

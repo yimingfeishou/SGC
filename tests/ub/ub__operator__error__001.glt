@@ -1,0 +1,10 @@
+// ub__operator__error__001.glt
+// expect exit 0
+
+int main() {
+    int zero = 0
+    int a = 7 % zero
+    int b = 7 % 0
+    output(a, " ", b)
+    return 0
+}

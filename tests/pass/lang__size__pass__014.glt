@@ -1,0 +1,12 @@
+// lang__size__pass__014.glt
+// expect output
+// 6
+
+const int size_of(int n) {
+    return n + 1
+}
+int main() {
+    int arr[size_of(2) * 2] = {1,2,3,4,5,6}
+    output(arr[5], "\n")
+    return 0
+}

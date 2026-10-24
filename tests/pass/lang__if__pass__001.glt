@@ -1,0 +1,14 @@
+// lang__if__pass__001.glt
+// expect output
+// 5.0
+
+@cond USE_MATH = 1
+
+@if (USE_MATH == 1) {
+guide "../support/lib/mathlib.glt"
+}
+
+int main() {
+    output(double_add(2.0, 3.0))
+    return 0
+}

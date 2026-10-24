@@ -1,0 +1,7 @@
+// compiler__parser__error__002.glt
+// expect error ER 0019
+
+int main() {
+    int x = 
+    return 0
+}

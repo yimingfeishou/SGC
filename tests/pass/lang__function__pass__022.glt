@@ -1,0 +1,21 @@
+// lang__function__pass__022.glt
+// expect output
+// 3
+
+struct V {
+    int x
+}
+
+V operator + (V a, V b) {
+    V r
+    r.x = a.x + b.x
+    return r
+}
+
+int main() {
+    V a = {1}
+    V b = {2}
+    V c = a + b
+    output(c.x)
+    return 0
+}

@@ -1,0 +1,12 @@
+// lang__switch__error__002.glt
+// expect error ER 0019
+
+int main() {
+    int x = 1
+    switch (x) {
+        default: {
+            output("x")
+        }
+    }
+    return 0
+}

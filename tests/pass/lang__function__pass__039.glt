@@ -1,0 +1,11 @@
+// lang__function__pass__039.glt
+// expect output
+// 6
+
+int main() {
+    int a = 1 \
+        + 2 \
+        + 3
+    output(a, "\n")
+    return 0
+}

@@ -1,0 +1,10 @@
+// lang__literal__pass__002.glt
+// expect output
+// 5 7
+
+int main() {
+    int literal = 5
+    int literals = 7
+    output(literal, " ", literals, "\n")
+    return 0
+}

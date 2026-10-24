@@ -1,0 +1,10 @@
+// compiler__diagnostics__pass__016.glt
+// expect output
+// 5
+
+int main() {
+    int for_ = 2
+    int while_ = 3
+    output(for_ + while_)
+    return 0
+}

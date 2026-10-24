@@ -1,0 +1,12 @@
+// lang__struct__error__017.glt
+// expect error ER 0144
+
+struct Point {
+    int x
+}
+Point runtime_point = {1}
+const int read_x(Point p) {
+    return p.x
+}
+const int x = read_x(runtime_point)
+int main() { return 0 }

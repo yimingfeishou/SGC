@@ -1,0 +1,22 @@
+// lang__member__pass__001.glt
+// expect output
+// 11 22
+
+struct Resource {
+    int value
+
+    constructor(int seed) {
+        value = seed
+    }
+
+    destructor() {
+        value = 0
+    }
+}
+
+int main() {
+    Resource first = Resource(11)
+    Resource second = Resource(22)
+    output(first.value, " ", second.value, "\n")
+    return 0
+}

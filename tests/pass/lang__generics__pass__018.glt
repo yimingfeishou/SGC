@@ -1,0 +1,30 @@
+// lang__generics__pass__018.glt
+// expect output
+// Hello5
+
+generics Box<T> {
+    struct Box {
+        T value
+    }
+    T get(Box b) {
+        return b.value
+    }
+}
+generics Box<string> {
+    struct Box {
+        string value
+        int length
+    }
+    string get(Box b) {
+        return b.value
+    }
+    int len(Box b) {
+        return b.length
+    }
+}
+int main() {
+    Box<string>.Box b = {"Hello", 5}
+    output(Box<string>.get(b))
+    output(Box<string>.len(b))
+    return 0
+}

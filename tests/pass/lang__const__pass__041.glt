@@ -1,0 +1,16 @@
+// lang__const__pass__041.glt
+// expect output
+// 169
+
+const int square(int value) {
+    return value ** 2
+}
+
+int table[square(3)]
+
+int main() {
+    const int value = square(4)
+    output(value)
+    output(size(table) / size(table[0]))
+    return 0
+}

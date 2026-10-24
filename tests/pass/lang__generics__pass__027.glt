@@ -1,0 +1,25 @@
+// lang__generics__pass__027.glt
+// expect output
+// 3
+// 1
+
+generics TypeCount<T...> {
+    emit {
+        int count() {
+            return T.length
+        }
+    }
+}
+
+generics NameIt<T...> {
+    emit "int size_of_" + T.typename + "() {\n"
+    emit "    return " + T.length + "\n"
+    emit "}\n"
+}
+
+int main() {
+    output(TypeCount<int, float, string>.count(), "\n")
+    NameIt<int>
+    output(size_of_int(), "\n")
+    return 0
+}

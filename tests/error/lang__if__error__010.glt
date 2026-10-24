@@ -1,0 +1,9 @@
+// lang__if__error__010.glt
+// expect error ER 0025
+
+int main() {
+    else {
+        return 0
+    }
+    return 0
+}

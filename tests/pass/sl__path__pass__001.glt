@@ -1,0 +1,122 @@
+// sl__path__pass__001.glt
+// expect output
+// stdlib_string_path_mem: ok (67 checks)
+
+guide "common.glt"
+access namespace sl
+
+int checks = 0
+int failures = 0
+
+void check(bool condition, string label) {
+    if (condition) {
+        checks = checks + 1
+        return
+    }
+    output("FAIL: ", label, "\n")
+    failures = failures + 1
+}
+
+int main() {
+    check(string_equals_ignore_case("Gallt", "gALLT"), "equals_ignore_case mixed")
+    check(string_equals_ignore_case("abc", "abc"), "equals_ignore_case same")
+    check(string_equals_ignore_case("", ""), "equals_ignore_case empty")
+    check(string_equals_ignore_case("abc", "abd") == false, "equals_ignore_case different")
+    check(string_equals_ignore_case("abc", "abcd") == false, "equals_ignore_case length")
+    check(string_equals_ignore_case("A", "") == false, "equals_ignore_case empty right")
+
+    check(string_rfind("hello world hello", "hello") == 12, "rfind repeated")
+    check(string_rfind("hello", "ll") == 2, "rfind middle")
+    check(string_rfind("hello", "z") == -1, "rfind missing")
+    check(string_rfind("hello", "") == 5, "rfind empty needle")
+    check(string_rfind("abc", "abcd") == -1, "rfind longer needle")
+    check(string_rfind("aaaa", "aa") == 2, "rfind overlapping tail")
+
+    check(string_contains_ignore_case("Hello World", "WORLD"), "contains_ignore_case found")
+    check(string_contains_ignore_case("Hello World", "hello w"), "contains_ignore_case prefix")
+    check(string_contains_ignore_case("Hello", "xyz") == false, "contains_ignore_case missing")
+    check(string_contains_ignore_case("Hello", ""), "contains_ignore_case empty needle")
+    check(string_contains_ignore_case("", "x") == false, "contains_ignore_case empty haystack")
+
+    check(string_count_substring("banana", "an") == 2, "count_substring banana")
+    check(string_count_substring("aaaa", "aa") == 2, "count_substring non overlapping")
+    check(string_count_substring("abc", "abc") == 1, "count_substring whole")
+    check(string_count_substring("abc", "abcd") == 0, "count_substring longer needle")
+    check(string_count_substring("abc", "") == 0, "count_substring empty needle")
+    check(string_count_substring("", "a") == 0, "count_substring empty haystack")
+
+    check(string_equals(path_join("a", "b"), "a/b"), "path_join adds separator")
+    check(string_equals(path_join("a/", "b"), "a/b"), "path_join trailing separator")
+    check(string_equals(path_join("a", "/b"), "a/b"), "path_join leading separator")
+    check(string_equals(path_join("a/", "/b"), "a/b"), "path_join both separators")
+    check(string_equals(path_join("", "b"), "b"), "path_join empty left")
+    check(string_equals(path_join("a", ""), "a"), "path_join empty right")
+    check(string_equals(path_join("", ""), ""), "path_join both empty")
+    check(string_equals(path_join("a\\b", "c"), "a\\b/c"), "path_join backslash input")
+    check(string_equals(path_join("C:\\", "file"), "C:\\file"), "path_join root")
+
+    check(string_equals(path_basename("/a/b/c.txt"), "c.txt"), "basename nested")
+    check(string_equals(path_basename("a/b/"), "b"), "basename trailing separator")
+    check(string_equals(path_basename("file"), "file"), "basename plain")
+    check(string_equals(path_basename("/"), ""), "basename root")
+    check(string_equals(path_basename(""), ""), "basename empty")
+    check(string_equals(path_basename("a\\b\\c.txt"), "c.txt"), "basename backslash")
+
+    check(string_equals(path_dirname("/a/b/c.txt"), "/a/b"), "dirname nested")
+    check(string_equals(path_dirname("a/b"), "a"), "dirname plain")
+    check(string_equals(path_dirname("file"), ""), "dirname no separator")
+    check(string_equals(path_dirname("/a"), "/"), "dirname root file")
+    check(string_equals(path_dirname("a/b/"), "a"), "dirname trailing separator")
+    check(string_equals(path_dirname("C:\\dir\\file.txt"), "C:\\dir"), "dirname backslash")
+    check(string_equals(path_dirname(""), ""), "dirname empty")
+
+    check(string_equals(path_extension("a/b/c.txt"), ".txt"), "extension nested")
+    check(string_equals(path_extension("c.txt"), ".txt"), "extension plain")
+    check(string_equals(path_extension("a/b/c"), ""), "extension missing")
+    check(string_equals(path_extension(".gitignore"), ""), "extension dot file")
+    check(string_equals(path_extension("archive.tar.gz"), ".gz"), "extension last dot")
+    check(string_equals(path_extension("a.b/c"), ""), "extension dot before separator")
+    check(string_equals(path_extension(""), ""), "extension empty")
+
+    char raw[6] = {'a', 'b', 'c', 'd', 'e', 'f'}
+    char copied[6] = {'0', '0', '0', '0', '0', '0'}
+    mem_copy(copied, raw, 6)
+    check(copied[0] == 'a' && copied[5] == 'f', "mem_copy content")
+    mem_copy(null, raw, 3)
+    mem_copy(copied, null, 3)
+    mem_copy(copied, raw, 0)
+    mem_copy(copied, raw, -3)
+    check(copied[0] == 'a' && copied[5] == 'f', "mem_copy null and non positive safe")
+
+    mem_fill(copied, 65, 6)
+    check(copied[0] == 'A' && copied[5] == 'A', "mem_fill content")
+    mem_fill(null, 65, 3)
+    mem_fill(copied, 66, 0)
+    mem_fill(copied, 66, -2)
+    check(copied[0] == 'A' && copied[5] == 'A', "mem_fill null and non positive safe")
+    mem_fill(copied, 66, 2)
+    check(copied[0] == 'B' && copied[1] == 'B' && copied[2] == 'A', "mem_fill partial")
+
+    char same[4] = {'a', 'b', 'c', 'd'}
+    char same2[4] = {'a', 'b', 'c', 'd'}
+    char less[4] = {'a', 'b', 'c', 'e'}
+    char greater[4] = {'a', 'b', 'c', 'c'}
+    check(mem_compare(same, same2, 4) == 0, "mem_compare equal")
+    check(mem_compare(same, less, 4) == -1, "mem_compare less")
+    check(mem_compare(same, greater, 4) == 1, "mem_compare greater")
+    check(mem_compare(same, less, 0) == 0, "mem_compare zero count")
+    check(mem_compare(same, less, -1) == 0, "mem_compare negative count")
+    check(mem_compare(null, null, 3) == 0, "mem_compare both null")
+    check(mem_compare(null, same, 3) == -1, "mem_compare null left")
+    check(mem_compare(same, null, 3) == 1, "mem_compare null right")
+
+    char high[1] = {'\x80'}
+    char low[1] = {'z'}
+    check(mem_compare(low, high, 1) == -1, "mem_compare unsigned bytes")
+    check(mem_compare(high, low, 1) == 1, "mem_compare unsigned bytes reversed")
+
+    if (failures == 0) {
+        output("stdlib_string_path_mem: ok (", checks, " checks)\n")
+    }
+    return failures
+}

@@ -1,0 +1,25 @@
+// lang__pointer__pass__005.glt
+// expect output
+// 4 8 8 8 4
+
+struct Node {
+    int a
+    int b
+}
+
+generics Probe<T> {
+    emit {
+        int size_of() {
+            return T.size
+        }
+
+        int align_of() {
+            return T.align
+        }
+    }
+}
+
+int main() {
+    output(Probe<int>.size_of(), " ", Probe<int*>.size_of(), " ", Probe<double*>.align_of(), " ", Probe<Node*>.size_of(), " ", Probe<Node>.align_of())
+    return 0
+}

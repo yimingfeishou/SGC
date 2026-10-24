@@ -1,0 +1,13 @@
+// lang__scope__error__002.glt
+// expect error ER 0002
+
+int poly(int a) {
+    return a
+}
+int poly(int a, int b) {
+    return a + b
+}
+int poly = 1
+int main() {
+    return 0
+}

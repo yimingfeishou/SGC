@@ -1,0 +1,17 @@
+// lang__op_overload__pass__017.glt
+// expect output
+// 12
+
+struct Shiftable {
+    int value
+}
+
+int operator << (Shiftable a, int bits) {
+    return a.value << bits
+}
+
+int main() {
+    Shiftable s = {3}
+    output(s << 2)
+    return 0
+}

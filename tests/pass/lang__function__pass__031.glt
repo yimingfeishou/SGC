@@ -1,0 +1,12 @@
+// lang__function__pass__031.glt
+// expect output
+// B
+
+const char shift_char(char c, int n) {
+    return c + n
+}
+const char ch = shift_char('A', 1)
+int main() {
+    output(ch, "\n")
+    return 0
+}

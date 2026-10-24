@@ -1,0 +1,14 @@
+int cost = 5
+
+struct itn {
+    int x
+}
+
+int retun(int v) {
+    return v
+}
+
+int helper_local() {
+    int whil = 1
+    return whil
+}

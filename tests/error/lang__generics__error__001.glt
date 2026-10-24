@@ -1,0 +1,20 @@
+// lang__generics__error__001.glt
+// expect error ER 0003
+
+generics Probe<T> {
+    T zero() {
+        T dummy
+        if (T.is_string == true) {
+            dummy = ""
+        } else {
+            dummy = 0
+        }
+        return dummy
+    }
+}
+
+int main() {
+    Probe<int>
+    output(Probe<int>.zero())
+    return 0
+}

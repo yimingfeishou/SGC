@@ -1,0 +1,23 @@
+// lang__op_overload__pass__020.glt
+// expect output
+// 106
+
+namespace outer {
+    namespace inner {
+        struct Tag {
+            int v
+        }
+
+        inner::Tag operator + (inner::Tag t, int v) {
+            t.v = t.v + v + 100
+            return t
+        }
+    }
+}
+
+int main() {
+    outer::inner::Tag t = {1}
+    outer::inner::Tag u = t + 5
+    output(u.v)
+    return 0
+}

@@ -1,0 +1,18 @@
+// lang__generics__pass__036.glt
+// expect output
+// 1
+
+generics Sized<T, int N> {
+    int probe() {
+        const if (N == 4) {
+            return 1
+        } const else {
+            return 0
+        }
+    }
+}
+
+int main() {
+    output(Sized<int, 4>.probe())
+    return 0
+}

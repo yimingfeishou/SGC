@@ -1,0 +1,25 @@
+// lang__cast_op__pass__002.glt
+// expect output
+// 2007
+
+namespace ns {
+    struct S {
+        int v
+    }
+
+    struct W {
+        int v
+    }
+
+    operator ns::W (ns::S s) {
+        W w = {s.v + 2000}
+        return w
+    }
+}
+
+int main() {
+    ns::S s = {7}
+    ns::W w = cast<ns::W>(s)
+    output(w.v)
+    return 0
+}

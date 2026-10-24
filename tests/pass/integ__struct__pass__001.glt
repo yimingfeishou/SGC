@@ -1,0 +1,191 @@
+// integ__struct__pass__001.glt
+// expect exit 0
+
+// struct_focus.glt
+// Focused runtime benchmark: the pointer / function pointer / struct / operator
+// group (T05..T09 of tests/benchmark.glt), each case timed separately.
+
+guide "common.glt"
+
+extern luint GetTickCount64 from kernel32 ()
+extern int printf from libucrt (string format, luint value)
+
+struct PlainStruct {
+    int a
+    double b
+    char c
+    bool flag
+}
+
+struct LifecycleStruct {
+    int value
+    string name
+
+    constructor() {
+        value = 0
+        name = ""
+    }
+
+    constructor(int v, string n) {
+        value = v
+        name = n
+    }
+
+    destructor() { value = 0 }
+
+    copy_constructor(LifecycleStruct* other) {
+        value = other->value
+        name = other->name
+    }
+
+    move_constructor(LifecycleStruct* other) {
+        value = other->value
+        name = move(other->name)
+        other->value = 0
+    }
+
+    copy_assignment(LifecycleStruct* other) {
+        value = other->value
+        name = other->name
+    }
+
+    move_assignment(LifecycleStruct* other) {
+        value = other->value
+        name = move(other->name)
+        other->value = 0
+    }
+}
+
+struct Vec2 {
+    double x
+    double y
+}
+
+Vec2 operator+(Vec2 a, Vec2 b) {
+    Vec2 r
+    r.x = a.x + b.x
+    r.y = a.y + b.y
+    return r
+}
+
+bool operator==(Vec2 a, Vec2 b) {
+    return a.x == b.x && a.y == b.y
+}
+
+int fib(int n) {
+    if (n < 2) {
+        return n
+    }
+    return fib(n - 1) + fib(n - 2)
+}
+
+int cmp_int(int a, int b) {
+    if (a < b) { return -1 }
+    if (a > b) { return 1 }
+    return 0
+}
+
+int main() {
+    // T05 pointers and heap
+    {
+        luint t0 = GetTickCount64()
+        int x = 42
+        int* px = &x
+        int y = *px
+        int outer = 0
+        lint sum = 0l
+        while (outer < 1000000) {
+            int* arr = heap(int, 1000)
+            if (arr != null) {
+                int i = 0
+                while (i < 1000) { arr[i] = i * 3; i++ }
+                int* p = arr
+                int* end = arr + 1000
+                while (p < end) { sum = sum + cast<lint>(*p); p++ }
+                free(arr)
+            }
+            outer++
+        }
+        printf("T05 heap/pointer       : %llu ms\n", GetTickCount64() - t0)
+        if (sum == 0l || y == 0) { printf("T05 fail\n", 0lu) }
+    }
+
+    // T06 function pointer
+    {
+        luint t0 = GetTickCount64()
+        int (int)* fn = &fib
+        int r = fn(20)
+        int (int, int)* cmp = &cmp_int
+        lint sum = 0l
+        int i = 0
+        while (i < 10000000) {
+            sum = sum + cast<lint>(cmp(i, 5000000))
+            i++
+        }
+        printf("T06 function pointer   : %llu ms\n", GetTickCount64() - t0)
+        if (r != 6765 || sum == 0l) { printf("T06 fail\n", 0lu) }
+    }
+
+    // T07 struct copy by value
+    {
+        luint t0 = GetTickCount64()
+        PlainStruct p
+        p.a = 1
+        p.b = 2.5
+        p.c = 'x'
+        p.flag = true
+        int i = 0
+        int sum = 0
+        while (i < 30000000) {
+            PlainStruct q = p
+            sum = sum + q.a + cast<int>(q.b) + cast<int>(q.c)
+            i++
+        }
+        printf("T07 struct copy        : %llu ms\n", GetTickCount64() - t0)
+        if (sum == -1) { printf("T07 fail\n", 0lu) }
+    }
+
+    // T08 lifecycle
+    {
+        luint t0 = GetTickCount64()
+        int i = 0
+        int sum = 0
+        while (i < 500000) {
+            LifecycleStruct a = LifecycleStruct(1, "hello")
+            LifecycleStruct b = copy(a)
+            LifecycleStruct c = move(b)
+            LifecycleStruct d
+            d = copy(a)
+            LifecycleStruct e
+            e = move(c)
+            sum = sum + d.value + e.value
+            i++
+        }
+        printf("T08 lifecycle          : %llu ms\n", GetTickCount64() - t0)
+        if (sum == -1) { printf("T08 fail\n", 0lu) }
+    }
+
+    // T09 operator overload
+    {
+        luint t0 = GetTickCount64()
+        Vec2 a
+        a.x = 1.0
+        a.y = 2.0
+        Vec2 b
+        b.x = 3.0
+        b.y = 4.0
+        int i = 0
+        double sum = 0.0
+        while (i < 3000000) {
+            Vec2 c = a + b
+            bool eq = (c == c)
+            double add = eq ? 1.0 : 0.0
+            sum = sum + c.x + c.y + add
+            i++
+        }
+        printf("T09 operator overload  : %llu ms\n", GetTickCount64() - t0)
+        if (sum == -1.0) { printf("T09 fail\n", 0lu) }
+    }
+
+    return 0
+}

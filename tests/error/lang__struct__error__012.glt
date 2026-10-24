@@ -1,0 +1,13 @@
+// lang__struct__error__012.glt
+// expect error ER 0019
+
+struct S {
+    int a
+}
+int main() {
+    S s = {1}
+    S* p = &s
+    void* v = void*(p)
+    S* r = S*(v)
+    return 0
+}

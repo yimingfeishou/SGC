@@ -1,0 +1,19 @@
+// lang__generics__error__017.glt
+// expect error ER 0068
+
+generics Pair<T, U> {
+    struct Pair {
+        T first
+        U second
+    }
+}
+
+generics Pair<T*, T[]> {
+    struct Pair {
+        int marker
+    }
+}
+
+int main() {
+    return 0
+}

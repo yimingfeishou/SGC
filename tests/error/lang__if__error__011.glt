@@ -1,0 +1,10 @@
+// lang__if__error__011.glt
+// expect error ER 0028
+
+int main() {
+    int a = 1
+    if (a) {
+        a = 2
+    }
+    return 0
+}

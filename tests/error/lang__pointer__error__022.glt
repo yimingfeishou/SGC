@@ -1,0 +1,11 @@
+// lang__pointer__error__022.glt
+// expect error ER 0019
+
+int main() {
+    int v = 3
+    int* p = &v
+    void* raw = void*(p)
+    int* back = int*(raw)
+    output(*back)
+    return 0
+}

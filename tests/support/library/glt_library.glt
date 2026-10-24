@@ -1,0 +1,19 @@
+export int add(int a, int b) {
+    return a + b
+}
+
+export int text_length(string text) {
+    return strlen(text)
+}
+
+export string combine(string first, string second) {
+    return strconcat(first, second)
+}
+
+export double scale(double value, int factor) {
+    return value * factor
+}
+
+int internal_only(int value) {
+    return value + 1
+}

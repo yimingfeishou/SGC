@@ -1,0 +1,11 @@
+// lang__namespace__pass__019.glt
+// expect output
+// 2 1
+
+guide "../support/work/recover_ident_gt_ns.glt"
+
+int main() {
+    floa::Point p = {2}
+    output(p.x, " ", floa::slot)
+    return 0
+}

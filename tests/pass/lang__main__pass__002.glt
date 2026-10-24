@@ -1,0 +1,8 @@
+// lang__main__pass__002.glt
+// expect output
+// 1
+
+int main() {
+    output(1)
+    return 0
+}

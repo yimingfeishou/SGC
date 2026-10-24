@@ -1,0 +1,12 @@
+// lang__struct__error__007.glt
+// expect error ER 0045
+
+struct WithMethod {
+    int value
+    int get() {
+        return value
+    }
+}
+int main() {
+    return 0
+}

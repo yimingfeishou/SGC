@@ -1,0 +1,12 @@
+// lang__member__error__003.glt
+// expect error ER 0085
+
+struct Bad {
+    int value
+    destructor () {
+        return 5
+    }
+}
+int main() {
+    return 0
+}

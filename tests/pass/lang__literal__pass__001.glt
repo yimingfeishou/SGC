@@ -1,0 +1,17 @@
+// lang__literal__pass__001.glt
+// expect output
+// Hello\nWorld
+// 12
+// 11
+// C:\path\to\file
+
+int main() {
+    string raw = literal"Hello\nWorld"
+    string normal = "Hello\nWorld"
+    string path = literal"C:\path\to\file"
+    output(raw, "\n")
+    output(strlen(raw), "\n")
+    output(strlen(normal), "\n")
+    output(path, "\n")
+    return 0
+}

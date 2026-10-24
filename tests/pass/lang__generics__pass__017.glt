@@ -1,0 +1,75 @@
+// lang__generics__pass__017.glt
+// expect output
+// 10101110
+
+struct Point {
+    int x
+    int y
+}
+generics Kind<T> {
+    const if (T.is_struct == true) {
+        emit {
+            int kind() {
+                return 1
+            }
+        }
+    } const else {
+        emit {
+            int kind() {
+                return 0
+            }
+        }
+    }
+}
+generics Same<T, U> {
+    const if (T.is_same<U> == true) {
+        emit {
+            int same() {
+                return 1
+            }
+        }
+    } const else {
+        emit {
+            int same() {
+                return 0
+            }
+        }
+    }
+}
+generics Convertible<T, U> {
+    const if (T.is_convertible<U> == true) {
+        emit {
+            int convertible() {
+                return 1
+            }
+        }
+    } const else {
+        emit {
+            int convertible() {
+                return 0
+            }
+        }
+    }
+}
+generics HasMember<T> {
+    const if (T.has_member<"x"> == true) {
+        emit {
+            int has_x() {
+                return 1
+            }
+        }
+    } const else {
+        emit {
+            int has_x() {
+                return 0
+            }
+        }
+    }
+}
+int main() {
+    output(Kind<Point>.kind(), Kind<int>.kind())
+    output(Same<int, int>.same(), Same<int, float>.same())
+    output(Convertible<int, double>.convertible(), Convertible<double, int>.convertible())
+    output(HasMember<Point>.has_x(), HasMember<int>.has_x())
+    return 0
+}

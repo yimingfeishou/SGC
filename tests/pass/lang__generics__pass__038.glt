@@ -1,0 +1,20 @@
+// lang__generics__pass__038.glt
+// expect output
+// 64
+
+generics Arr<T, int N> {
+    struct Arr {
+        T data[N]
+    }
+}
+
+struct example {
+    float f
+    double d
+}
+
+int main() {
+    Arr<int, size(example)>.Arr a
+    output(size(a))
+    return 0
+}

@@ -1,0 +1,10 @@
+// lang__str_func__error__002.glt
+// expect error ER 0108
+
+const string FIXED = "abc"
+
+int main() {
+    string moved = strmove(FIXED)
+    output(moved)
+    return 0
+}

@@ -1,0 +1,15 @@
+// compiler__diagnostics__error__006.glt
+// expect error ER 0152
+
+int observe() {
+    return 1
+}
+
+struct Holder {
+    int value = observe()
+}
+
+int main() {
+    const Holder holder = {}
+    return 0
+}

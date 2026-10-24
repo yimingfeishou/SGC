@@ -1,0 +1,22 @@
+// lang__if__error__014.glt
+// expect error ER 0143
+
+generics Bad<T> {
+    emit {
+        @cond BRANCH = 1
+        @if (BRANCH == 1) {
+            T selected() {
+                return 1
+            }
+        } @else {
+            T selected() {
+                return 0
+            }
+        }
+    }
+}
+
+int main() {
+    Bad<int>
+    return 0
+}

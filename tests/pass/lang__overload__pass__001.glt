@@ -1,0 +1,25 @@
+// lang__overload__pass__001.glt
+// expect output
+// intdouble59
+
+int printvalue(int value) {
+    output("int")
+    return 0
+}
+int printvalue(double value) {
+    output("double")
+    return 0
+}
+int add(int a, int b) {
+    return a + b
+}
+int add(int a, int b, int c) {
+    return a + b + c
+}
+int main() {
+    printvalue(10)
+    printvalue(3.14)
+    output(add(2, 3))
+    output(add(2, 3, 4))
+    return 0
+}

@@ -1,0 +1,10 @@
+// compiler__diagnostics__error__037.glt
+// expect error ER 0001
+
+guide "../support/work/recover_ident_gt_globals.glt"
+
+int main() {
+    cont = 1
+    output(cont)
+    return 0
+}

@@ -1,0 +1,23 @@
+// lang__function__pass__034.glt
+// expect output
+// 4705032704
+// 3705032704
+// 15000000000
+// 14000000000
+
+lint wide = 5000000000
+luint uwide = 10000000000lu
+
+int main() {
+    lint a = wide
+    a += 4000000000
+    output(a, "\n")
+    a -= 1000000000
+    output(a, "\n")
+    luint b = uwide
+    b += 5000000000lu
+    output(b, "\n")
+    b -= 1000000000lu
+    output(b, "\n")
+    return 0
+}

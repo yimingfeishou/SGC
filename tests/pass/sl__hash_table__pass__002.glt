@@ -1,0 +1,28 @@
+// sl__hash_table__pass__002.glt
+// expect output
+// true true true 3 cap 8 | true two | true TWO | missing false TWO | true false | erase true false 2 false | grown 22 cap 32 true x | cleared 0 true false | true seven
+
+guide "generics.glt"
+access namespace sl
+
+int main() {
+    hash_table_generic<int, string>
+    hash_table table = hash_table(4)
+    output(set(&table, 1, "one"), " ", set(&table, 2, "two"), " ", set(&table, 3, "three"), " ", length(&table), " cap ", get_capacity(&table), " | ")
+    string value = ""
+    output(get(&table, 2, &value), " ", value, " | ")
+    set(&table, 2, "TWO")
+    output(get(&table, 2, &value), " ", value, " | ")
+    output("missing ", get(&table, 99, &value), " ", value, " | ")
+    output(contains(&table, 3), " ", contains(&table, 99), " | ")
+    output("erase ", erase(&table, 2), " ", erase(&table, 2), " ", length(&table), " ", contains(&table, 2), " | ")
+    for (int i = 10; i < 30; i++) {
+        set(&table, i, "x")
+    }
+    output("grown ", length(&table), " cap ", get_capacity(&table), " ", get(&table, 29, &value), " ", value, " | ")
+    clear(&table)
+    output("cleared ", length(&table), " ", empty(&table), " ", get(&table, 1, &value), " | ")
+    set(&table, 7, "seven")
+    output(get(&table, 7, &value), " ", value)
+    return 0
+}

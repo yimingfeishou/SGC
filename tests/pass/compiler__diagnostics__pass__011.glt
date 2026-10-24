@@ -1,0 +1,20 @@
+// compiler__diagnostics__pass__011.glt
+// expect output
+
+struct Grid {
+    int id
+
+    copy_assignment (Grid* other) {
+        {
+            id = other->id
+        }
+        id = id + 1
+    }
+}
+
+int main() {
+    Grid a = Grid()
+    Grid b = Grid()
+    b = a
+    return 0
+}

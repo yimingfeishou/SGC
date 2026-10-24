@@ -1,0 +1,116 @@
+// sl__str_parse__pass__002.glt
+// expect output
+// stdlib_parse_to_string: ok (68 checks)
+
+guide "common.glt"
+access namespace sl
+
+int checks = 0
+int failures = 0
+
+void check(bool condition, string label) {
+    if (condition) {
+        checks = checks + 1
+        return
+    }
+    output("FAIL: ", label, "\n")
+    failures = failures + 1
+}
+
+int main() {
+    int i = 12345
+    check(parse_int("42", &i) && i == 42, "parse_int basic")
+    check(parse_int("   -17\t", &i) && i == -17, "parse_int sign and surrounding spaces")
+    check(parse_int("+8", &i) && i == 8, "parse_int plus sign")
+    check(parse_int("0", &i) && i == 0, "parse_int zero")
+    check(parse_int("2147483647", &i) && i == 2147483647, "parse_int max")
+    check(parse_int("-2147483648", &i) && i == -2147483648, "parse_int min")
+    check(parse_int("1", null) == false, "parse_int null out")
+
+    int kept_i = 777
+    check(parse_int("2147483648", &kept_i) == false && kept_i == 777, "parse_int overflow keeps out")
+    check(parse_int("-2147483649", &kept_i) == false && kept_i == 777, "parse_int underflow keeps out")
+    check(parse_int("", &kept_i) == false && kept_i == 777, "parse_int empty keeps out")
+    check(parse_int("   ", &kept_i) == false && kept_i == 777, "parse_int blank keeps out")
+    check(parse_int("12abc", &kept_i) == false && kept_i == 777, "parse_int trailing junk")
+    check(parse_int("abc", &kept_i) == false && kept_i == 777, "parse_int letters")
+    check(parse_int("--5", &kept_i) == false && kept_i == 777, "parse_int double sign")
+    check(parse_int("1 2", &kept_i) == false && kept_i == 777, "parse_int inner junk")
+
+    lint l = 0l
+    check(parse_lint("9223372036854775807", &l) && l == 9223372036854775807l, "parse_lint max")
+    check(parse_lint("-9223372036854775808", &l) && l == -9223372036854775808l, "parse_lint min")
+    lint kept_l = 5l
+    check(parse_lint("9223372036854775808", &kept_l) == false && kept_l == 5l, "parse_lint overflow keeps out")
+    check(parse_lint("-9223372036854775809", &kept_l) == false && kept_l == 5l, "parse_lint underflow keeps out")
+    check(parse_lint("-9", &kept_l) && kept_l == -9l, "parse_lint negative")
+
+    uint u = 0u
+    check(parse_uint("4294967295", &u) && u == 4294967295u, "parse_uint max")
+    check(parse_uint("0", &u) && u == 0u, "parse_uint zero")
+    uint kept_u = 3u
+    check(parse_uint("4294967296", &kept_u) == false && kept_u == 3u, "parse_uint overflow keeps out")
+    check(parse_uint("-1", &kept_u) == false && kept_u == 3u, "parse_uint rejects minus")
+    check(parse_uint("+12", &kept_u) && kept_u == 12u, "parse_uint plus sign")
+    check(parse_uint("", &kept_u) == false && kept_u == 12u, "parse_uint empty keeps out")
+    check(parse_uint("   ", &kept_u) == false && kept_u == 12u, "parse_uint blank keeps out")
+
+    luint lu = 0lu
+    check(parse_luint("18446744073709551615", &lu) && lu == 18446744073709551615lu, "parse_luint max")
+    check(parse_luint("0", &lu) && lu == 0lu, "parse_luint zero")
+    luint kept_lu = 9lu
+    check(parse_luint("18446744073709551616", &kept_lu) == false && kept_lu == 9lu, "parse_luint overflow keeps out")
+    check(parse_luint("-3", &kept_lu) == false && kept_lu == 9lu, "parse_luint rejects minus")
+
+    double d = 0.0
+    check(parse_double("3.25", &d) && d == 3.25, "parse_double plain")
+    check(parse_double("  -0.5 ", &d) && d == -0.5, "parse_double negative")
+    check(parse_double(".5", &d) && d == 0.5, "parse_double leading dot")
+    check(parse_double("2.", &d) && d == 2.0, "parse_double trailing dot")
+    check(parse_double("0", &d) && d == 0.0, "parse_double zero")
+    check(parse_double("1.5e3", &d) && d == 1500.0, "parse_double exponent")
+    check(parse_double("2E-2", &d) && d == 0.02, "parse_double negative exponent")
+    check(parse_double("+7", &d) && d == 7.0, "parse_double plus sign")
+    double kept_d = 8.5
+    check(parse_double("", &kept_d) == false && kept_d == 8.5, "parse_double empty keeps out")
+    check(parse_double("abc", &kept_d) == false && kept_d == 8.5, "parse_double letters keeps out")
+    check(parse_double("1e", &kept_d) == false && kept_d == 8.5, "parse_double empty exponent")
+    check(parse_double("1.2.3", &kept_d) == false && kept_d == 8.5, "parse_double double dot")
+    check(parse_double("1.0x", &kept_d) == false && kept_d == 8.5, "parse_double trailing junk")
+    check(parse_double("1", null) == false, "parse_double null out")
+
+    check(string_equals(int_to_string(0), "0"), "int_to_string zero")
+    check(string_equals(int_to_string(2147483647), "2147483647"), "int_to_string max")
+    check(string_equals(int_to_string(-2147483648), "-2147483648"), "int_to_string min")
+    check(string_equals(lint_to_string(9223372036854775807l), "9223372036854775807"), "lint_to_string max")
+    check(string_equals(lint_to_string(-9223372036854775808l), "-9223372036854775808"), "lint_to_string min")
+    check(string_equals(uint_to_string(0u), "0"), "uint_to_string zero")
+    check(string_equals(uint_to_string(4294967295u), "4294967295"), "uint_to_string max")
+    check(string_equals(luint_to_string(0lu), "0"), "luint_to_string zero")
+    check(string_equals(luint_to_string(18446744073709551615lu), "18446744073709551615"), "luint_to_string max")
+    check(string_equals(double_to_string(3.14159, 2), "3.14"), "double_to_string precision")
+    check(string_equals(double_to_string(2.5), "2.500000"), "double_to_string default precision")
+    check(string_equals(double_to_string(-0.25, 4), "-0.2500"), "double_to_string negative")
+    check(string_equals(double_to_string(0.0, 0), "0"), "double_to_string zero precision")
+    check(string_equals(double_to_string(9.9999999, 6), "10.000000"), "double_to_string rounding carry")
+    check(string_equals(double_to_string(1.0, 20), "1.00000000000000000"), "double_to_string precision clamp")
+    check(string_equals(double_to_string(1.0e19, 0), "10000000000000000000"), "double_to_string large value")
+    check(string_equals(bool_to_string(true), "true"), "bool_to_string true")
+    check(string_equals(bool_to_string(false), "false"), "bool_to_string false")
+
+    int rt_i = 0
+    check(parse_int(int_to_string(-123456), &rt_i) && rt_i == -123456, "int round trip")
+    lint rt_l = 0l
+    check(parse_lint(lint_to_string(-9223372036854775807l), &rt_l) && rt_l == -9223372036854775807l, "lint round trip")
+    uint rt_u = 0u
+    check(parse_uint(uint_to_string(4294967295u), &rt_u) && rt_u == 4294967295u, "uint round trip")
+    luint rt_lu = 0lu
+    check(parse_luint(luint_to_string(18446744073709551615lu), &rt_lu) && rt_lu == 18446744073709551615lu, "luint round trip")
+    double rt_d = 0.0
+    check(parse_double(double_to_string(-12.5, 3), &rt_d) && rt_d == -12.5, "double round trip")
+
+    if (failures == 0) {
+        output("stdlib_parse_to_string: ok (", checks, " checks)\n")
+    }
+    return failures
+}

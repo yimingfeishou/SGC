@@ -1,0 +1,38 @@
+// lang__generics__pass__032.glt
+// expect output
+// 1 2 7
+
+generics Box<T> {
+    struct Box {
+        int marker
+    }
+    int tag() {
+        return 0
+    }
+}
+
+generics Box<T*> {
+    struct Box {
+        int marker
+    }
+    int tag() {
+        return 1
+    }
+}
+
+generics Box<T[]> {
+    struct Box {
+        int marker
+    }
+    int tag() {
+        return 2
+    }
+}
+
+int main() {
+    int value = 7
+    Box<int*>.Box pointer_box
+    Box<int[4]>.Box array_box
+    output(Box<int*>.tag(), " ", Box<int[4]>.tag(), " ", value)
+    return 0
+}

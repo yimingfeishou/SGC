@@ -1,0 +1,24 @@
+// lang__member__pass__004.glt
+// expect output
+// 7
+
+struct SwitchMembers {
+    int value = 7
+
+    constructor () {
+        value = 7
+        switch (2) {
+            case (1) {
+                int value = 5
+                output(value)
+            } case (2) {
+                output(value)
+            }
+        }
+    }
+}
+
+int main() {
+    SwitchMembers item
+    return 0
+}

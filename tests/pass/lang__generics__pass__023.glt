@@ -1,0 +1,31 @@
+// lang__generics__pass__023.glt
+// expect output
+// [] 0 false abc7true
+
+generics Probe<T: int | bool | string> {
+    struct Item {
+        T value
+    }
+
+    T zero() {
+        T dummy
+        const if (T.is_string == true) {
+            dummy = ""
+        } const else {
+            const if (T.is_bool == true) {
+                dummy = false
+            } const else {
+                dummy = 0
+            }
+        }
+        return dummy
+    }
+}
+
+int main() {
+    Probe<string>.Item text = {"abc"}
+    Probe<int>.Item number = {7}
+    Probe<bool>.Item flag = {true}
+    output("[", Probe<string>.zero(), "] ", Probe<int>.zero(), " ", Probe<bool>.zero(), " ", text.value, number.value, flag.value)
+    return 0
+}

@@ -1,0 +1,26 @@
+// lang__destruct__pass__006.glt
+// expect output
+// BD1 MD
+
+struct S {
+    int v
+
+    destructor () {
+        output("D")
+    }
+}
+
+int take(S value) {
+    if (value.v > 0) {
+        output("B")
+        return value.v
+    }
+    return 0
+}
+
+int main() {
+    S a = {1}
+    output(take(a), " ")
+    output("M")
+    return 0
+}

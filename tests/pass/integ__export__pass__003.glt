@@ -1,0 +1,16 @@
+// integ__export__pass__003.glt
+// expect output
+// 42
+
+@cond TOOLS = 1
+
+@if (is_defined("TOOLS")) {
+    export int add(int a, int b) {
+        return a + b
+    }
+}
+
+int main() {
+    output(add(20, 22), "\n")
+    return 0
+}

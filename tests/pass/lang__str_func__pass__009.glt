@@ -1,0 +1,29 @@
+// lang__str_func__pass__009.glt
+// expect output
+// -1 0 1
+// 0 2 -1
+// [hel][][o]
+// [a-b-c][a+b+c]
+// [a b]
+// 3 1 1
+// [b][]
+// true GALLT 26 gallt 26
+// [payload][] 0
+// false true bat
+
+int main() {
+    output(strcompare("abc", "abd"), " ", strcompare("abc", "abc"), " ", strcompare("abd", "abc"))
+    output("\n", strfind("hello", ""), " ", strfind("hello", "ll"), " ", strfind("hello", "z"))
+    output("\n[", strsubstr("hello", -2, 3), "][", strsubstr("hello", 3, -5), "][", strsubstr("hello", 4, 99), "]")
+    output("\n[", strreplace("a-b-c", "", "+"), "][", strreplace("a-b-c", "-", "+"), "]")
+    output("\n[", strtrim("  a b \n\t\r\v\f"), "]")
+    output("\n", strsplitcount("a,b,c", ","), " ", strsplitcount("abc", ""), " ", strsplitcount("", ","))
+    output("\n[", strsplitget("a,b,c", ",", 1), "][", strsplitget("a,b,c", ",", 9), "]")
+    output("\n", strcharat("cat", 9) == '\0', " ", strupper("Gallt 26"), " ", strlower("Gallt 26"))
+    string source = "payload"
+    string target = strmove(source)
+    output("\n[", target, "][", source, "] ", strlen(source))
+    string text = "cat"
+    output("\n", strsetchar(text, 9, 'z'), " ", strsetchar(text, 0, 'b'), " ", text)
+    return 0
+}

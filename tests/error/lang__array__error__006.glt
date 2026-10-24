@@ -1,0 +1,8 @@
+// lang__array__error__006.glt
+// expect error ER 0019
+
+int main() {
+    int a[0]
+    output(size(a))
+    return 0
+}

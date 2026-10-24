@@ -1,0 +1,18 @@
+// lang__pointer__pass__006.glt
+// expect output
+// 42 42 true
+
+struct Node {
+    int value
+}
+
+int main() {
+    Node node = {42}
+    Node* original = &node
+    void* generic = cast<void*>(original)
+    Node* restored = cast<Node*>(generic)
+    int* raw = cast<int*>(original)
+    Node* again = cast<Node*>(raw)
+    output(restored->value, " ", again->value, " ", restored == original)
+    return 0
+}

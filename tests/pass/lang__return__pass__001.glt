@@ -1,0 +1,18 @@
+// lang__return__pass__001.glt
+// expect output
+// 6
+
+int add(int a, int b) { return a + b }
+int sub(int a, int b) { return a - b }
+int(int, int)* select(char op) {
+    if (op == '+') {
+        return &add
+    } else {
+        return &sub
+    }
+}
+int main() {
+    int(int, int)* fn = select('+')
+    output(fn(4, 2))
+    return 0
+}

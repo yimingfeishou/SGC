@@ -1,0 +1,9 @@
+// lang__file__error__001.glt
+// expect error ER 0052
+
+file handle
+
+int main() {
+    fileclose(handle)
+    return 0
+}

@@ -1,0 +1,28 @@
+// lang__access__pass__004.glt
+// expect output
+
+namespace ns {
+    struct A {
+        int x
+    }
+}
+
+addition namespace ns {
+    A operator + (A a, A b) {
+        A r = {a.x + b.x}
+        return r
+    }
+
+    A operator + (A a, int b) { // 期望：编译通过，实际：ER 0114: member '__glt_op__2b' merged by addition namespace conflicts with an existing declaration
+        A r = {a.x + b}
+        return r
+    }
+}
+
+int main() {
+    ns::A a = {1}
+    ns::A b = {2}
+    ns::A c = a + b
+    ns::A d = a + 3
+    return 0
+}

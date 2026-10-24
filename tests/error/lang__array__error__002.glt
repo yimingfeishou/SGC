@@ -1,0 +1,9 @@
+// lang__array__error__002.glt
+// expect error ER 0013
+
+int main() {
+    int a[3] = {1, 2, 3}
+    float f = 1.0
+    int c = a[f]
+    return 0
+}

@@ -1,0 +1,7 @@
+// lang__file__pass__001.glt
+// expect output
+
+int main() {
+    file* fp = fileopen("./x.txt", "q")
+    return 0
+}

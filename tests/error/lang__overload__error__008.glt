@@ -1,0 +1,19 @@
+// lang__overload__error__008.glt
+// expect exit nonzero
+
+struct A { int v }
+struct B { int v }
+struct Box { int x }
+
+bool is_open(A a) { return a.v != 0 }
+bool is_open(B b) { return b.v != 0 }
+
+int operator << (Box lhs, int rhs) { return lhs.x + rhs }
+
+int main() {
+    A a = {1}
+    B b = {0}
+    if (!is_open(a)) { return 1 } // 期望：编译通过，实际：ER 0009: function 'is_open$SA' is undefined
+    if (!is_open(b)) { return 2 } // 期望：编译通过，实际：ER 0009: function 'is_open$SA' is undefined
+    return 0
+}

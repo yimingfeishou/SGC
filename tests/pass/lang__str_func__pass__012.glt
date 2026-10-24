@@ -1,0 +1,12 @@
+// lang__str_func__pass__012.glt
+// expect output
+// global local global
+
+const string GLOBAL_TEXT = "global"
+
+int main() {
+    const string local_text = "local"
+    const string copy_of_global = GLOBAL_TEXT
+    output(GLOBAL_TEXT, " ", local_text, " ", copy_of_global)
+    return 0
+}

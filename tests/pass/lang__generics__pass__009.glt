@@ -1,0 +1,18 @@
+// lang__generics__pass__009.glt
+// expect output
+// 0
+
+generics Box<T> {
+    struct Example {
+        T value
+    }
+    T Returner(Example e) {
+        return e.value
+    }
+}
+int main() {
+    Box<int>
+    Example e = {0}
+    output(Returner(e))
+    return 0
+}

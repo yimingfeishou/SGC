@@ -1,0 +1,14 @@
+// lang__namespace__pass__018.glt
+// expect output
+// 6 8
+
+namespace ns {
+    int v = 3
+}
+int main() {
+    int r = ns::v * (2)
+    int x = 4
+    int s = x * (2)
+    output(r, " ", s)
+    return 0
+}

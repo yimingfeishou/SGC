@@ -1,0 +1,13 @@
+// lang__generics__error__046.glt
+// expect error ER 0019
+
+generics Wrap<T> {
+    struct Wrap {
+        T value
+    }
+}
+
+int main() {
+    Wrap<int, expr { return 1 }>.Wrap w
+    return 0
+}

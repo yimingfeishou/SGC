@@ -1,0 +1,21 @@
+// lang__namespace__pass__002.glt
+// expect output
+// 15
+
+namespace ns {
+    struct Box {
+        int v
+    }
+
+    Box operator + (Box a, int delta) {
+        Box r = {a.v + delta}
+        return r
+    }
+}
+
+int main() {
+    ns::Box a = {10}
+    ns::Box c = a + 5
+    output(c.v)
+    return 0
+}

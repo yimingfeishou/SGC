@@ -1,0 +1,12 @@
+// lang__const_fn__pass__007.glt
+// expect output
+// 1073741824
+
+const int big() {
+    return 2 ** 30
+}
+const int b = big()
+int main() {
+    output(b, "\n")
+    return 0
+}

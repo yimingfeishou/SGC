@@ -1,0 +1,12 @@
+// sl__math__pass__002.glt
+// expect output
+// 10000000000 10000000000 10000000001 10000000001 -10000000000 -10000000001 -10000000000 -10000000001
+
+guide "math.glt"
+access namespace sl
+
+int main() {
+    output(cast<lint>(trunc(10000000000.5)), " ", cast<lint>(floor(10000000000.5)), " ", cast<lint>(ceil(10000000000.5)), " ", cast<lint>(round(10000000000.5)))
+    output(" ", cast<lint>(trunc(-10000000000.5)), " ", cast<lint>(floor(-10000000000.5)), " ", cast<lint>(ceil(-10000000000.5)), " ", cast<lint>(round(-10000000000.5)))
+    return 0
+}

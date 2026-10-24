@@ -1,0 +1,20 @@
+// lang__struct__pass__026.glt
+// expect output
+// 5
+
+struct Point {
+    int x
+    int y
+}
+const Point make_point(int x, int y) {
+    Point p = {x, y}
+    return p
+}
+int sum_point(Point p) {
+    return p.x + p.y
+}
+int main() {
+    int total = sum_point(make_point(2, 3))
+    output(total, "\n")
+    return 0
+}

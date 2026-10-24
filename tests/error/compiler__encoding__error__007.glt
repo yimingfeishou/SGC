@@ -1,0 +1,15 @@
+// compiler__encoding__error__007.glt
+// expect error ER 0033
+
+const int square(int x) {
+    return x ** 2
+}
+
+const int result = square(5)
+int runtime_value = square(6)
+
+int main() {
+    output(result)
+    output(runtime_value)
+    return 0
+}

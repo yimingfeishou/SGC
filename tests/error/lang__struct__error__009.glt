@@ -1,0 +1,7 @@
+// lang__struct__error__009.glt
+// expect error ER 0090
+
+int main() {
+    int* p = construct int()
+    return 0
+}

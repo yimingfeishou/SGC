@@ -1,0 +1,23 @@
+// lang__lifecycle__pass__022.glt
+// expect output
+// default 0
+
+struct Tracer {
+    int n
+
+    constructor () {
+        n = 0
+        output("default ")
+    }
+
+    constructor (int v) {
+        n = v
+        output("arg ")
+    }
+}
+Tracer g
+
+int main() {
+    output(g.n)
+    return 0
+}

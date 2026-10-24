@@ -1,0 +1,17 @@
+// lang__struct__pass__024.glt
+// expect output
+// 1 2
+
+struct Point {
+    int x
+    int y
+}
+const Point make_point(int x, int y) {
+    Point p = {x, y}
+    return p
+}
+int main() {
+    const Point p = make_point(1, 2)
+    output(p.x, " ", p.y, "\n")
+    return 0
+}

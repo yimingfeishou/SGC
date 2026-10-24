@@ -1,0 +1,17 @@
+// compiler__diagnostics__error__051.glt
+// expect error ER 0065
+
+generics F<T, int N> {
+    struct F {
+        T data[N]
+    }
+}
+generics F<T,
+    (N)> {
+    struct F {
+        T data[1]
+    }
+}
+int main() {
+    return 0
+}

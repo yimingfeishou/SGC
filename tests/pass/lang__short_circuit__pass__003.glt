@@ -1,0 +1,40 @@
+// lang__short_circuit__pass__003.glt
+// expect output
+// 31
+// 00
+// 10
+// 10
+
+bool or_and(bool a, bool b, bool c) {
+    return a || (b && c)
+}
+
+bool and_or(bool a, bool b, bool c) {
+    return a && (b || c)
+}
+
+int depth(bool a, bool b, bool c, bool d) {
+    if (a || (b && (c || d))) {
+        return 1
+    }
+    return 0
+}
+
+bool mixed(bool a, bool b, bool c) {
+    return (a || b) && (b || c)
+}
+
+int main() {
+    int total = 0
+    for (int i = 0; i < 8; i++) {
+        bool a = (i / 4) % 2 == 1
+        bool b = (i / 2) % 2 == 1
+        bool c = i % 2 == 1
+        total = total * 2 + (or_and(a, b, c) ? 1 : 0)
+    }
+    output(total, "\n")
+    output(and_or(false, true, false) ? 1 : 0, and_or(true, false, false) ? 1 : 0, "\n")
+    output(depth(false, true, false, true), depth(false, false, false, false), "\n")
+    output(mixed(true, false, true) ? 1 : 0, mixed(false, false, true) ? 1 : 0, "\n")
+    return 0
+}

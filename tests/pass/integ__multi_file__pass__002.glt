@@ -1,0 +1,29 @@
+// integ__multi_file__pass__002.glt
+// expect output
+// add=5 bump=110 weight=21 len=5 text=positive app_counter=1
+
+// Importing program for the --no-runtime / -NR test.
+// It declares the same struct and the same global as the provider library, so
+// the generated symbols would collide if the library were not built with -NR.
+
+clib("nr_import_provider.lib")
+
+struct Packet {
+    int id
+    int weight
+}
+
+int library_counter = 1
+
+extern int add from nr_import_provider (int a, int b)
+extern int bump from nr_import_provider ()
+extern int weight_of from nr_import_provider (Packet p)
+extern int text_len from nr_import_provider (string* ptext)
+extern string make_text from nr_import_provider (int n)
+
+int main() {
+    Packet packet = {7, 21}
+    string message = "hello"
+    output("add=", add(2, 3), " bump=", bump(), " weight=", weight_of(packet), " len=", text_len(&message), " text=", make_text(3), " app_counter=", library_counter, "\n")
+    return 0
+}

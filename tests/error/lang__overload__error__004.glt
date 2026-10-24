@@ -1,0 +1,8 @@
+// lang__overload__error__004.glt
+// expect error ER 0080
+
+int fn(int a, int b = 1) { return a + b }
+int fn(int a, double b = 1.0) { return a + cast<int>(b) }
+int main() {
+    return fn(1)
+}

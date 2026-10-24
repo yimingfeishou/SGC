@@ -1,0 +1,26 @@
+// sl__math__pass__003.glt
+// expect output
+// sin1e6:0 cos1e6:0 sin1:0 cos1:0 exp1:0 exp05:0 log1e30:0 log1e-30:0 log2:0 atan1:0 asin05:0 sinh1:0 cosh1:0 tanh1:0 sqrt1e30:0 pow10_30:0
+
+guide "math.glt"
+access namespace sl
+
+int main() {
+    output("sin1e6:", cast<lint>((sin(1000000.0) + 0.34999350217129177) * 1000000000000000.0))
+    output(" cos1e6:", cast<lint>((cos(1000000.0) - 0.93675212753314518) * 1000000000000000.0))
+    output(" sin1:", cast<lint>((sin(1.0) - 0.8414709848078965) * 1000000000000000.0))
+    output(" cos1:", cast<lint>((cos(1.0) - 0.54030230586813977) * 1000000000000000.0))
+    output(" exp1:", cast<lint>((exp(1.0) - 2.7182818284590451) * 1000000000000000.0))
+    output(" exp05:", cast<lint>((exp(0.5) - 1.6487212707001282) * 1000000000000000.0))
+    output(" log1e30:", cast<lint>((log(1.0e30) - 69.077552789821368) * 1000000000000000.0))
+    output(" log1e-30:", cast<lint>((log(1.0e-30) + 69.077552789821368) * 1000000000000000.0))
+    output(" log2:", cast<lint>((log(2.0) - 0.69314718055994529) * 1000000000000000.0))
+    output(" atan1:", cast<lint>((atan(1.0) - 0.78539816339744828) * 1000000000000000.0))
+    output(" asin05:", cast<lint>((asin(0.5) - 0.52359877559829893) * 1000000000000000.0))
+    output(" sinh1:", cast<lint>((sinh(1.0) - 1.1752011936438014) * 1000000000000000.0))
+    output(" cosh1:", cast<lint>((cosh(1.0) - 1.5430806348152437) * 1000000000000000.0))
+    output(" tanh1:", cast<lint>((tanh(1.0) - 0.76159415595576485) * 1000000000000000.0))
+    output(" sqrt1e30:", cast<lint>((sqrt(1.0e30) / 1.0e15 - 1.0) * 1000000000000000.0))
+    output(" pow10_30:", cast<lint>((pow(10.0, 30.0) / 1.0e30 - 1.0) * 1000000000000.0))
+    return 0
+}

@@ -1,0 +1,42 @@
+// lang__emit__pass__001.glt
+// expect output
+// 689
+
+generics EmitStatements<T> {
+    T block_condition() {
+        emit {
+            int block_branch = 1
+            if (block_branch == 1) {
+                return 6
+            }
+            return 0
+        }
+    }
+
+    T string_condition() {
+        emit "    int string_branch = 2\n"
+        emit "    if (string_branch == 2) {\n"
+        emit "    return 8\n"
+        emit "    }\n"
+        emit "    return 0\n"
+    }
+
+    T local_code() {
+        emit "struct Local {\n"
+        emit "    T value\n"
+        emit "}\n"
+        emit "Local item = {9}\n"
+        emit "int local_branch = 1\n"
+        emit "if (local_branch == 1) {\n"
+        emit "    return item.value\n"
+        emit "}\n"
+        emit "    return 0\n"
+    }
+}
+
+int main() {
+    output(EmitStatements<int>.block_condition())
+    output(EmitStatements<int>.string_condition())
+    output(EmitStatements<int>.local_code())
+    return 0
+}

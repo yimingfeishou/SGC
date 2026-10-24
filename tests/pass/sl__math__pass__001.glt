@@ -1,0 +1,19 @@
+// sl__math__pass__001.glt
+// expect output
+// pi = 3.1415926535897931sqrt(2.0) = 1.4142135623730949sin(pi / 2.0) = 1.0000000000000002rand = 440917719random_int = 5random_double = 0.98135659470286063
+
+guide "math.glt"
+access namespace sl
+
+int main() {
+    output("pi = ", pi)
+    output("sqrt(2.0) = ", sqrt(2.0))
+    output("sin(pi / 2.0) = ", sin(pi / 2.0))
+
+    srand(123lu)
+    output("rand = ", rand())
+    output("random_int = ", random_int(1, 10))
+    output("random_double = ", random_double())
+
+    return 0
+}

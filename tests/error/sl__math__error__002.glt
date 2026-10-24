@@ -1,0 +1,46 @@
+// sl__math__error__002.glt
+// expect error ER 0019
+
+guide "math.glt"
+access namespace sl
+
+generics math_ops_generic<T: int | lint | uint | luint | float | double> {
+    T __math_zero() {
+        T dummy
+        const if (T.is_float == true) {
+            dummy = 0.0
+        } const else {
+            const if (T.is_double == true) {
+                dummy = 0.0
+            } const else {
+                dummy = 0
+            }
+        }
+        return dummy
+    }
+
+    T abs(T x) {
+        T zero = __math_zero()
+        if (x < zero) {
+            return zero - x
+        }
+        return x
+    }
+
+    T min(T a, T b) {
+        if (a < b) {
+            return a
+        }
+        return b
+    }
+}
+
+int main() {
+    output(math_ops_generic<int>.abs(-5), " ", math_ops_generic<int>.min(3, 5), " | ")
+    output(math_ops_generic<lint>.abs(-9l), " ", math_ops_generic<lint>.min(3l, 5l), " | ")
+    output(math_ops_generic<uint>.abs(7u), " ", math_ops_generic<uint>.min(3u, 5u), " | ")
+    output(math_ops_generic<luint>.min(3lu, 5lu), " | ")
+    output(math_ops_generic<float>.abs(-1.5f), " ", math_ops_generic<float>.min(1.5f, 2.5f), " | ")
+    output(math_ops_generic<double>.abs(-2.5), " ", math_ops_generic<double>.min(1.5, 2.5), " ")
+    return 0
+}

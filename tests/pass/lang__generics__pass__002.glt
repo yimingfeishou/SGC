@@ -1,0 +1,30 @@
+// lang__generics__pass__002.glt
+// expect output
+// 42
+// 7 seven
+
+generics Box<T> {
+    struct Example {
+        T value
+    }
+
+    T Returner(Example e) {
+        return e.value
+    }
+}
+
+generics Pair<T, U> {
+    struct Pair {
+        T first
+        U second
+    }
+}
+
+int main() {
+    Box<int>
+    Example e = {42}
+    output(Returner(e), "\n")
+    Pair<int, string> p = {7, "seven"}
+    output(p.first, " ", p.second, "\n")
+    return 0
+}

@@ -1,0 +1,10 @@
+// lang__if__error__004.glt
+// expect error ER 0143
+
+const if (true) {
+    output("a")
+}
+
+int main() {
+    return 0
+}

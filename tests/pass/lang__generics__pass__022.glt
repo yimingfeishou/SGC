@@ -1,0 +1,84 @@
+// lang__generics__pass__022.glt
+// expect output
+// 1 21 42 Hello 5 2.5 World 9
+
+namespace mathx {
+    int base() {
+        return 1
+    }
+}
+
+addition namespace mathx {
+    generics Holder<T> {
+        struct Item {
+            T value
+        }
+
+        T get(Item box) {
+            return box.value
+        }
+    }
+
+    generics Holder<string> {
+        struct Item {
+            string value
+            int length
+        }
+
+        string get(Item box) {
+            return box.value
+        }
+
+        int len(Item box) {
+            return box.length
+        }
+    }
+
+    generics Holder<int> {
+        struct Item {
+            int value
+        }
+
+        int get(Item box) {
+            return box.value
+        }
+
+        int doubled(Item box) {
+            return box.value + box.value
+        }
+    }
+}
+
+namespace plainx {
+    generics Wrap<T> {
+        struct Item {
+            T value
+        }
+
+        T get(Item box) {
+            return box.value
+        }
+    }
+
+    generics Wrap<string> {
+        struct Item {
+            string value
+        }
+
+        string get(Item box) {
+            return box.value
+        }
+    }
+}
+
+access namespace mathx
+
+int main() {
+    Holder<int>.Item hi = {21}
+    Holder<string>.Item hs = {"Hello", 5}
+    Holder<float>.Item hf = {2.5}
+    plainx::Wrap<string>.Item ws = {"World"}
+    plainx::Wrap<int>.Item wi = {9}
+    output(base(), " ", Holder<int>.get(hi), " ", Holder<int>.doubled(hi), " ", Holder<string>.get(hs), " ", Holder<string>.len(hs), " ", Holder<float>.get(hf), " ", plainx::Wrap<string>.get(ws), " ", plainx::Wrap<int>.get(wi))
+    return 0
+}

@@ -1,0 +1,11 @@
+// compiler__continuation__error__007.glt
+// expect error ER 0019
+
+int main() {
+    int a[] = { \
+        1, 2, 3
+    }
+    int b = undefined_after_continuation
+    output(a[0], b)
+    return 0
+}

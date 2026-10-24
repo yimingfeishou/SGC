@@ -1,0 +1,12 @@
+// lang__type__error__006.glt
+// expect error ER 0028
+
+int main() {
+    if (1) {
+        output("int condition accepted")
+    }
+    while (0) {
+        output("never")
+    }
+    return 0
+}

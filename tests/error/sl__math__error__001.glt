@@ -1,0 +1,69 @@
+// sl__math__error__001.glt
+// expect error ER 0019
+
+guide "math.glt"
+access namespace sl
+
+string greeting(string name = "Alice") {
+    return "hi " + name
+}
+
+generics math_ops_generic<T: int | lint | uint | luint | float | double> {
+    T __math_zero() {
+        T dummy
+        const if (T.is_float == true) {
+            dummy = 0.0
+        } const else {
+            const if (T.is_double == true) {
+                dummy = 0.0
+            } const else {
+                dummy = 0
+            }
+        }
+        return dummy
+    }
+
+    T abs(T x) {
+        T zero = __math_zero()
+        if (x < zero) {
+            return zero - x
+        }
+        return x
+    }
+
+    T min(T a, T b) {
+        if (a < b) {
+            return a
+        }
+        return b
+    }
+
+    T max(T a, T b) {
+        if (a > b) {
+            return a
+        }
+        return b
+    }
+
+    T clamp(T x, T min_val, T max_val) {
+        if (x < min_val) {
+            return min_val
+        }
+        if (x > max_val) {
+            return max_val
+        }
+        return x
+    }
+
+    int gcd(T a, T b) {
+        return 0
+    }
+}
+
+int main() {
+    output(greeting(), " ", greeting("Bob"), "| ")
+    math_ops_generic<int>
+    output(abs(-5), " ", min(3, 5), " ", max(3, 5), " ", clamp(9, 1, 4), " ")
+    output(clamp(0, 1, 4), " ", min(-9, -3), " ")
+    return 0
+}

@@ -1,0 +1,47 @@
+// lang__if__pass__010.glt
+// expect output
+// noD
+// L3
+// gt2
+// miss
+// local
+
+@cond DEBUG
+@cond LEVEL = 3
+@uncond DEBUG
+
+int var = 1
+
+int main() {
+    @if (is_defined("DEBUG")) {
+        output("D\n")
+    } @else {
+        output("noD\n")
+    }
+
+    @if (is_defined("LEVEL") && LEVEL == 3) {
+        output("L3\n")
+    } @else {
+        output("noL3\n")
+    }
+
+    @if (LEVEL > 5) {
+        output("gt5\n")
+    } @else {
+        @if (LEVEL > 2) {
+            output("gt2\n")
+        } @else {
+            output("le2\n")
+        }
+    }
+
+    @if (!is_defined("MISSING")) {
+        output("miss\n")
+    }
+
+    @cond LOCAL = 7
+    @if (LOCAL == 7) {
+        output("local\n")
+    }
+    return 0
+}

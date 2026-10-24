@@ -1,0 +1,14 @@
+// lang__namespace__pass__026.glt
+// expect output
+// m
+
+namespace space {
+    struct X {
+        int v
+    }
+}
+
+int main() {
+    output("m")
+    return 0
+}

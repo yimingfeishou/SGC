@@ -1,0 +1,8 @@
+// lang__address__error__001.glt
+// expect error ER 0108
+
+const int k = 10
+int main() {
+    int* p = &k
+    return 0
+}

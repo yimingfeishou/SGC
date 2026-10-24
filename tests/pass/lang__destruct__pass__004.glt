@@ -1,0 +1,17 @@
+// lang__destruct__pass__004.glt
+// expect output
+// true
+
+struct Buffer {
+    int* data
+    destructor () {
+        data = null
+    }
+}
+int main() {
+    Buffer b
+    b.data = heap(int, 2)
+    b.destructor()
+    output(b.data == null)
+    return 0
+}

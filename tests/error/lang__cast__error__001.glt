@@ -1,0 +1,15 @@
+// lang__cast__error__001.glt
+// expect error ER 0019
+
+struct Point {
+    int x
+}
+
+int main() {
+    int value = 1
+    double d = double(value)
+    void* raw = void*(&value)
+    Point pt = {5}
+    Point* back = Point*(&pt)
+    return 0
+}

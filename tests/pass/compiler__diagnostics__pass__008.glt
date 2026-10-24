@@ -1,0 +1,12 @@
+// compiler__diagnostics__pass__008.glt
+// expect output
+// 8 4
+
+guide "../support/work/recover_ident_gt_mid.glt"
+
+int main() {
+    floa = floa + 1
+    whil = whil + 1
+    output(floa, " ", whil)
+    return 0
+}

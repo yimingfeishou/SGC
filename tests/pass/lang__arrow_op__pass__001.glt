@@ -1,0 +1,22 @@
+// lang__arrow_op__pass__001.glt
+// expect output
+// 77
+
+struct Box {
+    int v
+}
+
+struct BoxPtr {
+    Box* p
+}
+
+Box* operator -> (BoxPtr* self) {
+    return self->p
+}
+
+int main() {
+    Box b = {77}
+    BoxPtr holder = {&b}
+    output(holder->v)
+    return 0
+}

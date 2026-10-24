@@ -1,0 +1,12 @@
+// integ__extern__error__002.glt
+// expect error ER 0049
+
+clib("string.lib")
+
+extern string get_string from stringlib ()
+
+int main() {
+    string value = get_string()
+    output(value)
+    return 0
+}

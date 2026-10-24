@@ -1,0 +1,12 @@
+// lang__member__error__002.glt
+// expect error ER 0082
+
+struct Bad {
+    int value
+    copy_constructor (int other) {
+        value = other
+    }
+}
+int main() {
+    return 0
+}

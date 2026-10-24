@@ -1,0 +1,14 @@
+// lang__varargs__pass__004.glt
+// expect output
+// 7 7
+
+int take(string text, int... counts) {
+    return strlen(text) + counts.length
+}
+
+int main() {
+    string a = "hello"
+    output(take(a, 1, 2), " ")
+    output(take("abcdef", 1))
+    return 0
+}

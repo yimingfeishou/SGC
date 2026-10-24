@@ -1,0 +1,16 @@
+// lang__const__pass__035.glt
+// expect output
+// 9
+
+const int square(int x) {
+    return x * x
+}
+generics G<T: int, T N> {
+    int value() {
+        return N
+    }
+}
+int main() {
+    output(G<int, square(3)>.value(), "\n")
+    return 0
+}

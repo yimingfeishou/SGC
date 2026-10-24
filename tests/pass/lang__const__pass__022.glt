@@ -1,0 +1,38 @@
+// lang__const__pass__022.glt
+// expect output
+// 4
+// 9
+// 4
+// 9
+// 5
+
+const int square(int x) {
+    return x * x
+}
+
+const int width_of(int n) {
+    return n * 2
+}
+
+struct Row {
+    int cells[width_of(2)]
+}
+
+generics Slot<T: int, T N> {
+    int value() {
+        return N
+    }
+}
+
+const int table[square(2)] = {1, 2, 3, 4}
+
+int main() {
+    int data[square(3)] = {1, 2, 3, 4, 5, 6, 7, 8, 9}
+    Row row = {{1, 2, 3, 4}}
+    output(table[3], "\n")
+    output(data[8], "\n")
+    output(row.cells[3], "\n")
+    output(Slot<int, square(3)>.value(), "\n")
+    output(Slot<int, width_of(2) + 1>.value(), "\n")
+    return 0
+}

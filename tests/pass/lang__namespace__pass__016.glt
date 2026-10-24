@@ -1,0 +1,34 @@
+// lang__namespace__pass__016.glt
+// expect output
+// 15 50
+
+namespace alpha {
+    struct Box {
+        int v
+    }
+
+    alpha::Box operator + (alpha::Box b, int v) {
+        b.v = b.v + v
+        return b
+    }
+}
+
+namespace beta {
+    struct Box {
+        int v
+    }
+
+    Box operator + (Box b, int v) {
+        b.v = b.v * v
+        return b
+    }
+}
+
+int main() {
+    alpha::Box a = {10}
+    alpha::Box c = a + 5
+    beta::Box d = {10}
+    beta::Box e = d + 5
+    output(c.v, " ", e.v)
+    return 0
+}

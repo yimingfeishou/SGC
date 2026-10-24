@@ -1,0 +1,17 @@
+// lang__generics__pass__058.glt
+// expect output
+// 75
+
+int expr = 7
+
+generics Box<int size> {
+    int get() {
+        return size
+    }
+}
+
+int main() {
+    output(expr)
+    output(Box<5>.get())
+    return 0
+}

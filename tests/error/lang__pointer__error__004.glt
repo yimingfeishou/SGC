@@ -1,0 +1,8 @@
+// lang__pointer__error__004.glt
+// expect error ER 0034
+
+int main() {
+    int* p = null
+    float* q = p
+    return 0
+}

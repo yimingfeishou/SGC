@@ -1,0 +1,16 @@
+// lang__generics__error__026.glt
+// expect error ER 0070
+
+generics Box<T> {
+    struct Value {
+        T content
+    }
+}
+struct Value {
+    int content
+}
+Box<int>
+int main() {
+    Value v = {1}
+    return 0
+}

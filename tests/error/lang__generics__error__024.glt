@@ -1,0 +1,12 @@
+// lang__generics__error__024.glt
+// expect error ER 0061
+
+generics NumericBox<T: int | float> {
+    struct Box {
+        T value
+    }
+}
+int main() {
+    NumericBox<string>.Box b
+    return 0
+}

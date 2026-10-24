@@ -1,0 +1,33 @@
+// lang__generics__pass__004.glt
+// expect output
+// 2122
+
+generics Local<T> {
+    T plain() {
+        struct Plain {
+            T value
+        }
+
+        Plain item = {21}
+        return item.value
+    }
+
+    T branch() {
+        const if (T.is_integer == true) {
+            struct Branch {
+                T value
+            }
+
+            Branch item = {22}
+            return item.value
+        }
+
+        return 0
+    }
+}
+
+int main() {
+    output(Local<int>.plain())
+    output(Local<int>.branch())
+    return 0
+}

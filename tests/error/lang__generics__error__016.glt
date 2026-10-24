@@ -1,0 +1,28 @@
+// lang__generics__error__016.glt
+// expect error ER 0063
+
+generics Pair<T, U> {
+    struct Pair {
+        T first
+        U second
+    }
+}
+
+generics Pair<T*, U> {
+    struct Pair {
+        T* first
+        U second
+    }
+}
+
+generics Pair<T, U*> {
+    struct Pair {
+        T first
+        U* second
+    }
+}
+
+int main() {
+    Pair<int*, int*>.Pair item
+    return 0
+}

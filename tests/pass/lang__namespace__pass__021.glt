@@ -1,0 +1,18 @@
+// lang__namespace__pass__021.glt
+// expect output
+// ok
+
+namespace ns1 {
+    int v = 1
+}
+addition namespace ns1 {
+    @if (is_defined("WINDOWS_PLATFORM")) {
+        @cond A = 1
+    } @else {
+        @cond C = 1
+    }
+}
+int main() {
+    output("ok")
+    return 0
+}

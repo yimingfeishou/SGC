@@ -1,0 +1,16 @@
+// lang__generics__pass__014.glt
+// expect output
+// 7
+
+generics Ops<T> {
+    T pick(T a) {
+        return a
+    }
+    int pick(int a, int b) {
+        return a + b
+    }
+}
+int main() {
+    output(Ops<int>::pick(3, 4))
+    return 0
+}

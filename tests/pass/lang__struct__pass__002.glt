@@ -1,0 +1,31 @@
+// lang__struct__pass__002.glt
+// expect output
+// hi ~hi ~
+
+struct Inner {
+    string s
+}
+
+struct Outer {
+    Inner inner
+
+    constructor (Inner i) {
+        inner = i
+    }
+
+    destructor () {
+        output("~")
+    }
+}
+
+int main() {
+    Inner x
+    x.s = "hi"
+    Outer* p = construct Outer(x)
+    output(x.s, " ")
+    p->destructor()
+    construct Outer(x) at p
+    output(x.s, " ")
+    destruct p
+    return 0
+}

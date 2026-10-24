@@ -1,0 +1,84 @@
+// lang__generics__pass__005.glt
+// expect output
+// 71141014specialspecial1.012128299
+
+generics Values<T> {
+    const T base = 4
+    T value = base + 3
+
+    T compute() {
+        return value + base
+    }
+}
+
+generics Choice<T> {
+    T value = 1
+
+    T get() {
+        return value
+    }
+}
+
+generics Choice<int> {
+    string value = "special"
+
+    string get() {
+        return value
+    }
+}
+
+generics ValueBox<T> {
+    T value
+}
+
+generics FixedBox<T> {
+    const T value = 8
+}
+
+generics ArrayValues<T, int N> {
+    T values[N] = {1, 2, 3}
+}
+
+int type_form() {
+    ValueBox<int> requested = 12
+    output(value)
+    output(ValueBox<int>::value)
+    return 0
+}
+
+int fixed_type_form() {
+    FixedBox<int> requested
+    output(value)
+    return 0
+}
+
+int choice_form() {
+    output(Choice<int>::get())
+    output(Choice<int>::value)
+    output(Choice<float>.get())
+    return 0
+}
+
+int array_form() {
+    ArrayValues<int, 3>
+    output(values[1])
+    values[2] = 9
+    output(values[2])
+    output(ArrayValues<int, 3>::values[2])
+    return 0
+}
+
+int main() {
+    Values<int>
+    output(value)
+    output(compute())
+    output(Values<int>::base)
+    Values<int>::value = 10
+    output(value)
+    output(compute())
+    choice_form()
+    type_form()
+    fixed_type_form()
+    array_form()
+    return 0
+}

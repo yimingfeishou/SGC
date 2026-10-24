@@ -1,0 +1,34 @@
+// lang__op_overload__pass__011.glt
+// expect output
+// true01
+
+int order = 0
+
+int first = 0
+
+int second = 0
+
+struct Flag {
+    bool v
+}
+
+bool operator || (Flag a, Flag b) {
+    return a.v || b.v
+}
+
+Flag make(bool x, int id) {
+    if (id == 1) {
+        first = order
+    } else {
+        second = order
+    }
+    order++
+    Flag r = {x}
+    return r
+}
+
+int main() {
+    bool r = make(true, 1) || make(false, 2)
+    output(r, first, second)
+    return 0
+}

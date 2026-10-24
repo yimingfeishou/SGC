@@ -1,0 +1,18 @@
+// lang__construct__pass__007.glt
+// expect output
+// 5
+
+generics Box<T> {
+    struct Box {
+        T value
+        constructor (T v) {
+            value = v
+        }
+    }
+}
+int main() {
+    void* mem = heap(Box<int>.Box)
+    Box<int>.Box* b = construct Box<int>.Box(5) at mem
+    output(b->value)
+    return 0
+}

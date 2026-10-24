@@ -1,0 +1,11 @@
+// compiler__diagnostics__pass__007.glt
+// expect output
+// 4
+
+guide "../support/work/recover_ident_gt_globals.glt"
+
+int main() {
+    itn v = {4}
+    output(v.x)
+    return 0
+}

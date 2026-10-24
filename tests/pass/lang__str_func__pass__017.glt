@@ -1,0 +1,12 @@
+// lang__str_func__pass__017.glt
+// expect output
+// HELLO!
+
+const string shout(string s) {
+    return strupper(strtrim(s)) + "!"
+}
+const string t = shout("  hello  ")
+int main() {
+    output(t, "\n")
+    return 0
+}

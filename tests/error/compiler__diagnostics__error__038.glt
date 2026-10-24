@@ -1,0 +1,13 @@
+// compiler__diagnostics__error__038.glt
+// expect error ER 0019
+
+int helper() {
+    int itn = 1
+    return itn
+}
+
+int main() {
+    itn a = 2
+    output(a)
+    return 0
+}

@@ -1,0 +1,26 @@
+// lang__struct__pass__018.glt
+// expect output
+// 16 8 24 8 16 8
+
+struct pad_tail {
+    double d
+    float f
+}
+
+struct pad_all {
+    bool b
+    double d
+    char c
+}
+
+struct alignment_sample {
+    float f
+    double d
+}
+
+int main() {
+    output(size(pad_tail), " ", align(pad_tail))
+    output(" ", size(pad_all), " ", align(pad_all))
+    output(" ", size(alignment_sample), " ", align(alignment_sample))
+    return 0
+}

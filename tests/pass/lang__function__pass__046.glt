@@ -1,0 +1,16 @@
+// lang__function__pass__046.glt
+// expect output
+// 12
+
+struct P {
+    int x
+    int y
+}
+
+int main() {
+    P p
+    p.x = 1
+    p.y = 2
+    output(p.x, p.y)
+    return 0
+}

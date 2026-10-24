@@ -1,0 +1,10 @@
+// lang__string__pass__003.glt
+// expect output
+// Hello
+// World
+
+int main() {
+    string s = "Hello\nWorld"
+    output(s, "\n")
+    return 0
+}

@@ -1,0 +1,17 @@
+// lang__short_circuit__pass__002.glt
+// expect output
+// falsetrue0
+
+int order = 0
+
+bool side() {
+    order++
+    return true
+}
+
+int main() {
+    bool a = false && side()
+    bool b = true || side()
+    output(a, b, order)
+    return 0
+}

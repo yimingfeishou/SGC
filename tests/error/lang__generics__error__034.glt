@@ -1,0 +1,12 @@
+// lang__generics__error__034.glt
+// expect error ER 0019
+
+generics Default<T, expr Make() -> T> {
+    T create() {
+        return Make()
+    }
+}
+
+int main() {
+    return 0
+}

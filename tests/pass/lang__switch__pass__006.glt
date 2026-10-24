@@ -1,0 +1,26 @@
+// lang__switch__pass__006.glt
+// expect output
+// b1
+
+int counter = 0
+
+int source_value() {
+    counter = counter + 1
+    return 2
+}
+
+int main() {
+    counter = 0
+    switch (source_value()) {
+        case (1) {
+            output("a")
+        } case (2) {
+            output("b")
+        } case (3) {
+            output("c")
+        }
+    }
+    output(counter)
+    output("\n")
+    return 0
+}

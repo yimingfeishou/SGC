@@ -1,0 +1,12 @@
+// lang__cast__error__004.glt
+// expect error ER 0019
+
+int main() {
+    int runtime_value = 3
+    output(int(bool(3)), " ", int(bool(runtime_value)))
+    const int folded = int(bool(3))
+    output(" ", folded)
+    bool b = bool(runtime_value)
+    output(" ", int(b), " ", (b == true))
+    return 0
+}

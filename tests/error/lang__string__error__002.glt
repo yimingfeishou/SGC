@@ -1,0 +1,7 @@
+// lang__string__error__002.glt
+// expect error ER 0055
+
+int main() {
+    file* fp = fileopen(7, "r")
+    return 0
+}

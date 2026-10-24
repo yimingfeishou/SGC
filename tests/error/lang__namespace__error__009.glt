@@ -1,0 +1,17 @@
+// lang__namespace__error__009.glt
+// expect error ER 0001
+
+namespace outer {
+    int a = 1
+    namespace inner {
+        int b = 2
+    }
+}
+
+access namespace outer
+
+int main() {
+    output(a, "\n")
+    output(b, "\n")
+    return 0
+}

@@ -1,0 +1,20 @@
+// lang__addition__pass__005.glt
+// expect output
+// 112
+
+namespace floa {
+    struct Point {
+        int x
+    }
+    int i = 1
+}
+
+addition namespace floa {
+    int j = 2
+}
+
+int main() {
+    floa::Point p = {1}
+    output(p.x, floa::i, floa::j)
+    return 0
+}

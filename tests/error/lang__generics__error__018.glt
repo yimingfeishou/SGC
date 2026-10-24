@@ -1,0 +1,14 @@
+// lang__generics__error__018.glt
+// expect error ER 0075
+
+generics Normalization<T, double N> {
+    struct Holder {
+        int value
+    }
+}
+
+int main() {
+    Normalization<int, 1>
+    Normalization<int, 1.0>
+    return 0
+}

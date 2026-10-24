@@ -1,0 +1,6 @@
+// compiler__diagnostics__error__054.glt
+// expect error ER 0027
+
+@if (1) {
+ output("x")
+}

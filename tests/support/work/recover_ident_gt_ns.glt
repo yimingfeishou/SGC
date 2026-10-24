@@ -1,0 +1,7 @@
+namespace floa {
+    struct Point {
+        int x
+    }
+
+    int slot = 1
+}

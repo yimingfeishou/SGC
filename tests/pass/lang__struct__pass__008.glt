@@ -1,0 +1,19 @@
+// lang__struct__pass__008.glt
+// expect output
+// John19905155000.0
+
+struct Date {
+    int year
+    int month
+    int day
+}
+struct Employee {
+    string name
+    Date birth_date
+    float salary
+}
+int main() {
+    Employee e1 = {"John", {1990, 5, 15}, 5000.0}
+    output(e1.name, e1.birth_date.year, e1.birth_date.month, e1.birth_date.day, e1.salary)
+    return 0
+}

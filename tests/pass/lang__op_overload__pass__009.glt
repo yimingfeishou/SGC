@@ -1,0 +1,18 @@
+// lang__op_overload__pass__009.glt
+// expect output
+// 42
+
+struct Box2 {
+    int v
+}
+
+int operator * (Box2 b) {
+    return b.v * 2
+}
+
+int main() {
+    Box2 b = {21}
+    int r = *b
+    output(r)
+    return 0
+}

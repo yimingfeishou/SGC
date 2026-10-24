@@ -1,0 +1,15 @@
+// lang__pointer__error__020.glt
+// expect error ER 0019
+
+namespace ns {
+    struct S {
+        int a
+    }
+}
+int main() {
+    ns::S s = {1}
+    void* v = void*(&s)
+    ns::S* r = ns::S*(v)
+    output(r->a)
+    return 0
+}

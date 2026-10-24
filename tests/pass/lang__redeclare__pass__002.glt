@@ -1,0 +1,14 @@
+// lang__redeclare__pass__002.glt
+// expect output
+// a
+
+int main() {
+    switch (1) {
+        case (1) {
+            output("a")
+        } case (1) {
+            output("b")
+        }
+    }
+    return 0
+}

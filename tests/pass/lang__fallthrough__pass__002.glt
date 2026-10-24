@@ -1,0 +1,20 @@
+// lang__fallthrough__pass__002.glt
+// expect output
+// default statementcase 2
+
+int main() {
+    int x = 3
+    switch (x) {
+        case (1) {
+            output("case 1")
+            fallthrough
+        }
+        output("default statement")
+        fallthrough
+        case (2) {
+            output("case 2")
+        }
+        output("default statement")
+    }
+    return 0
+}

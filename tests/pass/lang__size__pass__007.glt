@@ -1,0 +1,19 @@
+// lang__size__pass__007.glt
+// expect output
+// 416
+
+generics Sized<T, int N> {
+    struct Buf {
+        int data[N]
+    }
+    int probe() {
+        return size(N)
+    }
+}
+
+int main() {
+    Sized<int, 4>.Buf b
+    output(Sized<int, 4>.probe())
+    output(size(b))
+    return 0
+}

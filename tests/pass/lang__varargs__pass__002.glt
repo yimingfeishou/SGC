@@ -1,0 +1,23 @@
+// lang__varargs__pass__002.glt
+// expect output
+// length = 0 empty = true
+// get(0) = 0 get(7) = 0
+// length = 3 empty = false
+// first = 9 last = 7
+// data[0] = 9 data[1] = 8
+// get(0) = 9 get(7) = 0
+
+void inspect(int... values) {
+    output("length = ", values.length, " empty = ", values.empty, "\n")
+    if (!values.empty) {
+        output("first = ", values.first, " last = ", values.last, "\n")
+        output("data[0] = ", values.data[0], " data[1] = ", values.data[1], "\n")
+    }
+    output("get(0) = ", values.get(0), " get(7) = ", values.get(7), "\n")
+}
+
+int main() {
+    inspect()
+    inspect(9, 8, 7)
+    return 0
+}

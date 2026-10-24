@@ -1,0 +1,36 @@
+// lang__generics__pass__003.glt
+// expect output
+// 111213emit block
+
+generics Emitter<T> {
+    T direct() {
+        emit "    return 11\n"
+    }
+
+    T composed() {
+        emit "    T value = 12\n"
+        emit "    return value\n"
+    }
+
+    T selected() {
+        const if (T.is_integer == true) {
+            emit "    return 13\n"
+        } const else {
+            emit "    return 0\n"
+        }
+    }
+
+    void reported() {
+        emit {
+            output("emit block")
+        }
+    }
+}
+
+int main() {
+    output(Emitter<int>.direct())
+    output(Emitter<int>.composed())
+    output(Emitter<int>.selected())
+    Emitter<int>.reported()
+    return 0
+}

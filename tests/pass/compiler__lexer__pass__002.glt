@@ -1,0 +1,12 @@
+// compiler__lexer__pass__002.glt
+// expect output
+// 100000.0 0.0025000000000000001 1000.0 300.0
+
+int main() {
+    double a = 1e+5
+    double b = 2.5e-3
+    double c = 1E3
+    double d = 3e2
+    output(a, " ", b, " ", c, " ", d)
+    return 0
+}

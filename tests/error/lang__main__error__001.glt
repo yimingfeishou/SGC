@@ -1,0 +1,6 @@
+// lang__main__error__001.glt
+// expect error ER 0020
+
+int main(float x) {
+    return 0
+}

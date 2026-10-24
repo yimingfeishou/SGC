@@ -1,0 +1,9 @@
+// lang__function__pass__020.glt
+// expect output
+
+int main() {
+    int a = 3
+    int b = 4
+    a * (b)
+    return 0
+}

@@ -1,0 +1,19 @@
+// lang__namespace__error__012.glt
+// expect error ER 0097
+
+addition namespace sl {
+    int v = 1
+    @if (is_defined("WINDOWS_PLATFORM")) {
+        @cond A = 1
+    } @else {
+        @if (is_defined("LINUX_PLATFORM")) {
+            @cond B = 1
+        } @else {
+            @cond C = 1
+        }
+    }
+}
+int main() {
+    output("ok")
+    return 0
+}

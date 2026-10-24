@@ -1,0 +1,7 @@
+// lang__null__error__001.glt
+// expect error ER 0035
+
+int main() {
+    int value = *null
+    return 0
+}

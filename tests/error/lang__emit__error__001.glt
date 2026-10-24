@@ -1,0 +1,11 @@
+// lang__emit__error__001.glt
+// expect error ER 0099
+
+int report() {
+    emit "    return 1\n"
+}
+
+int main() {
+    output(report())
+    return 0
+}

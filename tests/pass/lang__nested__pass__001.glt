@@ -1,0 +1,30 @@
+// lang__nested__pass__001.glt
+// expect output
+// 2114132223
+
+generics NestedEmit<T> {
+    emit "emit {\n"
+    emit "    T top_member(T value) {\n"
+    emit "        return value + 20\n"
+    emit "    }\n"
+    emit "}\n"
+
+    T statement_member() {
+        emit "emit { return 14 }\n"
+    }
+
+    T block_member() {
+        emit {
+            emit "return 13\n"
+        }
+    }
+}
+
+int main() {
+    output(NestedEmit<int>::top_member(1))
+    output(NestedEmit<int>::statement_member())
+    output(NestedEmit<int>::block_member())
+    output(NestedEmit<lint>::top_member(2))
+    output(NestedEmit<int>::top_member(3))
+    return 0
+}

@@ -1,0 +1,39 @@
+// lang__emit__pass__002.glt
+// expect output
+// 8.0 8.0 1.0 8.0 8.0 2.0
+
+generics BlockInfo<T: double, T N> {
+    emit {
+        T block_size() {
+            return N.size
+        }
+
+        T block_align() {
+            return N.align
+        }
+
+        emit T.typename + " block_type_name() {\n"
+        emit "    return 1\n"
+        emit "}\n"
+    }
+}
+
+generics StringInfo<T: double, T N> {
+    emit T.typename + " string_size() {\n"
+    emit "    return ", N.size, "\n"
+    emit "}\n"
+    emit T.typename + " string_align() {\n"
+    emit "    return ", N.align, "\n"
+    emit "}\n"
+    emit T.typename + " string_type_name() {\n"
+    emit "    return 2\n"
+    emit "}\n"
+}
+
+int main() {
+    BlockInfo<double, 0.0>
+    StringInfo<double, 0.0>
+    output(block_size(), " ", block_align(), " ", block_type_name(), " ")
+    output(string_size(), " ", string_align(), " ", string_type_name())
+    return 0
+}

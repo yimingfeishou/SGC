@@ -1,0 +1,19 @@
+// lang__struct__pass__022.glt
+// expect output
+// 99 1
+
+struct S {
+    int v
+}
+
+int mutate(S value) {
+    value.v = 99
+    return value.v
+}
+
+int main() {
+    S a = {1}
+    output(mutate(a), " ")
+    output(a.v)
+    return 0
+}

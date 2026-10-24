@@ -1,0 +1,27 @@
+// lang__namespace__pass__015.glt
+// expect output
+// 7 7
+
+namespace ns {
+    struct Box {
+        int v
+    }
+
+    ns::Box plain(ns::Box b) {
+        return b
+    }
+
+    Box inner(Box b) {
+        return b
+    }
+}
+
+access namespace ns
+
+int main() {
+    Box a = {7}
+    Box c = plain(a)
+    Box d = inner(a)
+    output(c.v, " ", d.v)
+    return 0
+}

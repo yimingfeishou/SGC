@@ -1,0 +1,12 @@
+// lang__lifecycle__error__003.glt
+// expect error ER 0084
+
+struct Bad {
+    int value
+    int constructor () {
+        value = 1
+    }
+}
+int main() {
+    return 0
+}

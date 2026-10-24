@@ -1,0 +1,13 @@
+// lang__cast__pass__001.glt
+// expect output
+// 1.4142135623730951 8
+
+int main() {
+    int base = 2
+    double half = 0.5
+    double rooted = base ** half
+    lint big = 2
+    lint cubed = big ** 3
+    output(rooted, " ", cubed)
+    return 0
+}

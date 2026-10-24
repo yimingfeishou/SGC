@@ -1,0 +1,9 @@
+// integ__multi_file__error__003.glt
+// expect error ER 0049
+
+clib("string.lib")
+
+int main() {
+    int x = 2
+    return 0
+}

@@ -1,0 +1,14 @@
+// lang__self_ref__error__001.glt
+// expect error ER 0048
+
+struct A {
+    B b
+}
+
+struct B {
+    A a
+}
+
+int main() {
+    return 0
+}

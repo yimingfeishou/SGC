@@ -1,0 +1,22 @@
+// lang__namespace__error__005.glt
+// expect error ER 0004
+
+struct G {
+    int v
+}
+
+namespace ns {
+    G operator + (G a, G b) {
+        G r = {a.v + b.v}
+        return r
+    }
+}
+
+access namespace ns
+
+int main() {
+    G a = {1}
+    G b = {2}
+    G c = a + b
+    return 0
+}

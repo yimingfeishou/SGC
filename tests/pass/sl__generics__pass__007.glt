@@ -1,0 +1,33 @@
+// sl__generics__pass__007.glt
+// expect output
+// true false two none | 3 6 | 1 | 3 three one two | 0 0 0 | 0 0 0 
+
+guide "generics.glt"
+access namespace sl
+
+int main() {
+    hash_table_generic<int, string>
+    hash_table table = hash_table(4)
+    set(&table, 1, "one")
+    set(&table, 2, "two")
+    set(&table, 3, "three")
+    output(contains_key(&table, 2), " ", contains_key(&table, 9), " ")
+    output(get_or_default(&table, 2, "none"), " ", get_or_default(&table, 9, "none"), " | ")
+
+    int keys[4] = {0, 0, 0, 0}
+    int key_count = keys_to_array(&table, keys, 4)
+    int key_sum = 0
+    for (int i = 0; i < key_count; i++) {
+        key_sum = key_sum + keys[i]
+    }
+    output(key_count, " ", key_sum, " | ")
+    int small[1] = {0}
+    output(keys_to_array(&table, small, 1), " | ")
+
+    string values[4] = {"", "", "", ""}
+    int value_count = values_to_array(&table, values, 4)
+    output(value_count, " ", values[0], " ", values[1], " ", values[2], " | ")
+    output(keys_to_array(&table, null, 4), " ", keys_to_array(null, small, 1), " ", keys_to_array(&table, small, 0), " | ")
+    output(values_to_array(&table, null, 4), " ", values_to_array(null, values, 4), " ", values_to_array(&table, values, -1), " ")
+    return 0
+}

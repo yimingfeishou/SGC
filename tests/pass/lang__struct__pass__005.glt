@@ -1,0 +1,16 @@
+// lang__struct__pass__005.glt
+// expect output
+// Alice18trueBob25true
+
+struct Person {
+    string name
+    int age = 18
+    bool is_active = true
+}
+int main() {
+    Person alice = {"Alice"}
+    Person bob = {"Bob", 25}
+    output(alice.name, alice.age, alice.is_active)
+    output(bob.name, bob.age, bob.is_active)
+    return 0
+}

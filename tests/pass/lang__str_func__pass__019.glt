@@ -1,0 +1,15 @@
+// lang__str_func__pass__019.glt
+// expect output
+// true
+
+const bool same(string a, string b) {
+    if (strcompare(a, b) == 0) {
+        return true
+    }
+    return false
+}
+const bool flag = same("ab", "ab")
+int main() {
+    output(flag, "\n")
+    return 0
+}

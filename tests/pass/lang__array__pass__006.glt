@@ -1,0 +1,14 @@
+// lang__array__pass__006.glt
+// expect output
+// 1
+
+struct P {
+    int x
+}
+
+int main() {
+    P a[3]
+    a[0].x = 1
+    output(a[0].x)
+    return 0
+}

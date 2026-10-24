@@ -1,0 +1,37 @@
+// Provider library for the --gallt-abi / -GA test.
+// Build with: sgc --compile --input gallt_abi_provider.glt --output gallt_abi_provider.lib -NR
+// Interface shapes: scalars, small struct return, struct parameter,
+// string parameter (by value) and string return.
+
+struct Pair {
+    int first
+    int second
+}
+
+export int add(int a, int b) {
+    return a + b
+}
+
+export Pair make_pair(int a, int b) {
+    Pair pair = {a, b}
+    return pair
+}
+
+export int pair_sum(Pair pair) {
+    return pair.first + pair.second
+}
+
+export int text_len(string text) {
+    return strlen(text)
+}
+
+export void shout(string text) {
+    output(text, "!\n")
+}
+
+export string make_text(int n) {
+    if (n > 0) {
+        return "positive"
+    }
+    return "non-positive"
+}

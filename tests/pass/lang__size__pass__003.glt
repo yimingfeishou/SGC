@@ -1,0 +1,14 @@
+// lang__size__pass__003.glt
+// expect output
+// 4 4
+
+generics Holder<U> {
+    int size_of_holder() { return size(U) }
+    int align_of_holder() { return align(U) }
+}
+
+int main() {
+    Holder<int>
+    output(size_of_holder(), " ", align_of_holder(), "\n")
+    return 0
+}

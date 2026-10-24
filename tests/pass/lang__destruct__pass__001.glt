@@ -1,0 +1,8 @@
+// lang__destruct__pass__001.glt
+// expect output
+
+int main() {
+    int* p = heap(int, 2)
+    destruct p
+    return 0
+}

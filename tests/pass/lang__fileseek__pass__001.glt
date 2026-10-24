@@ -1,0 +1,62 @@
+// lang__fileseek__pass__001.glt
+// expect output
+// false
+// alpha false
+// beta true
+// 0 true
+// true false
+// alpha
+// t32b ok
+
+// t32b: fileeof / fileseek interaction at end of file
+// Guards the cheap eof probe: eof flag after reading past the last line,
+// and recovery after rewinding with fileseek.
+int main() {
+    string path = "t32b_rewind.txt"
+    file* writer = fileopen(path, "wb")
+    if (writer == null) {
+        output("write open failed\n")
+        return 1
+    }
+    filewriteline(writer, "alpha")
+    filewriteline(writer, "beta")
+    fileclose(writer)
+
+    file* reader = fileopen(path, "rb")
+    if (reader == null) {
+        output("read open failed\n")
+        return 1
+    }
+    bool ok = fileeof(reader) == false
+    output(fileeof(reader), "\n")
+
+    string first = filereadline(reader)
+    output(first, " ", fileeof(reader), "\n")
+    ok = ok && (fileeof(reader) == false)
+
+    string second = filereadline(reader)
+    output(second, " ", fileeof(reader), "\n")
+
+    string third = filereadline(reader)
+    output(strlen(third), " ", fileeof(reader), "\n")
+    ok = ok && (strlen(third) == 0)
+    ok = ok && (fileeof(reader) == true)
+
+    bool rewound = fileseek(reader, 0, 0)
+    output(rewound, " ", fileeof(reader), "\n")
+    ok = ok && rewound
+    ok = ok && (fileeof(reader) == false)
+
+    string again = filereadline(reader)
+    output(again, "\n")
+    ok = ok && (strcompare(again, "alpha") == 0)
+
+    fileclose(reader)
+    fileremove(path)
+    if (ok) {
+        output("t32b ok\n")
+    } else {
+        output("t32b fail\n")
+    }
+    return 0
+}

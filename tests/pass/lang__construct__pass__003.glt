@@ -1,0 +1,37 @@
+// lang__construct__pass__003.glt
+// expect output
+// 42
+
+struct Buffer {
+    int* data
+    int size
+
+    constructor (int sz) {
+        size = sz
+        data = heap(int, sz)
+    }
+
+    destructor () {
+        if (data != null) {
+            free(data)
+            data = null
+        }
+    }
+}
+
+Buffer* make_buffer(int size) {
+    return construct Buffer(size)
+}
+
+Buffer* forward_buffer(Buffer* source) {
+    return source
+}
+
+int main() {
+    Buffer* p = make_buffer(4)
+    p->data[0] = 42
+    output(p->data[0])
+    Buffer* q = forward_buffer(p)
+    destruct q
+    return 0
+}

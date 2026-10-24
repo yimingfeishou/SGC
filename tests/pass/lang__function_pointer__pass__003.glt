@@ -1,0 +1,13 @@
+// lang__function_pointer__pass__003.glt
+// expect output
+// 3
+
+int add(int a, int b) {
+    return a + b
+}
+int main() {
+    void* raw = cast<void*>(&add)
+    int(int, int)* f = cast<int(int, int)*>(raw)
+    output(f(1, 2))
+    return 0
+}

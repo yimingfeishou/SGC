@@ -1,0 +1,16 @@
+// lang__if__error__008.glt
+// expect error ER 0105
+
+generics Bad<T> {
+    const if (T) {
+        emit {
+            int value() {
+                return 1
+            }
+        }
+    }
+}
+int main() {
+    Bad<int>
+    return 0
+}

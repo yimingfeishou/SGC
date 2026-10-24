@@ -1,0 +1,16 @@
+// lang__if__error__013.glt
+// expect error ER 0143
+
+generics Bad<T> {
+    emit "T selected() {\n"
+    emit "    const if (T.is_integer == true) {\n"
+    emit "        return 1\n"
+    emit "    }\n"
+    emit "    return 0\n"
+    emit "}\n"
+}
+
+int main() {
+    Bad<int>
+    return 0
+}

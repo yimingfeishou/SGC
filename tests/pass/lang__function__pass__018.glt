@@ -1,0 +1,14 @@
+// lang__function__pass__018.glt
+// expect output
+// yes
+
+@cond V = 1
+
+int main() {
+    @if (is_defined("V")) {
+        output("yes")
+    } @else {
+        output("no")
+    }
+    return 0
+}

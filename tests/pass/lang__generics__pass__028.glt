@@ -1,0 +1,26 @@
+// lang__generics__pass__028.glt
+// expect output
+// pair
+// pair
+
+generics Inner<A, B> {
+    string tag() {
+        return "pair"
+    }
+}
+
+generics Outer<T...> {
+    string pair_tag() {
+        return Inner<T...>.tag()
+    }
+
+    string triple_tag() {
+        return Inner<int, T...>.tag()
+    }
+}
+
+int main() {
+    output(Outer<int, string>.pair_tag(), "\n")
+    output(Outer<double>.triple_tag(), "\n")
+    return 0
+}

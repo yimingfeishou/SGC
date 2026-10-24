@@ -1,0 +1,8 @@
+// lang__cast__error__006.glt
+// expect error ER 0032
+
+int main() {
+    int x = 1
+    cast<void>(x)
+    return 0
+}

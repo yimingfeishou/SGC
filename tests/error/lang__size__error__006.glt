@@ -1,0 +1,13 @@
+// lang__size__error__006.glt
+// expect error ER 0032
+
+generics Probe<T> {
+    int probe() {
+        return size(T)
+    }
+}
+
+int main() {
+    output(Probe<void>.probe())
+    return 0
+}

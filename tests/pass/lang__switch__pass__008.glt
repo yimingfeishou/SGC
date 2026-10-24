@@ -1,0 +1,21 @@
+// lang__switch__pass__008.glt
+// expect output
+// prexdeepafter
+
+int main() {
+    string a = "x"
+    switch (1) {
+        case (1) {
+            output("pre" + a)
+            {
+                string inner = "deep"
+                output(inner)
+                fallthrough
+            }
+            output("unreachable")
+        }
+        output("after")
+    }
+    output("\n")
+    return 0
+}

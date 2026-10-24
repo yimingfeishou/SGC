@@ -1,0 +1,18 @@
+// lang__generics__error__065.glt
+// expect error ER 0019
+
+generics Default<T, expr Make() -> T> {
+    T create() {
+        return Make()
+    }
+}
+
+generics Default<int, expr Make() -> int> {
+    int create() {
+        return 1
+    }
+}
+
+int main() {
+    return 0
+}

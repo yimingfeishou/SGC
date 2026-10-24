@@ -1,0 +1,15 @@
+// lang__emit__pass__003.glt
+// expect output
+// 456
+
+generics Emiter1<T: string, T N> {
+    emit {
+        T printer() {
+            return N
+        }
+    }
+}
+int main() {
+    output(Emiter1<string, "456">.printer())
+    return 0
+}

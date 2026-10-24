@@ -1,0 +1,14 @@
+// compiler__diagnostics__pass__005.glt
+// expect output
+
+generics G<T> {
+    emit {
+        int itn() {
+            return 1
+        }
+    }
+}
+
+int main() {
+    return 0
+}

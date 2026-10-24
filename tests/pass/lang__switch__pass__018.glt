@@ -1,0 +1,21 @@
+// lang__switch__pass__018.glt
+// expect output
+// b
+
+int counter = 0
+
+int nxt() {
+    counter = counter + 1
+    return counter
+}
+
+int main() {
+    switch (2) {
+        case (nxt()) {
+            output("a")
+        } case (nxt()) {
+            output("b")
+        }
+    }
+    return 0
+}

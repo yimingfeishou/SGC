@@ -1,0 +1,15 @@
+// ub__destruct__error__001.glt
+// expect exit nonzero
+
+struct Buffer {
+    int* data
+    destructor () {
+        data = null
+    }
+}
+int main() {
+    Buffer* p = construct Buffer()
+    destruct p
+    destruct p
+    return 0
+}

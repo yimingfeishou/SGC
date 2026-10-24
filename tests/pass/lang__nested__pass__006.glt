@@ -1,0 +1,22 @@
+// lang__nested__pass__006.glt
+// expect output
+// 7
+
+struct Inner {
+    int k
+    constructor (int v) {
+        k = v
+    }
+}
+struct Outer {
+    Inner inner
+    constructor (Inner i) {
+        inner = i
+    }
+}
+int main() {
+    Inner in = Inner(7)
+    Outer out = Outer(in)
+    output(out.inner.k)
+    return 0
+}

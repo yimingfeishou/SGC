@@ -1,0 +1,17 @@
+// lang__generics__error__043.glt
+// expect error ER 0101
+
+generics Source<T> {
+    T value
+}
+
+generics Bad<T> {
+    emit "struct Holder {\n"
+    emit "    Source<int> value\n"
+    emit "}\n"
+}
+
+int main() {
+    Bad<int>
+    return 0
+}

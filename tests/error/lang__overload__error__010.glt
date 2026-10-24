@@ -1,0 +1,9 @@
+// lang__overload__error__010.glt
+// expect error ER 0080
+
+int pick(int a, int b = 1) { return a + b }
+int pick(int a, double b = 1.0) { return a + cast<int>(b) }
+
+int main() {
+    return pick(1)
+}

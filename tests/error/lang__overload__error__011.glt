@@ -1,0 +1,13 @@
+// lang__overload__error__011.glt
+// expect error ER 0041
+
+int f(int a) {
+    return a
+}
+int f(double a) {
+    return 1
+}
+int main() {
+    int x = &f
+    return 0
+}

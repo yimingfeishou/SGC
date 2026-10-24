@@ -1,0 +1,17 @@
+// lang__construct__pass__018.glt
+// expect output
+// 1
+
+struct P {
+    int x
+    constructor () {
+        x = 1
+    }
+}
+
+int main() {
+    P* p = construct P()
+    output(p->x)
+    destruct p
+    return 0
+}

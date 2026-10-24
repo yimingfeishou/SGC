@@ -1,0 +1,6 @@
+// lang__function__pass__009.glt
+// expect output
+
+@cond DEBUG = 1
+
+int main() { return 0 }

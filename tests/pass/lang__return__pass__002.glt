@@ -1,0 +1,25 @@
+// lang__return__pass__002.glt
+// expect output
+// 7 9
+
+int choose(bool flag) {
+    if (flag) {
+        return 7 }
+    return 9 }
+
+void stop_now() {
+    return }
+
+void nested_stop(bool first) {
+    if (first) {
+        if (true) {
+            return }
+    }
+    return }
+
+int main() {
+    stop_now()
+    nested_stop(true)
+    nested_stop(false)
+    output(choose(true), " ", choose(false))
+    return 0 }

@@ -1,0 +1,5 @@
+// lang__fileseek__error__001.glt
+// expect error ER 0019
+
+int main() {
+    int x = 1 + \

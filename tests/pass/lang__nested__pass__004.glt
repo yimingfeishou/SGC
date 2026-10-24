@@ -1,0 +1,23 @@
+// lang__nested__pass__004.glt
+// expect output
+// 00 10 20 |3
+
+int main() {
+    for (int i = 0; i < 3; i++) {
+        for (int j = 0; j < 3; j++) {
+            if (j == 1) {
+                break
+            }
+            output(i, j, " ")
+        }
+    }
+    int k = 0
+    while (k < 5) {
+        k = k + 1
+        if (k == 3) {
+            break
+        }
+    }
+    output("|", k)
+    return 0
+}

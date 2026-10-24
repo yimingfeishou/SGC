@@ -1,0 +1,15 @@
+// compiler__diagnostics__pass__010.glt
+// expect output
+// 7
+
+guide "../support/work/recover_ident_gt_globals.glt"
+
+int bump() {
+    cost = cost + 2
+    return cost
+}
+
+int main() {
+    output(bump())
+    return 0
+}

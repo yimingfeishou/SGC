@@ -1,0 +1,17 @@
+// lang__namespace__pass__008.glt
+// expect output
+// 36
+
+namespace mathops {
+    int combine(int a, int b) {
+        return a + b
+    }
+    int combine(int a, int b, int c) {
+        return a + b + c
+    }
+}
+int main() {
+    output(mathops::combine(1, 2))
+    output(mathops::combine(1, 2, 3))
+    return 0
+}

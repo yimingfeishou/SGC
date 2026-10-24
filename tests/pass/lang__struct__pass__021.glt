@@ -1,0 +1,17 @@
+// lang__struct__pass__021.glt
+// expect output
+// 7
+
+struct Inner {
+    int k
+    constructor (int v) {
+        k = v
+    }
+}
+int use(Inner i) {
+    return i.k
+}
+int main() {
+    output(use(Inner(7)))
+    return 0
+}

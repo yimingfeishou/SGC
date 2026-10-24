@@ -1,0 +1,17 @@
+// lang__generics__error__049.glt
+// expect error ER 0011
+
+generics Box<T> {
+    struct Inner {
+        int k
+    }
+    struct Outer {
+        Inner inner
+    }
+}
+int main() {
+    Box<int>.Inner i = {7}
+    Box<int>.Outer* o = construct Box<int>.Outer(i)
+    output(o->inner.k)
+    return 0
+}

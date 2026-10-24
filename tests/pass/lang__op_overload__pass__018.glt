@@ -1,0 +1,24 @@
+// lang__op_overload__pass__018.glt
+// expect output
+// 2 12
+
+struct Counter {
+    int value
+}
+
+void operator ++ (Counter* c) {
+    c->value = c->value + 1
+}
+
+void operator ++ (Counter* c, string dummy) {
+    c->value = c->value + 10
+}
+
+int main() {
+    Counter c = {1}
+    ++c
+    output(c.value)
+    c++
+    output(" ", c.value)
+    return 0
+}

@@ -1,0 +1,18 @@
+// lang__generics__pass__006.glt
+// expect output
+// 10510
+
+generics Constants<T, int N> {
+    const T extent = N
+    const T twice = extent * 2
+}
+
+int table[Constants<int, 5>::twice]
+const int copied = Constants<int, 5>::extent
+
+int main() {
+    output(size(table) / size(table[0]))
+    output(copied)
+    output(Constants<int, 5>::twice)
+    return 0
+}

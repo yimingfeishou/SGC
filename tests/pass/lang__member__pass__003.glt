@@ -1,0 +1,49 @@
+// lang__member__pass__003.glt
+// expect output
+// 5123711
+
+generics EmitMembers<T> {
+    emit {
+        struct Pair {
+            T left
+            T right
+        }
+
+        const T base = 3
+
+        T add(T value) {
+            return value + base
+        }
+
+        struct Triple {
+            T value
+        }
+
+        Triple operator +(Triple left, Triple right) {
+            Triple result = {left.value + right.value}
+            return result
+        }
+
+        emit "T nested_emit() {\n"
+        emit "    return 11\n"
+        emit "}\n"
+    }
+
+    emit "T string_add(T value) {\n"
+    emit "    return value + base\n"
+    emit "}\n"
+}
+
+int main() {
+    EmitMembers<int>
+    Pair pair = {1, 2}
+    Triple first = {1}
+    Triple second = {2}
+    output(add(2))
+    output(pair.left)
+    output(pair.right)
+    output((first + second).value)
+    output(string_add(4))
+    output(nested_emit())
+    return 0
+}

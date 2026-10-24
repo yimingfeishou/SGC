@@ -1,0 +1,18 @@
+// lang__index_op__pass__001.glt
+// expect output
+// 789
+
+struct IntPtr {
+    int* p
+}
+
+int* operator [] (IntPtr* self, int i) {
+    return self->p + i
+}
+
+int main() {
+    int data[3] = {7, 8, 9}
+    IntPtr holder = {data}
+    output(*holder[0], *holder[1], *holder[2])
+    return 0
+}

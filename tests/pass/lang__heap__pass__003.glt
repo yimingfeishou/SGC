@@ -1,0 +1,21 @@
+// lang__heap__pass__003.glt
+// expect output
+// false true 7 3 1
+
+int main() {
+    int* zero = heap(int, 0)
+    output(zero == null)
+    int* one = heap(int)
+    output(" ", one != null)
+    *one = 7
+    output(" ", *one)
+    free(null)
+    free(one)
+    int* many = heap(int, 3)
+    many[0] = 1
+    many[1] = 2
+    many[2] = 3
+    output(" ", *(many + 2), " ", many[1] - many[0])
+    free(many)
+    return 0
+}

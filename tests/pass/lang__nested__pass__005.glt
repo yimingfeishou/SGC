@@ -1,0 +1,25 @@
+// lang__nested__pass__005.glt
+// expect output
+// true
+
+struct A {
+    int v
+}
+
+struct B {
+    int v
+}
+
+struct Box {
+    int x
+}
+
+bool is_open(A a) { return a.v != 0 }
+bool is_open(B b) { return b.v != 0 }
+int operator << (Box lhs, int rhs) { return lhs.x + rhs }
+
+int main() {
+    A a = {1}
+    output(!(!is_open(a)))
+    return 0
+}

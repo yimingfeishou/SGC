@@ -1,0 +1,10 @@
+// lang__op_overload__error__001.glt
+// expect error ER 0139
+
+int operator + (int... rest) {
+    return rest.length
+}
+
+int main() {
+    return 0
+}

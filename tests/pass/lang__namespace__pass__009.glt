@@ -1,0 +1,15 @@
+// lang__namespace__pass__009.glt
+// expect output
+// 1020.0
+
+namespace mynamespace {
+    int i = 10
+    namespace inner {
+        float f = 20.0
+    }
+}
+int main() {
+    output(mynamespace::i)
+    output(mynamespace::inner::f)
+    return 0
+}

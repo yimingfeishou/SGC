@@ -1,0 +1,15 @@
+// lang__generics__error__058.glt
+// expect error ER 0152
+
+int bump() {
+    return 1
+}
+
+generics Captured<T> {
+    const T value = bump()
+}
+
+int main() {
+    Captured<int>
+    return 0
+}

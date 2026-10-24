@@ -1,0 +1,31 @@
+// lang__namespace__pass__007.glt
+// expect output
+// 158
+
+namespace outer {
+    int base = 10
+
+    namespace inner {
+        int value = 5
+    }
+
+    int add(int a, int b) {
+        return a + b
+    }
+}
+
+namespace ops {
+    int twice(int x) {
+        return x * 2
+    }
+}
+
+access namespace outer
+
+int main() {
+    int total = outer::add(base, outer::inner::value)
+    output(total)
+    int pick(int)* = &ops::twice
+    output(pick(4))
+    return 0
+}

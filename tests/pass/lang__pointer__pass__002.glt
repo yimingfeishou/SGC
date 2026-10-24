@@ -1,0 +1,11 @@
+// lang__pointer__pass__002.glt
+// expect output
+// 7
+
+int main() {
+    int x = 7
+    void* v = &x
+    int* back = cast<int*>(v)
+    output(*back)
+    return 0
+}

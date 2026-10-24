@@ -1,0 +1,10 @@
+// compiler__continuation__pass__002.glt
+// expect output
+// Hello World!
+
+int main() {
+    string s = "Hello \
+World!"
+    output(s, "\n")
+    return 0
+}
