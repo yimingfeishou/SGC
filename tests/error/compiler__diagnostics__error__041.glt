@@ -1,0 +1,9 @@
+// compiler__diagnostics__error__041.glt
+// expect error ER 0019
+
+int main() {
+    itn a = 1
+    a = a + 1
+    output(a)
+    return 0
+}

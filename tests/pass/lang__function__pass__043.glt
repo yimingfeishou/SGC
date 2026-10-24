@@ -1,0 +1,19 @@
+// lang__function__pass__043.glt
+// expect output
+// 42
+
+struct IntPtr {
+    int* p
+}
+
+int* operator [] (IntPtr* self, int i) {
+    return self->p + i
+}
+
+int main() {
+    int x = 42
+    IntPtr holder = {&x}
+    int* q = holder[0]
+    output(*q)
+    return 0
+}

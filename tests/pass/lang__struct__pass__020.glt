@@ -1,0 +1,38 @@
+// lang__struct__pass__020.glt
+// expect output
+// 6 7
+
+struct A {
+    int v
+}
+
+struct B {
+    int v
+}
+
+struct R {
+    int r
+}
+
+struct Box {
+    int x
+}
+
+R total(A a) {
+    R r = {a.v + 1}
+    return r
+}
+
+R total(B b) {
+    R r = {b.v + 2}
+    return r
+}
+
+int operator << (Box lhs, int rhs) { return lhs.x + rhs }
+
+int main() {
+    A a = {5}
+    B b = {5}
+    output(total(a).r, " ", total(b).r)
+    return 0
+}

@@ -1,0 +1,16 @@
+// lang__member__error__007.glt
+// expect error ER 0095
+
+namespace ns {
+    struct Box {
+        int v
+    }
+
+    ns::Missing helper(ns::Missing m) {
+        return m
+    }
+}
+
+int main() {
+    return 0
+}

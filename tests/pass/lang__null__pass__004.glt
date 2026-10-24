@@ -1,0 +1,8 @@
+// lang__null__pass__004.glt
+// expect output
+// 8 8
+
+int main() {
+    output(size(null), " ", align(null))
+    return 0
+}

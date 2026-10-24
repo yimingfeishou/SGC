@@ -1,0 +1,30 @@
+// lang__addition__pass__004.glt
+// expect output
+// 3 4
+
+namespace ns {
+    struct A {
+        int x
+    }
+}
+
+addition namespace ns {
+    A operator + (A a, A b) {
+        A r = {a.x + b.x}
+        return r
+    }
+
+    A operator + (A a, int b) {
+        A r = {a.x + b}
+        return r
+    }
+}
+
+int main() {
+    ns::A a = {1}
+    ns::A b = {2}
+    ns::A c = a + b
+    ns::A d = a + 3
+    output(c.x, " ", d.x)
+    return 0
+}

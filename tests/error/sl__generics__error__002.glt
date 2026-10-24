@@ -1,0 +1,43 @@
+// sl__generics__error__002.glt
+// expect error ER 0069
+
+guide "generics.glt"
+access namespace sl
+
+generics probe_generic<T: int | lint | uint | luint | float | double | char | uchar | bool | string> {
+    bool __value_equals(T a, T b) {
+        const if (T.is_string == true) {
+            return strcompare(a, b) == 0
+        } const else {
+            return a == b
+        }
+    }
+
+    bool probe(T a, T b) {
+        return __value_equals(a, b)
+    }
+
+    T probe_zero() {
+        T dummy
+        const if (T.is_string == true) {
+            dummy = ""
+        } const else {
+            const if (T.is_bool == true) {
+                dummy = false
+            } const else {
+                dummy = 0
+            }
+        }
+        return dummy
+    }
+}
+
+int main() {
+    probe_generic<int>
+    output(probe(1, 1), " ", probe(1, 2), " ", probe_zero(), " ")
+    probe_generic<string>
+    output(probe("a", "a"), " ", probe("a", "b"), " [", probe_zero(), "] ")
+    probe_generic<bool>
+    output(probe(true, true), " ", probe(true, false), " ", probe_zero())
+    return 0
+}

@@ -1,0 +1,20 @@
+// lang__pointer__pass__010.glt
+// expect output
+// 8 10
+
+int add(int a, int b) {
+    return a + b
+}
+
+int p(int a, int b)* = &add
+
+void apply(int a, int b, int fn(int, int)*) {
+    output(fn(a, b))
+}
+
+int main() {
+    output(p(3, 5))
+    output(" ")
+    apply(4, 6, &add)
+    return 0
+}

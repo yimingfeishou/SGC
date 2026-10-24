@@ -1,0 +1,10 @@
+// lang__function__pass__014.glt
+// expect output
+// 1
+
+int main() {
+    int zero = 0
+    int a = 1 / zero
+    output(a)
+    return 0
+}

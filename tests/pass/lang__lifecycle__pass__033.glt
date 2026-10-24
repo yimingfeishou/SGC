@@ -1,0 +1,111 @@
+// lang__lifecycle__pass__033.glt
+// expect output
+// Buffer allocated, size=4
+// Buffer copied
+// 1
+// Buffer moved
+// 1
+// true
+// Buffer allocated, size=1
+// Buffer copy assigned
+// Buffer move assigned
+// Buffer freed
+// Buffer freed
+
+struct Buffer {
+    int* data
+    int size
+
+    constructor (int sz) {
+        size = sz
+        data = heap(int, sz)
+        output("Buffer allocated, size=", sz, "\n")
+    }
+
+    destructor () {
+        if (data != null) {
+            free(data)
+            data = null
+            output("Buffer freed\n")
+        }
+    }
+
+    copy_constructor (Buffer* other) {
+        size = other->size
+        data = heap(int, size)
+
+        for (int i = 0; i < size; i++) {
+            data[i] = other->data[i]
+        }
+
+        output("Buffer copied\n")
+    }
+
+    move_constructor (Buffer* other) {
+        data = other->data
+        size = other->size
+
+        other->data = null
+        other->size = 0
+
+        output("Buffer moved\n")
+    }
+
+    copy_assignment (Buffer* other) {
+        if (other->data == data) {
+            return
+        }
+
+        if (data != null) {
+            free(data)
+        }
+
+        size = other->size
+        data = heap(int, size)
+
+        for (int i = 0; i < size; i++) {
+            data[i] = other->data[i]
+        }
+
+        output("Buffer copy assigned\n")
+    }
+
+    move_assignment (Buffer* other) {
+        if (other->data == data) {
+            return
+        }
+
+        if (data != null) {
+            free(data)
+        }
+
+        data = other->data
+        size = other->size
+
+        other->data = null
+        other->size = 0
+
+        output("Buffer move assigned\n")
+    }
+}
+
+int main() {
+    Buffer buf1 = Buffer(4)
+    buf1.data[0] = 1
+    buf1.data[1] = 2
+    buf1.data[2] = 3
+    buf1.data[3] = 4
+
+    Buffer buf2 = copy(buf1)
+    output(buf2.data[0], "\n")
+
+    Buffer buf3 = move(buf1)
+    output(buf3.data[0], "\n")
+    output(buf1.data == null, "\n")
+
+    Buffer buf4 = Buffer(1)
+    buf4 = buf2
+    buf4 = move(buf3)
+
+    return 0
+}

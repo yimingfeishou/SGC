@@ -1,0 +1,7 @@
+// lang__redeclare__error__008.glt
+// expect error ER 0019
+
+int main() {
+    int a = 1
+    return return 0
+}

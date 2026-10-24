@@ -1,0 +1,28 @@
+// lang__pointer__pass__009.glt
+// expect output
+// 1 7
+
+namespace ns {
+    struct Point {
+        int x
+    }
+}
+
+generics Box<T> {
+    struct Box {
+        T value
+    }
+}
+
+int main() {
+    ns::Point p = {1}
+    void* raw = cast<void*>(&p)
+    ns::Point* back = cast<ns::Point*>(raw)
+
+    Box<int>.Box b = {7}
+    void* raw_box = cast<void*>(&b)
+    Box<int>.Box* back_box = cast<Box<int>.Box*>(raw_box)
+
+    output(back->x, " ", back_box->value)
+    return 0
+}

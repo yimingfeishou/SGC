@@ -1,0 +1,10 @@
+// lang__function__pass__037.glt
+// expect output
+// 4705032704
+
+lint wide = 5000000000
+int main() {
+    lint c = wide + 4000000000
+    output(c, "\n")
+    return 0
+}

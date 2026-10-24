@@ -1,0 +1,9 @@
+// lang__const__error__003.glt
+// expect error ER 0025
+
+int main() {
+    const else {
+        output("x")
+    }
+    return 0
+}

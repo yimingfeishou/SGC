@@ -1,0 +1,10 @@
+// lang__array__error__013.glt
+// expect error ER 0019
+
+int main() {
+    int a[] = {
+        1, 2, 3
+    }
+    output(a[2])
+    return 0
+}

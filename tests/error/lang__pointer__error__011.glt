@@ -1,0 +1,16 @@
+// lang__pointer__error__011.glt
+// expect error ER 0019
+
+void* raw = null
+
+int main() {
+    int x = 1
+    int* p = &x
+    int* q = p + 2
+    output(q - p)
+    output(" ", p == q, " ", p != null)
+    output("\n", int(*p), " ", int(x))
+    int* r = null
+    output(" ", r == null)
+    return 0
+}

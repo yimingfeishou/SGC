@@ -1,0 +1,22 @@
+// lang__lifecycle__pass__013.glt
+// expect output
+// 6 5 3 4
+
+int scale = 5
+
+int compute(int factor, int value) {
+    factor * (value + 1)
+    return factor * value
+}
+
+int main() {
+    int a = 3
+    int b = 4
+    a * (b + 1)
+    a * b
+    a ** 2
+    scale * (compute(2, 3))
+    compute(2, 3) * (a + b)
+    output(compute(2, 3), " ", scale, " ", a, " ", b)
+    return 0
+}

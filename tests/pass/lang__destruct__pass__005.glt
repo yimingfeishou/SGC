@@ -1,0 +1,16 @@
+// lang__destruct__pass__005.glt
+// expect output
+// abc3 done
+
+struct Holder {
+    string text
+    int code
+}
+
+int main() {
+    Holder h = {"abc", 3}
+    output(h.text, h.code, " ")
+    h.destructor()
+    output("done")
+    return 0
+}

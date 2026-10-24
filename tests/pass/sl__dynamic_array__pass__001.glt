@@ -1,0 +1,124 @@
+// sl__dynamic_array__pass__001.glt
+// expect output
+// stdlib_dynamic_array_algo: ok (47 checks)
+
+guide "generics.glt"
+access namespace sl
+
+int checks = 0
+int failures = 0
+
+void check(bool condition, string label) {
+    if (condition) {
+        checks = checks + 1
+        return
+    }
+    output("FAIL: ", label, "\n")
+    failures = failures + 1
+}
+
+int main() {
+    dynamic_array_generic<string>
+    dynamic_array names = dynamic_array(2)
+    push(&names, "alpha")
+    push(&names, "beta")
+    push(&names, "gamma")
+
+    check(contains(&names, "beta"), "contains string found")
+    check(contains(&names, "delta") == false, "contains string missing")
+    check(index_of(&names, "gamma") == 2, "index_of string")
+    check(index_of(&names, "delta") == -1, "index_of string missing")
+    check(contains(&names, "ALPHA") == false, "contains is case sensitive")
+
+    reverse(&names)
+    check(strcompare(get(&names, 0), "gamma") == 0, "reverse first")
+    check(strcompare(get(&names, 2), "alpha") == 0, "reverse last")
+
+    fill(&names, "x")
+    check(strcompare(get(&names, 0), "x") == 0 && strcompare(get(&names, 2), "x") == 0, "fill string")
+
+    dynamic_array empty_names = dynamic_array(1)
+    check(contains(&empty_names, "x") == false, "contains empty array")
+    check(index_of(&empty_names, "x") == -1, "index_of empty array")
+    reverse(&empty_names)
+    fill(&empty_names, "y")
+    check(length(&empty_names) == 0, "empty array algorithms safe")
+
+    dynamic_array tail = dynamic_array(2)
+    push(&tail, "p")
+    push(&tail, "q")
+    check(append_array(&names, &tail), "append_array success")
+    check(length(&names) == 5, "append_array length")
+    check(strcompare(get(&names, 3), "p") == 0 && strcompare(get(&names, 4), "q") == 0, "append_array content")
+    check(append_array(&names, null) == false, "append_array null other")
+    check(append_array(null, &tail) == false, "append_array null arr")
+
+    dynamic_array empty_tail = dynamic_array(1)
+    check(append_array(&names, &empty_tail), "append_array empty other")
+    check(length(&names) == 5, "append_array empty keeps size")
+
+    dynamic_array self = dynamic_array(2)
+    push(&self, "a")
+    push(&self, "b")
+    check(append_array(&self, &self), "append_array self")
+    check(length(&self) == 4, "append_array self length")
+    check(strcompare(get(&self, 0), "a") == 0 && strcompare(get(&self, 3), "b") == 0, "append_array self content")
+
+    dynamic_array target = dynamic_array(1)
+    check(copy_to(&target, &tail), "copy_to success")
+    check(length(&target) == 2, "copy_to length")
+    check(strcompare(get(&target, 0), "p") == 0 && strcompare(get(&target, 1), "q") == 0, "copy_to content")
+    check(copy_to(null, &tail) == false, "copy_to null dst")
+    check(copy_to(&target, null) == false, "copy_to null src")
+    check(copy_to(&target, &target), "copy_to self")
+    check(length(&target) == 2, "copy_to self keeps size")
+
+    dynamic_array shrunk = dynamic_array(4)
+    push(&shrunk, "1")
+    push(&shrunk, "2")
+    push(&shrunk, "3")
+    push(&shrunk, "4")
+    check(copy_to(&shrunk, &tail), "copy_to shrink")
+    check(length(&shrunk) == 2 && strcompare(get(&shrunk, 1), "q") == 0, "copy_to shrink content")
+
+    dynamic_array* missing = null
+    check(contains(missing, "x") == false, "contains null array")
+    check(index_of(missing, "x") == -1, "index_of null array")
+    reverse(missing)
+    fill(missing, "x")
+    check(true, "null array algorithms safe")
+
+    dynamic_array_generic<int>.dynamic_array nums = dynamic_array_generic<int>.dynamic_array(2)
+    dynamic_array_generic<int>.push(&nums, 10)
+    dynamic_array_generic<int>.push(&nums, 20)
+    dynamic_array_generic<int>.push(&nums, 30)
+    check(dynamic_array_generic<int>.contains(&nums, 20), "contains int found")
+    check(dynamic_array_generic<int>.contains(&nums, 99) == false, "contains int missing")
+    check(dynamic_array_generic<int>.index_of(&nums, 30) == 2, "index_of int")
+    check(dynamic_array_generic<int>.index_of(&nums, 99) == -1, "index_of int missing")
+    dynamic_array_generic<int>.reverse(&nums)
+    check(dynamic_array_generic<int>.get(&nums, 0) == 30 && dynamic_array_generic<int>.get(&nums, 2) == 10, "reverse int")
+    dynamic_array_generic<int>.fill(&nums, 7)
+    check(dynamic_array_generic<int>.get(&nums, 1) == 7, "fill int")
+
+    dynamic_array_generic<int>.dynamic_array extra = dynamic_array_generic<int>.dynamic_array(1)
+    dynamic_array_generic<int>.push(&extra, 5)
+    check(dynamic_array_generic<int>.append_array(&nums, &extra), "append int")
+    check(dynamic_array_generic<int>.length(&nums) == 4, "append int length")
+    check(dynamic_array_generic<int>.copy_to(&extra, &nums), "copy_to int")
+    check(dynamic_array_generic<int>.length(&extra) == 4, "copy_to int length")
+
+    dynamic_array_generic<bool>.dynamic_array flags = dynamic_array_generic<bool>.dynamic_array(2)
+    dynamic_array_generic<bool>.push(&flags, true)
+    dynamic_array_generic<bool>.push(&flags, false)
+    check(dynamic_array_generic<bool>.contains(&flags, true), "contains bool true")
+    check(dynamic_array_generic<bool>.contains(&flags, false), "contains bool false")
+    check(dynamic_array_generic<bool>.index_of(&flags, false) == 1, "index_of bool")
+    dynamic_array_generic<bool>.fill(&flags, true)
+    check(dynamic_array_generic<bool>.get(&flags, 1), "fill bool")
+
+    if (failures == 0) {
+        output("stdlib_dynamic_array_algo: ok (", checks, " checks)\n")
+    }
+    return failures
+}

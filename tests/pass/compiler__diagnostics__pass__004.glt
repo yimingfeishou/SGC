@@ -1,0 +1,10 @@
+// compiler__diagnostics__pass__004.glt
+// expect output
+// 2
+
+int main() {
+    int whil = 1
+    whil = whil + 1
+    output(whil)
+    return 0
+}

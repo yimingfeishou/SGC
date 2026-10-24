@@ -1,0 +1,23 @@
+// lang__generics__error__052.glt
+// expect error ER 0019
+
+int counter = 0
+
+int bump() {
+    counter++
+    return 3
+}
+
+generics G<T, expr F(int) -> int> {
+    int run() {
+        return F(bump())
+    }
+}
+
+int main() {
+    int r = G<int, expr F(int x) -> int {
+        return x + x
+    }>.run()
+    output(r, " counter=", counter, "\n")
+    return 0
+}

@@ -1,0 +1,15 @@
+// lang__struct__error__013.glt
+// expect error ER 0011
+
+struct Inner {
+    int k
+}
+struct Outer {
+    Inner inner
+}
+int main() {
+    Inner i = {7}
+    Outer* o = construct Outer(i)
+    output(o->inner.k)
+    return 0
+}

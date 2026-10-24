@@ -1,0 +1,21 @@
+// lang__const__pass__027.glt
+// expect output
+// 8
+
+generics Inner<U, string tag> {
+    int probe() { return size(U) }
+}
+
+generics Outer<T, string member> {
+    int go() {
+        return Inner<T, member>.probe()
+    }
+}
+
+struct S { lint wide }
+
+int main() {
+    Outer<S, "x">
+    output(go(), "\n")
+    return 0
+}

@@ -1,0 +1,39 @@
+// lang__type__pass__002.glt
+// expect output
+// char=1/1 uchar=1/1
+// int=4/4 lint=8/8
+// luint=8/8 float=4/4
+// double=8/8 string=32/8
+// Mixed=24/8 FD=16/8
+// sizeof int=4
+
+struct Mixed {
+    bool b
+    double d
+    char c
+}
+
+struct FD {
+    float f
+    double d
+}
+
+int main() {
+    int i = 0
+    char ch = 'a'
+    uchar u = 1
+    lint l = 1l
+    luint lu = 1lu
+    float f = 1.0f
+    double d = 1.0
+    string s = "x"
+    Mixed m
+    FD fd
+    output("char=", size(ch), "/", align(ch), " uchar=", size(u), "/", align(u), "\n")
+    output("int=", size(i), "/", align(i), " lint=", size(l), "/", align(l), "\n")
+    output("luint=", size(lu), "/", align(lu), " float=", size(f), "/", align(f), "\n")
+    output("double=", size(d), "/", align(d), " string=", size(s), "/", align(s), "\n")
+    output("Mixed=", size(m), "/", align(m), " FD=", size(fd), "/", align(fd), "\n")
+    output("sizeof int=", size(1), "\n")
+    return 0
+}

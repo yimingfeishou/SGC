@@ -1,0 +1,9 @@
+// lang__const__pass__032.glt
+// expect output
+// 456
+
+const int k = 456
+int main() {
+    output(k, "\n")
+    return 0
+}

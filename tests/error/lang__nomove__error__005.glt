@@ -1,0 +1,12 @@
+// lang__nomove__error__005.glt
+// expect error ER 0087
+
+[nomove] struct Fixed {
+    int value
+    move_constructor (Fixed* other) {
+        value = other->value
+    }
+}
+int main() {
+    return 0
+}

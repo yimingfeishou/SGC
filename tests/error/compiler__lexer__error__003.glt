@@ -1,0 +1,7 @@
+// compiler__lexer__error__003.glt
+// expect error ER 0022
+
+int main() {
+    char c = ''
+    return 0
+}

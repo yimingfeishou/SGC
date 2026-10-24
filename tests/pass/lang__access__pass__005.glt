@@ -1,0 +1,20 @@
+// lang__access__pass__005.glt
+// expect output
+
+namespace ns {}
+
+addition namespace ns {
+    int add(int a, int b) { // 期望：编译通过，实际：ER 0114: member 'add' merged by addition namespace conflicts with an existing declaration
+        return a + b
+    }
+
+    double add(double a, double b) {
+        return a + b
+    }
+}
+
+int main() {
+    ns::add(2, 3)
+    ns::add(3.1, 4.1)
+    return 0
+}

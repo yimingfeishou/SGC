@@ -1,0 +1,11 @@
+// lang__function__pass__040.glt
+// expect output
+// x
+
+@if (!is_defined("DEBUG")) {
+    @cond DEBUG = 1
+}
+int main() {
+    output("x\n")
+    return 0
+}

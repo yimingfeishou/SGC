@@ -1,0 +1,22 @@
+// lang__lifecycle__pass__008.glt
+// expect output
+// 102000
+
+struct Point {
+    int x
+    int y
+    constructor (int ix, int iy) {
+        x = ix
+        y = iy
+    }
+    constructor () {
+        x = 0
+        y = 0
+    }
+}
+int main() {
+    Point p1 = Point(10, 20)
+    Point p2 = Point()
+    output(p1.x, p1.y, p2.x, p2.y)
+    return 0
+}

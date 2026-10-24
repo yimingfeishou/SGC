@@ -1,0 +1,12 @@
+// lang__operator__error__003.glt
+// expect error ER 0004
+
+void report() {
+    return
+}
+
+int main() {
+    int value = 1
+    int r = (value > 0) ? 2 : report()
+    return r
+}

@@ -1,0 +1,30 @@
+// lang__generics__pass__019.glt
+// expect output
+// truetruetruefalsefalse
+
+generics ConvertProbe<T> {
+    bool to_int() {
+        return T.is_convertible<int>
+    }
+
+    bool to_long() {
+        return T.is_convertible<lint>
+    }
+
+    bool to_pointer() {
+        return T.is_convertible<int*>
+    }
+}
+
+struct Node {
+    int value
+}
+
+int main() {
+    output(ConvertProbe<lint>.to_int())
+    output(ConvertProbe<uint>.to_long())
+    output(ConvertProbe<double>.to_int())
+    output(ConvertProbe<int>.to_pointer())
+    output(ConvertProbe<Node>.to_int())
+    return 0
+}

@@ -1,0 +1,19 @@
+// lang__return__pass__004.glt
+// expect output
+// 3
+
+struct P {
+    int x
+}
+
+P make(int v) {
+    P r
+    r.x = v
+    return r
+}
+
+int main() {
+    P p = make(3)
+    output(p.x)
+    return 0
+}

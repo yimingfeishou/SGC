@@ -1,0 +1,72 @@
+// sl__str_func__pass__001.glt
+// expect output
+// ab 2
+// ababab 6
+// xxxxxxxxxxxxxxxxx 17
+// 99 true true
+// 200 true
+// 00007|70000|
+// ****
+// already wide
+// t32 ok
+
+// t32: sl::string_repeat / string_pad_left / string_pad_right boundary behaviour
+// Guards the doubling construction of string_repeat: count 0, 1, interior,
+// empty source, lengths crossing the inline/heap buffer boundary, and padding.
+guide "common.glt"
+
+int main() {
+    string zero = sl::string_repeat("ab", 0)
+    bool ok = strlen(zero) == 0
+
+    string one = sl::string_repeat("ab", 1)
+    output(one, " ", strlen(one), "\n")
+    ok = ok && (strlen(one) == 2)
+
+    string three = sl::string_repeat("ab", 3)
+    output(three, " ", strlen(three), "\n")
+    ok = ok && (strlen(three) == 6)
+    ok = ok && (strcharat(three, 0) == 'a')
+    ok = ok && (strcharat(three, 5) == 'b')
+
+    string empty = sl::string_repeat("", 5)
+    ok = ok && (strlen(empty) == 0)
+
+    string single = sl::string_repeat("x", 17)
+    output(single, " ", strlen(single), "\n")
+    ok = ok && (strlen(single) == 17)
+
+    string triple = sl::string_repeat("abc", 33)
+    output(strlen(triple), " ", strcharat(triple, 0) == 'a', " ", strcharat(triple, 32) == 'c', "\n")
+    ok = ok && (strlen(triple) == 99)
+    ok = ok && (strcharat(triple, 0) == 'a')
+    ok = ok && (strcharat(triple, 32) == 'c')
+
+    string long_value = sl::string_repeat("0123456789", 20)
+    output(strlen(long_value), " ", strcharat(long_value, 199) == '9', "\n")
+    ok = ok && (strlen(long_value) == 200)
+    ok = ok && (strcharat(long_value, 199) == '9')
+
+    string left = sl::string_pad_left("7", 5, '0')
+    string right = sl::string_pad_right("7", 5, '0')
+    output(left, "|", right, "|\n")
+    ok = ok && (strlen(left) == 5)
+    ok = ok && (strlen(right) == 5)
+    ok = ok && (strcharat(left, 4) == '7')
+    ok = ok && (strcharat(right, 0) == '7')
+
+    string padded_empty = sl::string_pad_left("", 4, '*')
+    output(padded_empty, "\n")
+    ok = ok && (strlen(padded_empty) == 4)
+
+    string unchanged = sl::string_pad_left("already wide", 4, '0')
+    output(unchanged, "\n")
+    ok = ok && (strlen(unchanged) == 12)
+
+    if (ok) {
+        output("t32 ok\n")
+    } else {
+        output("t32 fail\n")
+    }
+    return 0
+}

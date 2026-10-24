@@ -1,0 +1,35 @@
+// lang__array__error__008.glt
+// expect error ER 0019
+
+generics Grid<T, U> {
+    struct Grid {
+        int marker
+    }
+    int tag() {
+        return 0
+    }
+}
+
+generics Grid<int[3], int> {
+    struct Grid {
+        int marker
+    }
+    int tag() {
+        return 1
+    }
+}
+
+generics Grid<int[], U> {
+    struct Grid {
+        int marker
+    }
+    int tag() {
+        return 2
+    }
+}
+
+int main() {
+    Grid<int[3], int>.Grid g
+    output(Grid<int[3], int>.tag())
+    return 0
+}

@@ -1,0 +1,8 @@
+// lang__const_fn__error__001.glt
+// expect error ER 0148
+
+const int f(int x) {
+    output(x)
+    return x
+}
+int main() { return 0 }

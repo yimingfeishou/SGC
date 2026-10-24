@@ -1,0 +1,23 @@
+// lang__const__pass__013.glt
+// expect output
+// 7
+
+generics Inner<U, string tag> {
+    emit "int probe_" + tag + "() {\n"
+    emit "    return 7\n"
+    emit "}\n"
+}
+
+generics Outer<T, string member> {
+    int go() {
+        return Inner<T, member>.probe_x()
+    }
+}
+
+struct S { int x }
+
+int main() {
+    Outer<S, "x">
+    output(go(), "\n")
+    return 0
+}

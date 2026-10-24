@@ -1,0 +1,13 @@
+// lang__struct__error__014.glt
+// expect error ER 0019
+
+struct S {
+    int a
+}
+int main() {
+    S s = {4}
+    void* raw = void*(&s)
+    S* back = S*(raw)
+    output(back->a)
+    return 0
+}

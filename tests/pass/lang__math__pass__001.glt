@@ -1,0 +1,15 @@
+// lang__math__pass__001.glt
+// expect output
+// 3.5
+// 0.5
+
+const double average(double a, double b) {
+    return (a + b) / 2.0
+}
+const double avg = average(3.0, 4.0)
+const float half = 0.5f
+int main() {
+    output(avg, "\n")
+    output(half, "\n")
+    return 0
+}

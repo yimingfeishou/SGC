@@ -1,0 +1,17 @@
+// lang__size__error__005.glt
+// expect error ER 0105
+
+generics Sized<T, int N> {
+    int probe() {
+        const if (size(N) == 4) {
+            return 1
+        } const else {
+            return 0
+        }
+    }
+}
+
+int main() {
+    output(Sized<int, 4>.probe())
+    return 0
+}

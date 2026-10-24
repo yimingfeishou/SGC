@@ -1,0 +1,20 @@
+// lang__nocopy__pass__002.glt
+// expect output
+// 5
+
+[nocopy] struct C {
+    int x
+}
+
+C make_c(int v) {
+    C r
+    r.x = v
+    return move(r)
+}
+
+int main() {
+    C a
+    a = make_c(5)
+    output(a.x)
+    return 0
+}

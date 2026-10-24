@@ -1,0 +1,7 @@
+// lang__array__error__004.glt
+// expect error ER 0015
+
+int main() {
+    int a[2] = {1, 2, 3}
+    return 0
+}

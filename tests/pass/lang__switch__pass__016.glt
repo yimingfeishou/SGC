@@ -1,0 +1,15 @@
+// lang__switch__pass__016.glt
+// expect output
+// done
+
+int main() {
+    switch (9) {
+        case (1) {
+            output("one")
+        } case (2) {
+            output("two")
+        }
+    }
+    output("done")
+    return 0
+}

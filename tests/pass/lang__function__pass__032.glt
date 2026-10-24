@@ -1,0 +1,18 @@
+// lang__function__pass__032.glt
+// expect output
+// 10000000000
+// 1
+
+const lint big(lint a, lint b) {
+    return a * b
+}
+const luint mask(luint v) {
+    return v & 255lu
+}
+const lint p = big(100000, 100000)
+const luint m = mask(4097lu)
+int main() {
+    output(p, "\n")
+    output(m, "\n")
+    return 0
+}

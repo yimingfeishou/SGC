@@ -1,0 +1,12 @@
+// lang__generics__error__011.glt
+// expect error ER 0135
+
+void bad(int... rest) {
+    int copied = rest...
+    output(copied)
+}
+
+int main() {
+    bad(1, 2)
+    return 0
+}

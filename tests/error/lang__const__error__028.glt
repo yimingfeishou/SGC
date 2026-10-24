@@ -1,0 +1,10 @@
+// lang__const__error__028.glt
+// expect error ER 0146
+
+const int deref(int* p) {
+    return 0
+}
+
+int main() {
+    return 0
+}

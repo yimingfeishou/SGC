@@ -1,0 +1,12 @@
+// lang__struct__error__018.glt
+// expect error ER 0019
+
+struct P {
+    int x
+    int y
+}
+int main() {
+    P p = {1, 2,}
+    output(p.y)
+    return 0
+}

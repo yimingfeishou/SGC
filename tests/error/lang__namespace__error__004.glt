@@ -1,0 +1,10 @@
+// lang__namespace__error__004.glt
+// expect error ER 0095
+
+namespace ns {
+    int i = 1
+}
+int main() {
+    output(ns::missing)
+    return 0
+}

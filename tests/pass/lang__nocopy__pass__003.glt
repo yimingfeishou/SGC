@@ -1,0 +1,12 @@
+// lang__nocopy__pass__003.glt
+// expect output
+// m
+
+[nocopy] struct C {
+    int x
+}
+
+int main() {
+    output("m")
+    return 0
+}

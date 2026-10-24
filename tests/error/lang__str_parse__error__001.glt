@@ -1,0 +1,9 @@
+// lang__str_parse__error__001.glt
+// expect error ER 0003
+
+int main() {
+    char text[4] = "abc"
+    string s = text
+    output(s, "\n")
+    return 0
+}

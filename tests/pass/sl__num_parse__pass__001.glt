@@ -1,0 +1,43 @@
+// sl__num_parse__pass__001.glt
+// expect output
+// true -42 false -42 false -42 false -42 true -2147483648 true 7 | true 9223372036854775807 true -9223372036854775808 false -9223372036854775808 | true 4294967295 false 4294967295 | true 18446744073709551615 false 18446744073709551615 | true -3.25 true 1500.0 true 0.02 false 0.02 | -2147483648 -9223372036854775807 4294967295 18446744073709551615 3.14 2.500000 -0.2500 true false | 
+
+guide "common.glt"
+access namespace sl
+
+int main() {
+    int i = 0
+    bool ok = parse_int("  -42  ", &i)
+    output(ok, " ", i, " ")
+    output(parse_int("12abc", &i), " ", i, " ")
+    output(parse_int("", &i), " ", i, " ")
+    output(parse_int("2147483648", &i), " ", i, " ")
+    output(parse_int("-2147483648", &i), " ", i, " ")
+    output(parse_int("+7", &i), " ", i, " | ")
+
+    lint l = 0l
+    output(parse_lint("9223372036854775807", &l), " ", l, " ")
+    output(parse_lint("-9223372036854775808", &l), " ", l, " ")
+    output(parse_lint("9223372036854775808", &l), " ", l, " | ")
+
+    uint u = 0u
+    output(parse_uint("4294967295", &u), " ", u, " ")
+    output(parse_uint("-1", &u), " ", u, " | ")
+
+    luint lu = 0lu
+    output(parse_luint("18446744073709551615", &lu), " ", lu, " ")
+    output(parse_luint("18446744073709551616", &lu), " ", lu, " | ")
+
+    double d = 0.0
+    output(parse_double(" -3.25 ", &d), " ", d, " ")
+    output(parse_double("1.5e3", &d), " ", d, " ")
+    output(parse_double("2E-2", &d), " ", d, " ")
+    output(parse_double("abc", &d), " ", d, " | ")
+
+    output(int_to_string(-2147483648), " ", lint_to_string(-9223372036854775807l), " ")
+    output(uint_to_string(4294967295u), " ", luint_to_string(18446744073709551615lu), " ")
+    output(double_to_string(3.14159, 2), " ", double_to_string(2.5), " ", double_to_string(-0.25, 4), " ")
+    output(bool_to_string(true), " ", bool_to_string(false), " | ")
+
+    return 0
+}

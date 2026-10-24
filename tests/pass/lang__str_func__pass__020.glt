@@ -1,0 +1,56 @@
+// lang__str_func__pass__020.glt
+// expect output
+// strlen: 5 0 6
+// concat: [hello world][][0123456789abcdefghijXYZ]
+// copy: [value][value!]
+// move: [payload][][0]
+// compare: -1 0 1 1 -1
+// contains: true false true
+// substr: [ell][hel][][][hello][lo]
+// find: 2 -1 0
+// replace: [a+b+c][][s]
+// case: [GALLT 26][gallt 26]
+// trim: [text][x][]
+// charat: c t true true
+// setchar: true [bat] false
+// splitcount: 3 1 1
+// splitget: [a][b][c][]
+// splitget2: [][b]
+// doc: 3|Standard|Gallt | Standard | Compiler|COMPILER|6
+// strwrite ok
+
+int main() {
+    output("strlen: ", strlen("hello"), " ", strlen(""), " ", strlen("\xe4\xb8\xad\xe6\x96\x87"), "\n")
+    output("concat: [", strconcat("hello", " world"), "][", strconcat("", ""), "][", strconcat("0123456789abcdefghij", "XYZ"), "]\n")
+
+    string a = "value"
+    string b = strcopy(a)
+    b = strconcat(b, "!")
+    output("copy: [", a, "][", b, "]\n")
+
+    string source = "payload"
+    string moved = strmove(source)
+    output("move: [", moved, "][", source, "][", strlen(source), "]\n")
+
+    output("compare: ", strcompare("abc", "abd"), " ", strcompare("abc", "abc"), " ", strcompare("abd", "abc"), " ", strcompare("abc", "ab"), " ", strcompare("ab", "abc"), "\n")
+    output("contains: ", strcontains("gallt", "all"), " ", strcontains("gallt", "z"), " ", strcontains("gallt", ""), "\n")
+    output("substr: [", strsubstr("hello", 1, 3), "][", strsubstr("hello", -5, 3), "][", strsubstr("hello", 2, -1), "][", strsubstr("hello", 10, 3), "][", strsubstr("hello", 0, 99), "][", strsubstr("hello", 3, 2), "]\n")
+    output("find: ", strfind("hello", "ll"), " ", strfind("hello", "z"), " ", strfind("hello", ""), "\n")
+    output("replace: [", strreplace("a-b-c", "-", "+"), "][", strreplace("aaa", "a", ""), "][", strreplace("s", "", "x"), "]\n")
+    output("case: [", strupper("Gallt 26"), "][", strlower("Gallt 26"), "]\n")
+    output("trim: [", strtrim("  text \n"), "][", strtrim("\t\v\f x \r\n"), "][", strtrim(""), "]\n")
+
+    string text = "cat"
+    output("charat: ", strcharat(text, 0), " ", strcharat(text, 2), " ", strcharat(text, 9) == '\0', " ", strcharat(text, -1) == '\0', "\n")
+    output("setchar: ", strsetchar(text, 0, 'b'), " [", text, "] ", strsetchar(text, 9, 'z'), "\n")
+
+    output("splitcount: ", strsplitcount("a,b,c", ","), " ", strsplitcount("abc", ""), " ", strsplitcount("", ","), "\n")
+    output("splitget: [", strsplitget("a,b,c", ",", 0), "][", strsplitget("a,b,c", ",", 1), "][", strsplitget("a,b,c", ",", 2), "][", strsplitget("a,b,c", ",", 9), "]\n")
+    output("splitget2: [", strsplitget("a,,c", ",", 1), "][", strsplitget("a--b", "--", 1), "]\n")
+
+    string text2 = "  Gallt,Standard,Compiler  "
+    string trimmed = strtrim(text2)
+    output("doc: ", strsplitcount(trimmed, ","), "|", strsplitget(trimmed, ",", 1), "|", strreplace(trimmed, ",", " | "), "|", strupper(strsplitget(trimmed, ",", 2)), "|", strfind(trimmed, "Standard"), "\n")
+    strwrite("strwrite ok\n")
+    return 0
+}

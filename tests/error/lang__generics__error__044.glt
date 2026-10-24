@@ -1,0 +1,42 @@
+// lang__generics__error__044.glt
+// expect error ER 0065
+
+generics Blob<T, int N> {
+    struct Blob {
+        T value
+    }
+    int tag() {
+        return N
+    }
+}
+
+generics Sized<T, int N> {
+    struct Buf {
+        int data[size(N)]
+    }
+
+    int local_probe() {
+        int run[size(N)]
+        return size(run)
+    }
+
+    int nested_probe() {
+        Blob<int, size(N)>.Blob b
+        return b.tag()
+    }
+
+    int cond_probe() {
+        const if (size(N) == 4) {
+            return 1
+        } const else {
+            return 0
+        }
+    }
+}
+
+int main() {
+    Sized<int, 4>.Buf b
+    output(size(b.data), " ", Sized<int, 4>.local_probe())
+    output(" ", Sized<int, 4>.nested_probe(), " ", Sized<int, 4>.cond_probe())
+    return 0
+}

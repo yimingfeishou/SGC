@@ -1,0 +1,12 @@
+// lang__const__error__014.glt
+// expect error ER 0152
+
+int bump() {
+    output("bump")
+    return 1
+}
+
+int main() {
+    const int value = bump()
+    return value
+}

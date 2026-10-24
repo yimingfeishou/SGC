@@ -1,0 +1,11 @@
+// lang__function__pass__016.glt
+// expect output
+// enter: got=[123]
+
+int main() {
+    int value = 0
+    output("enter: ")
+    input(value)
+    output("got=[", value, "]")
+    return 0
+}

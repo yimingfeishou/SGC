@@ -1,0 +1,45 @@
+// lang__str_func__pass__006.glt
+// expect output
+// 5
+// Hello World
+// Hello World
+// -1 1 0
+// true false
+// World|Hello|
+// 6 -1
+// Hello Gallt
+// HELLO abc
+// [padded]
+// true true
+// true Hallo false
+// 3 1
+// a|c||
+// moved||0
+// strwrite writes to standard output
+
+int main() {
+    string a = "Hello"
+    string b = "World"
+    output(strlen(a), "\n")
+    string joined = strconcat(strconcat(a, " "), b)
+    output(joined, "\n")
+    string copied = strcopy(joined)
+    output(copied, "\n")
+    output(strcompare(a, b), " ", strcompare(b, a), " ", strcompare(a, a), "\n")
+    output(strcontains(joined, "lo W"), " ", strcontains(joined, "zz"), "\n")
+    output(strsubstr(joined, 6, 5), "|", strsubstr(joined, 0, 5), "|\n")
+    output(strfind(joined, "World"), " ", strfind(joined, "zz"), "\n")
+    output(strreplace(joined, "World", "Gallt"), "\n")
+    output(strupper(a), " ", strlower("ABC"), "\n")
+    output("[", strtrim("  padded  "), "]", "\n")
+    output(strcharat(a, 1) == 'e', " ", strcharat(a, 99) == '\0', "\n")
+    bool assigned = strsetchar(a, 1, 'a')
+    output(assigned, " ", a, " ", strsetchar(a, 99, 'z'), "\n")
+    output(strsplitcount("a,b,c", ","), " ", strsplitcount("abc", ","), "\n")
+    output(strsplitget("a,b,c", ",", 0), "|", strsplitget("a,b,c", ",", 2), "|", strsplitget("a,b,c", ",", 5), "|\n")
+    string spare = "moved"
+    string taken = strmove(spare)
+    output(taken, "|", spare, "|", strlen(spare), "\n")
+    strwrite("strwrite writes to standard output\n")
+    return 0
+}

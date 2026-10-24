@@ -1,0 +1,14 @@
+// lang__str_parse__error__002.glt
+// expect error ER 0003
+
+struct Point {
+    int x
+    int y
+}
+
+int main() {
+    Point p = {1, 2}
+    string s = p
+    output(s, "\n")
+    return 0
+}

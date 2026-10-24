@@ -1,0 +1,24 @@
+// lang__const__pass__003.glt
+// expect output
+// 61.0Z6
+
+const int N = 3
+const double HALF = 0.5
+const char LETTER = 'Z'
+
+int sum(const int* data, int count) {
+    int total = 0
+    for (int i = 0; i < count; i++) {
+        total = total + data[i]
+    }
+    return total
+}
+
+int main() {
+    int arr[N] = {1, 2, 3}
+    double half = HALF * 2.0
+    char c = LETTER
+    int total = sum(arr, N)
+    output(total, half, c, N * 2)
+    return 0
+}

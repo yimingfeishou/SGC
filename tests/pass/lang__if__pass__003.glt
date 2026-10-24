@@ -1,0 +1,27 @@
+// lang__if__pass__003.glt
+// expect output
+// 0false0.0
+
+generics DefaultValue<T: int | float | double | bool | string> {
+    emit T.typename + " get_default() {\n"
+    const if (T.is_integer == true) {
+        emit "    return 0\n"
+    } const else {
+        const if (T.is_bool == true) {
+            emit "    return false\n"
+        } const else {
+            const if (T.is_string == true) {
+                emit "    return \"\"\n"
+            } const else {
+                emit "    return 0.0\n"
+            }
+        }
+    }
+    emit "}\n"
+}
+int main() {
+    output(DefaultValue<int>.get_default())
+    output(DefaultValue<bool>.get_default())
+    output(DefaultValue<float>.get_default())
+    return 0
+}

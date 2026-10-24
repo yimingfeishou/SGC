@@ -1,0 +1,14 @@
+// lang__overload__error__012.glt
+// expect error ER 0019
+
+int f(int a) {
+    return a
+}
+int f(double a) {
+    return 1
+}
+int main() {
+    int(*fp)(int) = &f
+    output(fp(2))
+    return 0
+}

@@ -1,0 +1,14 @@
+// lang__member__error__004.glt
+// expect error ER 0088
+
+struct Buffer {
+    int value
+    constructor () {
+        value = 0
+    }
+}
+int main() {
+    Buffer b
+    b.constructor()
+    return 0
+}

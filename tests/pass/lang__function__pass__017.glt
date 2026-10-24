@@ -1,0 +1,11 @@
+// lang__function__pass__017.glt
+// expect output
+// double=[2.5]
+
+int main() {
+    double value = 0.0
+    input(value)
+    output("double=[", value, "]")
+    char c = 'x'
+    return 0
+}

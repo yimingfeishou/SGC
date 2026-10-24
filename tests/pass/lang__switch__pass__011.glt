@@ -1,0 +1,49 @@
+// lang__switch__pass__011.glt
+// expect output
+// 100 200 0 skip1214
+
+int classify(int x) {
+    switch (x) {
+        case (1) {
+            return 100
+        }
+        case (2) {
+            return 200
+        }
+    }
+    return 0
+}
+
+int sum_skip(int limit) {
+    int total = 0
+    for (int i = 0; i < limit; i++) {
+        switch (i) {
+            case (1) {
+                string tag = "skip"
+                output(tag)
+                continue
+            }
+            case (3) {
+                total = total + 1000
+                fallthrough
+            }
+            case (4) {
+                total = total + 100
+            }
+        }
+        total = total + i
+    }
+    return total
+}
+
+int main() {
+    output(classify(1))
+    output(" ")
+    output(classify(2))
+    output(" ")
+    output(classify(9))
+    output(" ")
+    output(sum_skip(6))
+    output("\n")
+    return 0
+}

@@ -1,0 +1,65 @@
+// lang__if__pass__007.glt
+// expect output
+// 1 0
+// 11 22
+// 1 0
+
+struct Point {
+    int x
+    int y
+}
+
+generics Kind<T> {
+    const if (T.is_struct == true && T.has_member<"x"> == true) {
+        emit {
+            int kind() {
+                return 1
+            }
+        }
+    } const else {
+        emit {
+            int kind() {
+                return 0
+            }
+        }
+    }
+}
+
+generics Named<T> {
+    const if (T.typename == "int") {
+        emit {
+            int code() {
+                return 11
+            }
+        }
+    } const else {
+        emit {
+            int code() {
+                return 22
+            }
+        }
+    }
+}
+
+generics Same<T, U> {
+    const if (T.is_same<U> == true) {
+        emit {
+            int same() {
+                return 1
+            }
+        }
+    } const else {
+        emit {
+            int same() {
+                return 0
+            }
+        }
+    }
+}
+
+int main() {
+    output(Kind<Point>.kind(), " ", Kind<int>.kind(), "\n")
+    output(Named<int>.code(), " ", Named<float>.code(), "\n")
+    output(Same<int, int>.same(), " ", Same<int, float>.same(), "\n")
+    return 0
+}

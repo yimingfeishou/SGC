@@ -1,0 +1,14 @@
+// lang__const__error__032.glt
+// expect error ER 0105
+
+generics G<T> {
+    const if (T.size == 4) {
+        int positive() {
+            return 1
+        }
+    }
+}
+int main() {
+    output(G<int>.positive(), "\n")
+    return 0
+}

@@ -1,0 +1,18 @@
+// lang__namespace__pass__023.glt
+// expect output
+// ok
+
+namespace sl {
+    int base = 0
+}
+addition namespace sl {
+    @if (is_defined("WINDOWS_PLATFORM")) {
+        int winonly = 1
+    } @else {
+        int other = 1
+    }
+}
+int main() {
+    output("ok")
+    return 0
+}

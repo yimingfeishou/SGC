@@ -1,0 +1,48 @@
+// lang__member__pass__002.glt
+// expect output
+// 85391096other
+
+generics BlockEmit<T> {
+    emit {
+        T block_value
+        const T block_fixed = 5
+
+        T block_sum() {
+            return block_value + block_fixed
+        }
+    }
+}
+
+generics StringEmit<T, int N> {
+    emit "T string_value = ", N, "\n"
+    emit "T string_sum() {\n"
+    emit "    return string_value + 1\n"
+    emit "}\n"
+}
+
+generics ConditionalEmit<T> {
+    const if (T.is_integer == true) {
+        emit {
+            T chosen = 6
+        }
+    } const else {
+        emit {
+            string chosen = "other"
+        }
+    }
+}
+
+int main() {
+    BlockEmit<int>
+    block_value = 3
+    output(block_sum())
+    output(block_fixed)
+    output(BlockEmit<int>::block_value)
+    StringEmit<int, 9>
+    output(string_value)
+    output(string_sum())
+    output(StringEmit<int, 9>::string_value)
+    output(ConditionalEmit<int>::chosen)
+    output(ConditionalEmit<string>.chosen)
+    return 0
+}

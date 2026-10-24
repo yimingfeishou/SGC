@@ -1,0 +1,23 @@
+// lang__pointer__pass__007.glt
+// expect output
+// 9 9 5 5
+
+struct Node {
+    int value
+}
+
+Node global_node = {5}
+Node* global_single = &global_node
+Node** global_double = &global_single
+Node*** global_triple = &global_double
+
+int main() {
+    Node local_node = {9}
+    Node* local_single = &local_node
+    Node** local_double = &local_single
+    Node*** local_triple = &local_double
+    Node** table[2] = {&local_single, &global_single}
+    output((*local_double)->value, " ", (**local_triple)->value)
+    output(" ", (**global_triple)->value, " ", (*table[1])->value)
+    return 0
+}

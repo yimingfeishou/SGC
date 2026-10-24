@@ -1,0 +1,18 @@
+// lang__lifecycle__error__004.glt
+// expect error ER 0011
+
+struct Point {
+    int x
+    int y
+
+    constructor (int ix, int iy) {
+        x = ix
+        y = iy
+    }
+}
+Point g
+
+int main() {
+    output(g.x)
+    return 0
+}

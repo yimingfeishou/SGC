@@ -1,0 +1,9 @@
+// compiler__continuation__error__005.glt
+// expect error ER 0019
+
+int main() {
+    int x = 1 + \	
+        2
+    output(x, "\n")
+    return 0
+}

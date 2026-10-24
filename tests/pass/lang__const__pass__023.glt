@@ -1,0 +1,16 @@
+// lang__const__pass__023.glt
+// expect output
+// 4 8 16 20
+
+namespace n {
+    const int total = 4
+    const int doubled = total * 2
+}
+
+int data[n::total] = {1, 2, 3, 4}
+
+int main() {
+    int local[n::total + 1] = {0, 0, 0, 0, 0}
+    output(n::total, " ", n::doubled, " ", size(data), " ", size(local))
+    return 0
+}

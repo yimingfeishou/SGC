@@ -1,0 +1,41 @@
+// lang__switch__pass__019.glt
+// expect output
+// d3 3 2
+
+int counter = 0
+
+int nxt() {
+    counter = counter + 1
+    return counter
+}
+
+int main() {
+    counter = 0
+    switch (3) {
+        case (nxt()) {
+            output("d1 ")
+        }
+        case (nxt()) {
+            output("d2 ")
+        }
+        case (nxt()) {
+            output("d3 ")
+        }
+        case (nxt()) {
+            output("d4 ")
+        }
+    }
+    output(counter)
+    output(" ")
+    counter = 0
+    switch (9) {
+        case (nxt()) {
+            output("e1 ")
+        }
+        case (nxt()) {
+            output("e2 ")
+        }
+    }
+    output(counter)
+    return 0
+}

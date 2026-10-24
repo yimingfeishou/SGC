@@ -1,0 +1,18 @@
+// lang__cast__pass__008.glt
+// expect output
+// 1 1 1 1 true true-branch
+
+int main() {
+    int runtime_value = 3
+    const int folded = cast<int>(cast<bool>(3))
+    bool stored = cast<bool>(runtime_value)
+    output(cast<int>(cast<bool>(3)), " ", cast<int>(cast<bool>(runtime_value)), " ", folded)
+    output(" ", cast<int>(stored), " ", stored == true)
+    bool from_two = cast<bool>(2)
+    if (from_two) {
+        output(" true-branch")
+    } else {
+        output(" false-branch")
+    }
+    return 0
+}

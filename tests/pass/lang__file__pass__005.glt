@@ -1,0 +1,14 @@
+// lang__file__pass__005.glt
+// expect output
+// null
+
+int main() {
+    string mode = "r"
+    file* fp = fileopen("./sgc_missing_file.txt", mode)
+    if (fp == null) {
+        output("null")
+    } else {
+        fileclose(fp)
+    }
+    return 0
+}

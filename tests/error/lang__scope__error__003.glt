@@ -1,0 +1,7 @@
+// lang__scope__error__003.glt
+// expect error ER 0027
+
+1 + 2
+int main() {
+    return 0
+}

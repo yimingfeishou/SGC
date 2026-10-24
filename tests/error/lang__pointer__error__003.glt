@@ -1,0 +1,10 @@
+// lang__pointer__error__003.glt
+// expect error ER 0108
+
+int main() {
+    int a = 1
+    int b = 2
+    int* const p = &a
+    p = &b
+    return 0
+}

@@ -1,0 +1,7 @@
+// lang__const_fn__pass__005.glt
+// expect output
+
+const int f(int x) {
+    return size(int) + x
+}
+int main() { return 0 }

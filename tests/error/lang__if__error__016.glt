@@ -1,0 +1,19 @@
+// lang__if__error__016.glt
+// expect error ER 0105
+
+int runtime_flag(int x) {
+    return x
+}
+generics G<T: int> {
+    const if (runtime_flag(1)) {
+        emit {
+            int positive() {
+                return 1
+            }
+        }
+    }
+}
+int main() {
+    output(G<int>.positive(), "\n")
+    return 0
+}

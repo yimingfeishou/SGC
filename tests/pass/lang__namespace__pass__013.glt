@@ -1,0 +1,28 @@
+// lang__namespace__pass__013.glt
+// expect output
+// 1
+
+namespace n {
+    int helper() {
+        return 1
+    }
+
+    void write() {
+        return
+    }
+
+    struct S {
+        int v
+
+        constructor () {
+            v = helper()
+            write()
+        }
+    }
+}
+
+int main() {
+    n::S s
+    output(s.v)
+    return 0
+}

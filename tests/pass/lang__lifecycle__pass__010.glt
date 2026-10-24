@@ -1,0 +1,23 @@
+// lang__lifecycle__pass__010.glt
+// expect output
+// 0 0
+
+struct Box {
+    int value
+    string label
+}
+
+int take(Box b) {
+    return b.value
+}
+
+Box make() {
+    return Box()
+}
+
+int main() {
+    output(take(Box()), " ")
+    Box b = make()
+    output(b.value)
+    return 0
+}

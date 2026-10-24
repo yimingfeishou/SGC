@@ -1,0 +1,10 @@
+// lang__const__error__015.glt
+// expect error ER 0100
+
+generics Bad<T> {
+    emit T
+}
+int main() {
+    Bad<int>
+    return 0
+}

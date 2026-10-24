@@ -1,0 +1,58 @@
+// lang__generics__pass__008.glt
+// expect output
+// 10257869
+
+generics Constants<T, int N> {
+    const T extent = N + 1
+    const T twice = extent + extent
+}
+
+generics Sized<T, int N> {
+    const int length = N
+    T data[length] = {1, 2, 3}
+}
+
+generics ConstantArgument<int N> {
+    int value = N
+}
+
+generics Chosen<T> {
+    const if (Constants<int, 4>::twice == 10) {
+        T selected = 7
+    } const else {
+        T selected = 0
+    }
+}
+
+generics TextSource<T> {
+    const string word = "ok"
+}
+
+generics TextChosen<T> {
+    const if (TextSource<int>::word == "ok") {
+        T selected = 8
+    } const else {
+        T selected = 0
+    }
+}
+
+const int global_extent = 6
+
+generics GlobalChosen<T> {
+    const if (global_extent == 6) {
+        T selected = 9
+    } const else {
+        T selected = 0
+    }
+}
+
+int main() {
+    output(Constants<int, 4>::twice)
+    output(Sized<int, 3>::data[1])
+    output(ConstantArgument<Constants<int, 4>::extent>::value)
+    output(Chosen<int>::selected)
+    output(TextChosen<int>.selected)
+    output(ConstantArgument<global_extent>.value)
+    output(GlobalChosen<int>.selected)
+    return 0
+}

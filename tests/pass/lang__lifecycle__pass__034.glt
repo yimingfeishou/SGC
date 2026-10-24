@@ -1,0 +1,45 @@
+// lang__lifecycle__pass__034.glt
+// expect output
+// true 3 alpha
+// false 5 3 alpha
+// true 5
+// 5 5
+// [][text]
+
+struct Node {
+    int* data
+    int len
+    string name = "n"
+}
+
+int main() {
+    Node a
+    a.data = heap(int, 3)
+    a.data[0] = 5
+    a.data[1] = 6
+    a.data[2] = 7
+    a.len = 3
+    a.name = "alpha"
+
+    Node b = shallow_copy(a)
+    output(b.data == a.data, " ", b.len, " ", b.name, "\n")
+
+    Node c = deep_copy(a)
+    output(c.data == a.data, " ", c.data[0], " ", c.len, " ", c.name, "\n")
+
+    Node d = copy(a)
+    output(d.data == a.data, " ", d.data[0], "\n")
+
+    int x = 5
+    int y = move(x)
+    output(x, " ", y, "\n")
+    string s1 = "text"
+    string s2 = move(s1)
+    output("[", s1, "][", s2, "]\n")
+
+    free(a.data)
+    free(c.data)
+    a.data = null
+    c.data = null
+    return 0
+}

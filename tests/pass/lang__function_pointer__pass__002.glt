@@ -1,0 +1,14 @@
+// lang__function_pointer__pass__002.glt
+// expect output
+// 8 8 8
+
+int f() {
+    return 0
+}
+
+int main() {
+    output(size(&f), " ", size(null))
+    int(int, int)* p = null
+    output(" ", size(p))
+    return 0
+}

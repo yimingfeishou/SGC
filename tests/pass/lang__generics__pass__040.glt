@@ -1,0 +1,17 @@
+// lang__generics__pass__040.glt
+// expect output
+// 7
+
+generics Box<T> {
+    struct Inner {
+        int k
+        constructor (int v) {
+            k = v
+        }
+    }
+}
+int main() {
+    Box<int>.Inner i = Box<int>.Inner(7)
+    output(i.k)
+    return 0
+}

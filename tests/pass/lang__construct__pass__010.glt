@@ -1,0 +1,18 @@
+// lang__construct__pass__010.glt
+// expect output
+// 7
+
+generics Box<T> {
+    struct Inner {
+        T k
+        constructor (T v) {
+            k = v
+        }
+    }
+}
+int main() {
+    Box<int>.Inner* i = construct Box<int>.Inner(7)
+    output(i->k)
+    destruct i
+    return 0
+}

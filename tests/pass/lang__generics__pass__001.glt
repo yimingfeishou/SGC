@@ -1,0 +1,24 @@
+// lang__generics__pass__001.glt
+// expect output
+// 5 9
+
+generics Inner<U> {
+    struct Box {
+        U value
+    }
+}
+
+generics Outer<T> {
+    struct Box {
+        Inner<T>.Box inner
+        T tag
+    }
+}
+
+int main() {
+    Outer<int>.Box pair
+    pair.tag = 5
+    pair.inner.value = 9
+    output(pair.tag, " ", pair.inner.value, "\n")
+    return 0
+}

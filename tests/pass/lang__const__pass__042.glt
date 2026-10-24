@@ -1,0 +1,24 @@
+// lang__const__pass__042.glt
+// expect output
+// ct_split=[b] rt_split=[b]
+// ct_char=-28 rt_char=-28
+
+const string ct_pick(string s, string sep, int i) {
+    return strsplitget(s, sep, i)
+}
+
+const string ct_field1 = ct_pick("a,b,c", ",", 1)
+
+const int ct_char0(string s) {
+    return cast<int>(strcharat(s, 0))
+}
+
+const int ct_byte = ct_char0("\xe4\xb8\xad")
+
+int main() {
+    string s = "a,b,c"
+    string d = "\xe4\xb8\xad"
+    output("ct_split=[", ct_field1, "] rt_split=[", strsplitget(s, ",", 1), "]\n")
+    output("ct_char=", ct_byte, " rt_char=", cast<int>(strcharat(d, 0)), "\n")
+    return 0
+}

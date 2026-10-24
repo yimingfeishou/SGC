@@ -1,0 +1,8 @@
+// lang__function__pass__001.glt
+// expect output
+// Hello World!
+
+int main() {
+    output("Hello World!")
+    return 0
+}

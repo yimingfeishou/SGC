@@ -1,0 +1,13 @@
+// lang__function__pass__044.glt
+// expect output
+// m
+
+struct P {
+    int x
+    int y
+}
+
+int main() {
+    output("m")
+    return 0
+}

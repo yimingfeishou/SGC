@@ -1,0 +1,15 @@
+// lang__lifecycle__pass__007.glt
+// expect output
+// 10201020
+
+struct Point {
+    int x
+    int y
+}
+int main() {
+    Point p1 = {10, 20}
+    Point p2 = copy(p1)
+    Point p3 = move(p1)
+    output(p2.x, p2.y, p3.x, p3.y)
+    return 0
+}

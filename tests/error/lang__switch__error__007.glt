@@ -1,0 +1,7 @@
+// lang__switch__error__007.glt
+// expect error ER 0018
+
+int main() {
+    break
+    return 0
+}

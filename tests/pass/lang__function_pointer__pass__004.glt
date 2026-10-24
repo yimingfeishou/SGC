@@ -1,0 +1,38 @@
+// lang__function_pointer__pass__004.glt
+// expect output
+// 8
+// 6
+// 6
+// res=10
+// 5
+// true
+
+int add(int a, int b) { return a + b }
+int sub(int a, int b) { return a - b }
+
+int(int, int)* select(char op) {
+    if (op == '+') {
+        return &add
+    } else {
+        return &sub
+    }
+}
+
+void apply(int a, int b, int fn(int, int)*) {
+    output("res=", fn(a, b), "\n")
+}
+
+int main() {
+    int op(int, int)* = &add
+    output(op(3, 5), "\n")
+    op = &sub
+    output(op(10, 4), "\n")
+    int(int, int)* fn = select('+')
+    output(fn(4, 2), "\n")
+    apply(3, 7, &add)
+    int another(int, int)* = &add
+    output(another(2, 3), "\n")
+    int(int, int)* empty = null
+    output(empty == null, "\n")
+    return 0
+}

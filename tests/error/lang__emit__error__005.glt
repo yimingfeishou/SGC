@@ -1,0 +1,15 @@
+// lang__emit__error__005.glt
+// expect error ER 0001
+
+generics EmitDiagnostic<T: int> {
+    emit {
+        int broken() {
+            return undefined_thing
+        }
+    }
+}
+
+int main() {
+    EmitDiagnostic<int>
+    return 0
+}

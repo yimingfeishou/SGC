@@ -1,0 +1,21 @@
+// lang__lifecycle__error__002.glt
+// expect error ER 0009
+
+namespace n {
+    struct S {
+        int v
+
+        constructor () {
+            v = late()
+        }
+    }
+
+    int late() {
+        return 1
+    }
+}
+
+int main() {
+    n::S s
+    return 0
+}

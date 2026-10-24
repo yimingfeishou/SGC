@@ -1,0 +1,21 @@
+// lang__str_func__pass__003.glt
+// expect output
+// A3453
+
+int apply(int(string)* fn, string value) {
+    return fn(value)
+}
+
+int main() {
+    int first(string)* = &strlen
+    int second(string)* = strlen
+    int applied = apply(strlen, "hello")
+    void write_text(string)* = &output
+    string copy_text(string)* = &strcopy
+    int read_number()* = &input
+    bool exists(string)* = &fileexists
+    string copied = copy_text("xyz")
+    write_text("A")
+    output(first("abc"), second("abcd"), applied, strlen(copied))
+    return 0
+}

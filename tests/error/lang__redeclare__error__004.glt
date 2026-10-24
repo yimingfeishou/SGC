@@ -1,0 +1,17 @@
+// lang__redeclare__error__004.glt
+// expect error ER 0058
+
+generics Box<T> {
+    struct Box {
+        T value
+    }
+}
+generics Box<T> {
+    struct Box {
+        T value
+        int extra
+    }
+}
+int main() {
+    return 0
+}

@@ -1,0 +1,9 @@
+// lang__nocopy__error__001.glt
+// expect error ER 0086
+
+[nocopy] struct Unique { int handle }
+int main() {
+    Unique a = {1}
+    Unique b = copy(a)
+    return 0
+}

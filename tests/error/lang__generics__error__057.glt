@@ -1,0 +1,13 @@
+// lang__generics__error__057.glt
+// expect error ER 0069
+
+generics Box<T> {
+    T value
+}
+
+int main() {
+    Box<int>
+    Box<float>
+    output(value)
+    return 0
+}

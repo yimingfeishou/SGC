@@ -1,0 +1,55 @@
+// lang__const__pass__008.glt
+// expect output
+// 5 6 5 6 13 16 6 8 6 8
+
+int runtime_value = 2
+
+int add_runtime(int value) {
+    return value + runtime_value
+}
+
+generics BlockRuntime<T: int> {
+    emit {
+        T block_dynamic = add_runtime(3)
+
+        T block_compute(T value) {
+            return value * 2 + block_dynamic + runtime_value
+        }
+
+        T block_probe() {
+            block_dynamic + runtime_value
+            return block_dynamic
+        }
+
+        T block_adjust(T value) {
+            block_dynamic = block_dynamic + value
+            return block_dynamic
+        }
+    }
+}
+
+generics StringRuntime<T: int> {
+    emit "T string_dynamic = add_runtime(4)\n"
+    emit "T string_compute(T value) {\n"
+    emit "    return value * 2 + string_dynamic + runtime_value\n"
+    emit "}\n"
+    emit "T string_probe() {\n"
+    emit "    string_dynamic + runtime_value\n"
+    emit "    return string_dynamic\n"
+    emit "}\n"
+    emit "T string_adjust(T value) {\n"
+    emit "    string_dynamic = string_dynamic + value\n"
+    emit "    return string_dynamic\n"
+    emit "}\n"
+}
+
+int main() {
+    BlockRuntime<int>
+    StringRuntime<int>
+    output(block_dynamic, " ", string_dynamic, " ")
+    output(block_probe(), " ", string_probe(), " ")
+    output(block_compute(3), " ", string_compute(4), " ")
+    output(block_adjust(1), " ", string_adjust(2), " ")
+    output(block_dynamic, " ", string_dynamic)
+    return 0
+}

@@ -1,0 +1,14 @@
+// lang__str_func__pass__001.glt
+// expect output
+// prompt
+// read=[hello world] len=11
+
+int main() {
+    output("prompt\n")
+    string typed = strread()
+    strwrite("read=[")
+    strwrite(typed)
+    strwrite("] len=")
+    output(strlen(typed), "\n")
+    return 0
+}

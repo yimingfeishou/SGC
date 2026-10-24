@@ -1,0 +1,20 @@
+// lang__const__pass__006.glt
+// expect output
+// 16 8 4 64 4 4 3
+
+struct example {
+    float f
+    double d
+}
+
+int table[size(example)]
+
+const int SZ = size(example)
+const int AL = align(example)
+
+int main() {
+    int local = 3
+    const int L = size(local)
+    output(SZ, " ", AL, " ", L, " ", size(table), " ", size(local), " ", align(local), " ", local)
+    return 0
+}

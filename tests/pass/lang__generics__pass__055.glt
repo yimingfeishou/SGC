@@ -1,0 +1,15 @@
+// lang__generics__pass__055.glt
+// expect output
+// 2
+
+generics Box<T> {
+    T value
+}
+
+int main() {
+    Box<int>
+    Box<int>
+    value = 2
+    output(value)
+    return 0
+}

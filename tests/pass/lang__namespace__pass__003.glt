@@ -1,0 +1,20 @@
+// lang__namespace__pass__003.glt
+// expect output
+// 5
+
+generics GeneratedNamespace<T> {
+    emit "namespace emitted {\n"
+    emit "T namespaced(T value) {\n"
+    emit "    return value + 1\n"
+    emit "}\n"
+    emit "}\n"
+    emit "access namespace emitted\n"
+    emit "T use_namespaced(T value) {\n"
+    emit "    return namespaced(value)\n"
+    emit "}\n"
+}
+
+int main() {
+    output(GeneratedNamespace<int>::use_namespaced(4))
+    return 0
+}

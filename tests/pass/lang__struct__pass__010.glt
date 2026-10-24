@@ -1,0 +1,30 @@
+// lang__struct__pass__010.glt
+// expect output
+// 4.06.0alphaalpha
+
+struct Vec2 {
+    float x
+    float y
+}
+Vec2 add_vector(Vec2 a, Vec2 b) {
+    Vec2 result
+    result.x = a.x + b.x
+    result.y = a.y + b.y
+    return result
+}
+struct Named {
+    string name
+}
+Named identity(Named value) {
+    return value
+}
+int main() {
+    Vec2 v1 = {1.0, 2.0}
+    Vec2 v2 = {3.0, 4.0}
+    Vec2 v3 = add_vector(v1, v2)
+    output(v3.x, v3.y)
+    Named a = {"alpha"}
+    Named b = identity(a)
+    output(a.name, b.name)
+    return 0
+}

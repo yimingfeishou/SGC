@@ -1,0 +1,11 @@
+// lang__operator__pass__002.glt
+// expect output
+// -5000000000 5000000000
+
+int main() {
+    lint v = 5000000000l
+    lint neg = -v
+    lint pos = +v
+    output(neg, " ", pos)
+    return 0
+}

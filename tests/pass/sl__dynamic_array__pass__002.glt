@@ -1,0 +1,25 @@
+// sl__dynamic_array__pass__002.glt
+// expect output
+// size = 2arr[1] = 20front = 99pop = 20
+
+guide "generics.glt"
+access namespace sl
+
+int main() {
+    dynamic_array_generic<int>
+    dynamic_array arr = dynamic_array(2)
+
+    push(&arr, 10)
+    push(&arr, 20)
+
+    output("size = ", length(&arr))
+    output("arr[1] = ", get(&arr, 1))
+
+    set(&arr, 0, 99)
+    output("front = ", front(&arr))
+
+    int x = pop(&arr)
+    output("pop = ", x)
+
+    return 0
+}

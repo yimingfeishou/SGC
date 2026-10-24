@@ -1,0 +1,14 @@
+// lang__op_overload__error__006.glt
+// expect error ER 0114
+
+struct S {
+    int v
+}
+
+void operator += (S a, S b) {
+    a.v += b.v
+}
+
+int main() {
+    return 0
+}

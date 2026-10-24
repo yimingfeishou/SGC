@@ -1,0 +1,12 @@
+// integ__if__pass__001.glt
+// expect output
+
+@cond LINK_EXTRA = 0
+
+@if (LINK_EXTRA == 1) {
+    clib("sgc_missing_conditional_library.lib")
+}
+
+int main() {
+    return 0
+}

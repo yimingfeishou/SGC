@@ -1,0 +1,21 @@
+// lang__const__pass__031.glt
+// expect output
+// 4
+
+generics Inner<U> {
+    int probe() { return size(U) }
+}
+
+generics Outer<int K> {
+    int go() {
+        return Inner<K>.probe()
+    }
+}
+
+struct K { int x }
+
+int main() {
+    Outer<3>
+    output(go(), "\n")
+    return 0
+}

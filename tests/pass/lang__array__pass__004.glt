@@ -1,0 +1,14 @@
+// lang__array__pass__004.glt
+// expect output
+// 2HWtrueWorld
+
+int main() {
+    int iarr[3] = {1, 2, 3}
+    char carr[] = {'H', 'E', 'L', 'L', 'O'}
+    bool barr[] = {true, false}
+    string sarr[] = {"Hello ", "World"}
+    char c2 = carr[0]
+    carr[0] = 'W'
+    output(iarr[1], c2, carr[0], barr[0], sarr[1])
+    return 0
+}

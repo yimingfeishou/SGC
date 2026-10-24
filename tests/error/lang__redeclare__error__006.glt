@@ -1,0 +1,15 @@
+// lang__redeclare__error__006.glt
+// expect error ER 0081
+
+struct Two {
+    int value
+    destructor () {
+        value = 0
+    }
+    destructor () {
+        value = 1
+    }
+}
+int main() {
+    return 0
+}

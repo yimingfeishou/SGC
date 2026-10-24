@@ -1,0 +1,93 @@
+// sl__hash_table__pass__001.glt
+// expect output
+// stdlib_hash_table_api: ok (34 checks)
+
+guide "generics.glt"
+access namespace sl
+
+int checks = 0
+int failures = 0
+
+void check(bool condition, string label) {
+    if (condition) {
+        checks = checks + 1
+        return
+    }
+    output("FAIL: ", label, "\n")
+    failures = failures + 1
+}
+
+int main() {
+    hash_table_generic<int, string>
+    hash_table table = hash_table(4)
+    check(set(&table, 1, "one"), "set key 1")
+    check(set(&table, 2, "two"), "set key 2")
+    check(set(&table, 3, "three"), "set key 3")
+
+    check(contains_key(&table, 2), "contains_key found")
+    check(contains_key(&table, 9) == false, "contains_key missing")
+    check(contains_key(null, 2) == false, "contains_key null table")
+
+    check(strcompare(get_or_default(&table, 2, "none"), "two") == 0, "get_or_default found")
+    check(strcompare(get_or_default(&table, 9, "none"), "none") == 0, "get_or_default missing")
+    check(strcompare(get_or_default(null, 9, "none"), "none") == 0, "get_or_default null table")
+    check(strcompare(get_or_default(&table, 1, "none"), "one") == 0, "get_or_default first key")
+
+    int keys[5] = {0, 0, 0, 0, 0}
+    int key_count = keys_to_array(&table, keys, 5)
+    check(key_count == 3, "keys_to_array count")
+    int key_sum = 0
+    for (int i = 0; i < key_count; i++) {
+        key_sum = key_sum + keys[i]
+    }
+    check(key_sum == 6, "keys_to_array content")
+    int small[1] = {0}
+    check(keys_to_array(&table, small, 1) == 1, "keys_to_array capacity limit")
+    check(small[0] >= 1 && small[0] <= 3, "keys_to_array respects capacity")
+    check(keys_to_array(&table, small, 0) == 0, "keys_to_array zero capacity")
+    check(keys_to_array(&table, small, -2) == 0, "keys_to_array negative capacity")
+    check(keys_to_array(&table, null, 4) == 0, "keys_to_array null out")
+    check(keys_to_array(null, small, 1) == 0, "keys_to_array null table")
+
+    string values[5] = {"", "", "", "", ""}
+    int value_count = values_to_array(&table, values, 5)
+    check(value_count == 3, "values_to_array count")
+    bool has_one = false
+    bool has_two = false
+    bool has_three = false
+    for (int i = 0; i < value_count; i++) {
+        if (strcompare(values[i], "one") == 0) {
+            has_one = true
+        }
+        if (strcompare(values[i], "two") == 0) {
+            has_two = true
+        }
+        if (strcompare(values[i], "three") == 0) {
+            has_three = true
+        }
+    }
+    check(has_one && has_two && has_three, "values_to_array content")
+    check(values_to_array(&table, values, 2) == 2, "values_to_array capacity limit")
+    check(values_to_array(&table, values, 0) == 0, "values_to_array zero capacity")
+    check(values_to_array(&table, null, 5) == 0, "values_to_array null out")
+    check(values_to_array(null, values, 5) == 0, "values_to_array null table")
+
+    check(contains(&table, 3), "existing contains preserved")
+    string probe = ""
+    check(get(&table, 3, &probe) && strcompare(probe, "three") == 0, "existing get preserved")
+    check(length(&table) == 3, "existing length preserved")
+    check(erase(&table, 1), "existing erase preserved")
+    check(contains_key(&table, 1) == false, "contains_key after erase")
+    check(length(&table) == 2, "length after erase")
+    check(strcompare(get_or_default(&table, 1, "gone"), "gone") == 0, "get_or_default after erase")
+
+    hash_table* missing = null
+    check(contains_key(missing, 5) == false, "missing table contains_key")
+    check(keys_to_array(missing, keys, 5) == 0, "missing table keys_to_array")
+    check(values_to_array(missing, values, 5) == 0, "missing table values_to_array")
+
+    if (failures == 0) {
+        output("stdlib_hash_table_api: ok (", checks, " checks)\n")
+    }
+    return failures
+}

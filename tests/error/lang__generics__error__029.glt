@@ -1,0 +1,11 @@
+// lang__generics__error__029.glt
+// expect error ER 0073
+
+generics Box<T: NoSuchType> {
+    struct Box {
+        T value
+    }
+}
+int main() {
+    return 0
+}

@@ -1,0 +1,54 @@
+// lang__operator__pass__004.glt
+// expect output
+// 190
+
+struct Foo {
+    int v
+}
+
+int operator == (Foo* self, Foo* other) { return 1 }
+int operator != (Foo* self, Foo* other) { return 2 }
+int operator > (Foo* self, Foo* other) { return 3 }
+int operator < (Foo* self, Foo* other) { return 4 }
+int operator >= (Foo* self, Foo* other) { return 5 }
+int operator <= (Foo* self, Foo* other) { return 6 }
+int operator + (Foo* self, Foo* other) { return 7 }
+int operator - (Foo* self, Foo* other) { return 8 }
+int operator * (Foo* self, Foo* other) { return 9 }
+int operator / (Foo* self, Foo* other) { return 10 }
+int operator % (Foo* self, Foo* other) { return 11 }
+int operator & (Foo* self, Foo* other) { return 12 }
+int operator ^ (Foo* self, Foo* other) { return 13 }
+int operator | (Foo* self, Foo* other) { return 14 }
+int operator << (Foo* self, Foo* other) { return 15 }
+int operator >> (Foo* self, Foo* other) { return 16 }
+int operator ** (Foo* self, Foo* other) { return 17 }
+int operator && (Foo* self, Foo* other) { return 18 }
+int operator || (Foo* self, Foo* other) { return 19 }
+
+int main() {
+    Foo a = {1}
+    Foo b = {2}
+    int r = 0
+    r = r + (a == b)
+    r = r + (a != b)
+    r = r + (a > b)
+    r = r + (a < b)
+    r = r + (a >= b)
+    r = r + (a <= b)
+    r = r + (a + b)
+    r = r + (a - b)
+    r = r + (a * b)
+    r = r + (a / b)
+    r = r + (a % b)
+    r = r + (a & b)
+    r = r + (a ^ b)
+    r = r + (a | b)
+    r = r + (a << b)
+    r = r + (a >> b)
+    r = r + (a ** b)
+    r = r + (a && b)
+    r = r + (a || b)
+    output(r)
+    return 0
+}

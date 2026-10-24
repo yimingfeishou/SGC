@@ -1,0 +1,7 @@
+// lang__function__pass__028.glt
+// expect output
+
+int main() {
+    output()
+    return 0
+}

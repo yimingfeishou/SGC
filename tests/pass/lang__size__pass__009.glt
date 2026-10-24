@@ -1,0 +1,13 @@
+// lang__size__pass__009.glt
+// expect output
+// 8
+
+int f() {
+    return 0
+}
+
+int main() {
+    int a = size(f)
+    output(a)
+    return 0
+}

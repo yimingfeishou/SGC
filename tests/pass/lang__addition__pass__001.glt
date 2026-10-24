@@ -1,0 +1,25 @@
+// lang__addition__pass__001.glt
+// expect output
+// 10 5 20 20
+
+namespace ordered {
+    int initial = 10
+}
+
+addition namespace ordered {
+    int before_access = 5
+}
+
+access namespace ordered
+
+addition namespace ordered {
+    int after_access = 20
+}
+
+int main() {
+    output(initial, " ", before_access, " ")
+    output(ordered::after_access, " ")
+    access namespace ordered
+    output(after_access)
+    return 0
+}

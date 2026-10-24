@@ -1,0 +1,16 @@
+// lang__generics__error__021.glt
+// expect error ER 0103
+
+generics Bad<T> {
+    const if (T.is_same == true) {
+        emit {
+            int value() {
+                return 1
+            }
+        }
+    }
+}
+int main() {
+    Bad<int>
+    return 0
+}

@@ -1,0 +1,914 @@
+// integ__lifecycle__pass__001.glt
+// expect exit 0
+
+// bench_v2.glt
+// Gallt 分组计时 Benchmark（无 PowerShell，直接 Win32 API）
+// 编译：sgc --compile --input bench_v2.glt --output bench_v2.exe
+// 建议：-OL 0 / -OL 2 各跑一次对比
+
+guide "common.glt"
+guide "math.glt"
+guide "generics.glt"
+
+// =====================================================
+// 直接调用 Win32 计时 + C 输出，绕过 PowerShell
+// =====================================================
+extern luint GetTickCount64 from kernel32 ()
+extern int printf from libucrt (string format, luint value)
+
+@cond FULL = 1
+
+// ---------------- 全局变量 ----------------
+const int GLOBAL_CONST = 42
+int global_counter = 0
+luint global_state = 123456789lu
+
+// ---------------- 结构体 ----------------
+struct PlainStruct {
+    int a
+    double b
+    char c
+    bool flag
+}
+
+struct LifecycleStruct {
+    int value
+    string name
+
+    constructor() {
+        value = 0
+        name = ""
+    }
+
+    constructor(int v, string n) {
+        value = v
+        name = n
+    }
+
+    destructor() { value = 0 }
+
+    copy_constructor(LifecycleStruct* other) {
+        value = other->value
+        name = other->name
+    }
+
+    move_constructor(LifecycleStruct* other) {
+        value = other->value
+        name = move(other->name)
+        other->value = 0
+    }
+
+    copy_assignment(LifecycleStruct* other) {
+        value = other->value
+        name = other->name
+    }
+
+    move_assignment(LifecycleStruct* other) {
+        value = other->value
+        name = move(other->name)
+        other->value = 0
+    }
+}
+
+struct Vec2 {
+    double x
+    double y
+}
+
+Vec2 operator+(Vec2 a, Vec2 b) {
+    Vec2 r
+    r.x = a.x + b.x
+    r.y = a.y + b.y
+    return r
+}
+
+bool operator==(Vec2 a, Vec2 b) {
+    return a.x == b.x && a.y == b.y
+}
+
+// ---------------- 命名空间 ----------------
+namespace bench_ns {
+    int add(int a, int b) { return a + b }
+    const int NS_CONST = 100
+}
+
+// ---------------- 辅助函数 ----------------
+int fib(int n) {
+    if (n < 2) {
+        return n
+    }
+    return fib(n - 1) + fib(n - 2)
+}
+
+int cmp_int(int a, int b) {
+    if (a < b) { return -1 }
+    if (a > b) { return 1 }
+    return 0
+}
+
+int cmp_double(double a, double b) {
+    if (a < b) { return -1 }
+    if (a > b) { return 1 }
+    return 0
+}
+
+// =====================================================
+// 泛型测试封装（短名不带 sl::）
+// =====================================================
+int bench_dyn_int() {
+    sl::dynamic_array_generic<int>
+    dynamic_array arr = dynamic_array()
+    int i = 0
+    while (i < 200000) {
+        push(&arr, i)
+        i++
+    }
+    int len = length(&arr)
+    int cap = get_capacity(&arr)
+    int f = front(&arr)
+    int b = back(&arr)
+    bool e = empty(&arr)
+    insert(&arr, 0, 999)
+    int v = get(&arr, 100)
+    set(&arr, 100, 888)
+    int popped = pop(&arr)
+    erase(&arr, 50)
+    resize(&arr, 100000)
+    reserve(&arr, 500000)
+    int* dp = data_ptr(&arr)
+    clear(&arr)
+    if (len == -1 || cap == -1 || dp == null) {
+        return -1
+    }
+    return len + cap + f + b + (e ? 1 : 0) + v + popped
+}
+
+int bench_dyn_double() {
+    sl::dynamic_array_generic<double>
+    dynamic_array arr = dynamic_array()
+    int i = 0
+    while (i < 100000) {
+        push(&arr, cast<double>(i) * 1.5)
+        i++
+    }
+    return length(&arr)
+}
+
+int bench_dyn_string() {
+    sl::dynamic_array_generic<string>
+    dynamic_array arr = dynamic_array()
+    int i = 0
+    while (i < 100000) {
+        push(&arr, "item")
+        i++
+    }
+    return length(&arr)
+}
+
+int bench_ht_int() {
+    sl::hash_table_generic<int, int>
+    hash_table ht = hash_table(128)
+    int i = 0
+    while (i < 200000) {
+        set(&ht, i, i * 2)
+        i++
+    }
+    int count = length(&ht)
+    bool has = contains(&ht, 100000)
+    int out = 0
+    bool got = get(&ht, 100000, &out)
+    erase(&ht, 100000)
+    bool removed = !contains(&ht, 100000)
+    clear(&ht)
+    if (!has || !got || !removed) {
+        return -1
+    }
+    return count
+}
+
+int bench_ht_string() {
+    sl::hash_table_generic<int, string>
+    hash_table sht = hash_table(64)
+    int i = 0
+    while (i < 20000) {
+        set(&sht, i, "value")
+        i++
+    }
+    string out = ""
+    bool got = get(&sht, 10000, &out)
+    int cnt = length(&sht)
+    if (!got || cnt == -1) {
+        return -1
+    }
+    return cnt
+}
+
+int bench_sort_int() {
+    sl::sort_generic<int>
+    int* data = heap(int, 100000)
+    if (data == null) {
+        return -1
+    }
+    sl::srand(123lu)
+    int i = 0
+    while (i < 100000) {
+        data[i] = sl::random_int(0, 1000000)
+        i++
+    }
+    sort(data, 100000, &cmp_int)
+    bool sorted = true
+    i = 1
+    while (i < 100000) {
+        if (data[i - 1] > data[i]) {
+            sorted = false
+            break
+        }
+        i++
+    }
+    free(data)
+    if (!sorted) {
+        return -1
+    }
+    return 100000
+}
+
+int bench_sort_double() {
+    sl::sort_generic<double>
+    double* data = heap(double, 100000)
+    if (data == null) {
+        return -1
+    }
+    sl::srand(456lu)
+    int i = 0
+    while (i < 100000) {
+        data[i] = sl::random_double()
+        i++
+    }
+    sort(data, 100000, &cmp_double)
+    bool sorted = true
+    i = 1
+    while (i < 100000) {
+        if (data[i - 1] > data[i]) {
+            sorted = false
+            break
+        }
+        i++
+    }
+    free(data)
+    if (!sorted) {
+        return -1
+    }
+    return 100000
+}
+
+int bench_swap_int() {
+    sl::swap_generic<int>
+    int i = 0
+    int sum = 0
+    while (i < 10000000) {
+        int a = i
+        int b = i + 1
+        swap(&a, &b)
+        sum = sum + a + b
+        i++
+    }
+    return sum
+}
+
+int bench_swap_string() {
+    sl::swap_generic<string>
+    string s1 = "hello"
+    string s2 = "world"
+    swap(&s1, &s2)
+    return strlen(s1)
+}
+
+// =====================================================
+// main
+// =====================================================
+int main() {
+    luint t_all_start = GetTickCount64()
+    printf("=== FULL BENCH v2 START ===\n", 0lu)
+
+    // ============ G1: 基础类型 / 运算符 / 控制流 / 静态数组 ============
+    {
+        luint g0 = GetTickCount64()
+
+        // T01 基本类型与字面量
+        {
+            int i = 42
+            int hx = 0xFF
+            int oc = 017
+            lint li = 9223372036854775807l
+            uint ui = 4294967295u
+            luint lui = 18446744073709551615lu
+            float f = 3.14f
+            double d = 2.718281828
+            char c = 'A'
+            char nl = '\n'
+            char esc = '\\'
+            char hex = '\x41'
+            uchar uc = 'a'
+            bool bt = true
+            bool bf = false
+            string s = "hello\n\tworld"
+            int sum = 0
+            sum = sum + i + hx + oc + cast<int>(li % 100l)
+            sum = sum + cast<int>(ui % 100u) + cast<int>(lui % 100lu)
+            sum = sum + cast<int>(f) + cast<int>(d) + cast<int>(c) + cast<int>(nl) + cast<int>(uc)
+            sum = sum + cast<int>(bt) + cast<int>(bf) + strlen(s)
+            if (sum == -1) { printf("T01 fail\n", 0lu) }
+        }
+
+        // T02 运算符
+        {
+            int a = 12345
+            int b = 6789
+            lint sum = 0l
+            int i = 0
+            while (i < 30000000) {
+                int x = (a + i) * (b - i)
+                int y = x / (a | 1)
+                int z = x % (b | 1)
+                int p = (a << 2) >> 1
+                int q = a & b
+                int r = a | b
+                int s = a ^ b
+                int t = ~a
+                int tern = (x > y) ? x : y
+                sum = sum + cast<lint>(x) + cast<lint>(y) + cast<lint>(z) + cast<lint>(p)
+                sum = sum + cast<lint>(q) + cast<lint>(r) + cast<lint>(s) + cast<lint>(t) + cast<lint>(tern)
+                i++
+            }
+            if (sum == 0l) { printf("T02 fail\n", 0lu) }
+        }
+
+        // T03 控制流
+        {
+            lint sum = 0l
+            for (int i = 0; i < 30000000; i = i + 1) {
+                if (i % 2 == 0) {
+                    sum = sum + 1l
+                } else {
+                    if (i % 3 == 0) { sum = sum + 2l }
+                    else { sum = sum + 3l }
+                }
+            }
+            int j = 0
+            while (j < 1000) { j++; sum = sum + 1l }
+            if (sum == 0l) { printf("T03 fail\n", 0lu) }
+        }
+
+        // T04 静态数组
+        {
+            int a[1000]
+            int m[10][10]
+            lint sum = 0l
+            int outer = 0
+            while (outer < 100000) {
+                int i = 0
+                while (i < 1000) { a[i] = i * 2; i++ }
+                i = 0
+                while (i < 10) {
+                    int j = 0
+                    while (j < 10) { m[i][j] = i * j; j++ }
+                    i++
+                }
+                i = 0
+                while (i < 1000) { sum = sum + cast<lint>(a[i]); i++ }
+                i = 0
+                while (i < 10) {
+                    int j = 0
+                    while (j < 10) { sum = sum + cast<lint>(m[i][j]); j++ }
+                    i++
+                }
+                outer++
+            }
+            if (sum == 0l) { printf("T04 fail\n", 0lu) }
+        }
+
+        luint g1 = GetTickCount64()
+        printf("G1 basics/ops/array    : %llu ms\n", g1 - g0)
+    }
+
+    // ============ G2: 指针 / 函数指针 / 结构体 / 运算符重载 ============
+    {
+        luint g0 = GetTickCount64()
+
+        // T05 指针与堆
+        {
+            int x = 42
+            int* px = &x
+            int y = *px
+            int outer = 0
+            lint sum = 0l
+            while (outer < 1000000) {
+                int* arr = heap(int, 1000)
+                if (arr != null) {
+                    int i = 0
+                    while (i < 1000) { arr[i] = i * 3; i++ }
+                    int* p = arr
+                    int* end = arr + 1000
+                    while (p < end) { sum = sum + cast<lint>(*p); p++ }
+                    free(arr)
+                }
+                outer++
+            }
+            if (sum == 0l || y == 0) { printf("T05 fail\n", 0lu) }
+        }
+
+        // T06 函数指针
+        {
+            int (int)* fn = &fib
+            int r = fn(20)
+            int (int, int)* cmp = &cmp_int
+            lint sum = 0l
+            int i = 0
+            while (i < 10000000) {
+                sum = sum + cast<lint>(cmp(i, 5000000))
+                i++
+            }
+            if (r != 6765 || sum == 0l) { printf("T06 fail\n", 0lu) }
+        }
+
+        // T07 结构体按值复制
+        {
+            PlainStruct p
+            p.a = 1
+            p.b = 2.5
+            p.c = 'x'
+            p.flag = true
+            int i = 0
+            int sum = 0
+            while (i < 30000000) {
+                PlainStruct q = p
+                sum = sum + q.a + cast<int>(q.b) + cast<int>(q.c)
+                i++
+            }
+            if (sum == -1) { printf("T07 fail\n", 0lu) }
+        }
+
+        // T08 结构体生命周期
+        {
+            int i = 0
+            int sum = 0
+            while (i < 500000) {
+                LifecycleStruct a = LifecycleStruct(1, "hello")
+                LifecycleStruct b = copy(a)
+                LifecycleStruct c = move(b)
+                LifecycleStruct d
+                d = copy(a)
+                LifecycleStruct e
+                e = move(c)
+                sum = sum + d.value + e.value
+                i++
+            }
+            if (sum == -1) { printf("T08 fail\n", 0lu) }
+        }
+
+        // T09 运算符重载
+        {
+            Vec2 a
+            a.x = 1.0
+            a.y = 2.0
+            Vec2 b
+            b.x = 3.0
+            b.y = 4.0
+            int i = 0
+            double sum = 0.0
+            while (i < 3000000) {
+                Vec2 c = a + b
+                bool eq = (c == c)
+                double add = eq ? 1.0 : 0.0
+                sum = sum + c.x + c.y + add
+                i++
+            }
+            if (sum == -1.0) { printf("T09 fail\n", 0lu) }
+        }
+
+        luint g1 = GetTickCount64()
+        printf("G2 ptr/fnptr/struct/op : %llu ms\n", g1 - g0)
+    }
+
+    // ============ G3: 递归 / 转换 / 幂 / size-align ============
+    {
+        luint g0 = GetTickCount64()
+
+        // T10 递归
+        {
+            int f = fib(32)
+            if (f != 2178309) { printf("T10 fail\n", 0lu) }
+        }
+
+        // T11 类型转换
+        {
+            int i = 0
+            double sum = 0.0
+            while (i < 30000000) {
+                double d = cast<double>(i)
+                int x = cast<int>(d * 0.5)
+                float f = cast<float>(d)
+                char c = cast<char>(x % 256)
+                lint li = cast<lint>(x)
+                luint lui = cast<luint>(li)
+                uint ui = cast<uint>(x)
+                sum = sum + cast<double>(x) + cast<double>(f) + cast<double>(c)
+                sum = sum + cast<double>(li % 100l) + cast<double>(lui % 100lu) + cast<double>(ui)
+                i++
+            }
+            if (sum == -1.0) { printf("T11 fail\n", 0lu) }
+        }
+
+        // T12 幂运算
+        {
+            int i = 0
+            lint isum = 0l
+            while (i < 10000) {
+                lint base = cast<lint>(i % 5) + 1l
+                isum = isum + (base ** 1000l)
+                i++
+            }
+            double dsum = 0.0
+            i = 0
+            while (i < 10000) {
+                dsum = dsum + (1.5 ** 2.5)
+                i++
+            }
+            if (isum == 0l || dsum == -1.0) { printf("T12 fail\n", 0lu) }
+        }
+
+        // T13 size / align
+        {
+            int arr100[100]
+            int a = size(int)
+            int b = size(PlainStruct)
+            int c = size(string)
+            int d = size(double)
+            int e = align(int)
+            int f = align(double)
+            int g = align(PlainStruct)
+            int h = size(arr100)
+            int sum = a + b + c + d + e + f + g + h
+            if (sum == -1) { printf("T13 fail\n", 0lu) }
+        }
+
+        luint g1 = GetTickCount64()
+        printf("G3 recur/cast/pow/size : %llu ms\n", g1 - g0)
+    }
+
+    // ============ G4: 字符处理 ============
+    {
+        luint g0 = GetTickCount64()
+
+        // T14 字符分类
+        {
+            int i = 0
+            int sum = 0
+            while (i < 10000000) {
+                char c = cast<char>(33 + (i % 94))
+                if (sl::is_digit(c)) { sum = sum + 1 }
+                if (sl::is_lower(c)) { sum = sum + 1 }
+                if (sl::is_upper(c)) { sum = sum + 1 }
+                if (sl::is_alpha(c)) { sum = sum + 1 }
+                if (sl::is_alnum(c)) { sum = sum + 1 }
+                if (sl::is_space(c)) { sum = sum + 1 }
+                if (sl::is_hex_digit(c)) { sum = sum + 1 }
+                if (sl::is_octal_digit(c)) { sum = sum + 1 }
+                i++
+            }
+            if (sum == -1) { printf("T14 fail\n", 0lu) }
+        }
+
+        // T15 大小写转换
+        {
+            int i = 0
+            int sum = 0
+            while (i < 10000000) {
+                char c = cast<char>(65 + (i % 26))
+                char lo = sl::to_lower(c)
+                char up = sl::to_upper(lo)
+                sum = sum + cast<int>(lo) + cast<int>(up)
+                i++
+            }
+            sum = sum + sl::hex_value('a') + sl::hex_value('F')
+            sum = sum + sl::hex_value('5') + sl::hex_value('z')
+            if (sum == -1) { printf("T15 fail\n", 0lu) }
+        }
+
+        luint g1 = GetTickCount64()
+        printf("G4 char classify/case  : %llu ms\n", g1 - g0)
+    }
+
+    // ============ G5: 字符串（common.glt + runtime API） ============
+    {
+        luint g0 = GetTickCount64()
+
+        // T16 比较与查找
+        {
+            string a = "hello world"
+            string b = "hello"
+            string c = "world"
+            int i = 0
+            int sum = 0
+            while (i < 500000) {
+                if (sl::string_equals(a, a)) { sum = sum + 1 }
+                if (sl::string_starts_with(a, b)) { sum = sum + 1 }
+                if (sl::string_ends_with(a, c)) { sum = sum + 1 }
+                if (sl::string_contains_char(a, 'o')) { sum = sum + 1 }
+                if (!sl::string_is_empty(a)) { sum = sum + 1 }
+                sum = sum + sl::string_index_of_char(a, 'w')
+                sum = sum + sl::string_last_index_of_char(a, 'l')
+                sum = sum + sl::string_count_char(a, 'l')
+                i++
+            }
+            if (sum == -1) { printf("T16 fail\n", 0lu) }
+        }
+
+        // T17 repeat / reverse / pad / trim
+        {
+            int i = 0
+            int sum = 0
+            while (i < 20000) {
+                string r = sl::string_repeat("ab", 50)
+                string rev = sl::string_reverse(r)
+                string pl = sl::string_pad_left("x", 100, '0')
+                string pr = sl::string_pad_right("x", 100, '0')
+                string tl = sl::string_trim_left("   hello")
+                string tr = sl::string_trim_right("hello   ")
+                sum = sum + strlen(r) + strlen(rev) + strlen(pl)
+                sum = sum + strlen(pr) + strlen(tl) + strlen(tr)
+                i++
+            }
+            if (sum == -1) { printf("T17 fail\n", 0lu) }
+        }
+
+        // T18 split / join
+        {
+            string s = "a,b,c,d,e,f,g,h,i,j"
+            int i = 0
+            int sum = 0
+            while (i < 100000) {
+                int count = sl::string_split_count(s, ",")
+                string p0 = sl::string_split(s, ",", 0)
+                string p5 = sl::string_split(s, ",", 5)
+                string p9 = sl::string_split(s, ",", 9)
+                string j = sl::string_join(p0, p5, "-")
+                sum = sum + count + strlen(p0) + strlen(p5) + strlen(p9) + strlen(j)
+                i++
+            }
+            if (sum == -1) { printf("T18 fail\n", 0lu) }
+        }
+
+        // T19 字符串 + 运算符
+        {
+            int i = 0
+            int sum = 0
+            while (i < 500000) {
+                string a = "hello"
+                string b = " world"
+                string c = a + b
+                sum = sum + strlen(c)
+                i++
+            }
+            if (sum == -1) { printf("T19 fail\n", 0lu) }
+        }
+
+        // T20 runtime 字符串 API
+        {
+            int i = 0
+            int sum = 0
+            while (i < 200000) {
+                string a = "Hello World"
+                string b = "hello world"
+                int cmp = strcompare(a, b)
+                int idx = strfind(a, "World")
+                bool has = strcontains(a, "lo")
+                string sub = strsubstr(a, 0, 5)
+                string up = strupper(a)
+                string lo = strlower(a)
+                string tr = strtrim("  x  ")
+                char at = strcharat(a, 0)
+                int cnt = strsplitcount("a;b;c", ";")
+                string sp = strsplitget("a;b;c", ";", 1)
+                int has_i = has ? 1 : 0
+                sum = sum + cmp + idx + has_i + strlen(sub) + strlen(up)
+                sum = sum + strlen(lo) + strlen(tr) + cast<int>(at) + cnt + strlen(sp)
+                i++
+            }
+            if (sum == -1) { printf("T20 fail\n", 0lu) }
+        }
+
+        luint g1 = GetTickCount64()
+        printf("G5 string ops          : %llu ms\n", g1 - g0)
+    }
+
+    // ============ G6: 数学 + 随机 ============
+    {
+        luint g0 = GetTickCount64()
+
+        // T21 math 基础
+        {
+            double sum = 0.0
+            int i = 0
+            while (i < 100000) {
+                double x = cast<double>(i) * 0.01
+                sum = sum + sl::abs(-x) + sl::fabs(-x)
+                sum = sum + sl::trunc(x) + sl::floor(x) + sl::ceil(x) + sl::round(x)
+                sum = sum + sl::fmod(x, 3.0) + sl::min(x, 5.0) + sl::max(x, 5.0)
+                sum = sum + sl::clamp(x, 0.0, 10.0)
+                i++
+            }
+            if (sum == -1.0) { printf("T21 fail\n", 0lu) }
+        }
+
+        // T22 math 超越
+        {
+            double sum = 0.0
+            int i = 1
+            while (i < 20000) {
+                double x = cast<double>(i) * 0.001
+                sum = sum + sl::sqrt(x + 1.0) + sl::exp(x)
+                sum = sum + sl::log(x + 1.0) + sl::log10(x + 1.0) + sl::log2(x + 1.0)
+                sum = sum + sl::pow(1.5, x)
+                i++
+            }
+            if (sum == -1.0) { printf("T22 fail\n", 0lu) }
+        }
+
+        // T23 三角函数
+        {
+            double sum = 0.0
+            int i = 0
+            while (i < 20000) {
+                double x = cast<double>(i) * 0.001
+                sum = sum + sl::sin(x) + sl::cos(x) + sl::tan(x * 0.5)
+                sum = sum + sl::asin(x * 0.5) + sl::acos(x * 0.5)
+                sum = sum + sl::atan(x) + sl::atan2(x, 1.0)
+                sum = sum + sl::sinh(x * 0.1) + sl::cosh(x * 0.1) + sl::tanh(x * 0.1)
+                i++
+            }
+            if (sum == -1.0) { printf("T23 fail\n", 0lu) }
+        }
+
+        // T24 随机
+        {
+            sl::srand(42lu)
+            lint sum = 0l
+            int i = 0
+            while (i < 10000000) {
+                sum = sum + cast<lint>(sl::rand())
+                sum = sum + cast<lint>(sl::random_int(0, 100))
+                if (i % 10 == 0) {
+                    sum = sum + cast<lint>(sl::random_double() * 1000.0)
+                    sum = sum + cast<lint>(sl::random_double_range(0.0, 100.0))
+                }
+                i++
+            }
+            if (sum == 0l) { printf("T24 fail\n", 0lu) }
+        }
+
+        luint g1 = GetTickCount64()
+        printf("G6 math+random         : %llu ms\n", g1 - g0)
+    }
+
+    // ============ G7: 文件 I/O ============
+    {
+        luint g0 = GetTickCount64()
+
+        // T25 文件 I/O
+        {
+            string path = "bench_v2_tmp.txt"
+            int outer = 0
+            while (outer < 20) {
+                file* wf = fileopen(path, "w")
+                if (wf != null) {
+                    int i = 0
+                    while (i < 2000) {
+                        filewriteline(wf, "line content")
+                        i++
+                    }
+                    fileflush(wf)
+                    fileclose(wf)
+                }
+
+                bool exists = fileexists(path)
+                int sz = filesize(path)
+
+                file* rf = fileopen(path, "r")
+                if (rf != null) {
+                    int total = 0
+                    while (!fileeof(rf)) {
+                        string line = filereadline(rf)
+                        total = total + strlen(line)
+                    }
+                    fileclose(rf)
+                }
+
+                string path2 = "bench_v2_copy.txt"
+                bool copied = filecopy(path, path2)
+                bool renamed = filerename(path2, "bench_v2_renamed.txt")
+                bool removed = fileremove("bench_v2_renamed.txt")
+                bool removed2 = fileremove(path)
+                if (!exists || sz < 0 || !copied || !renamed || !removed || !removed2) {
+                    printf("T25 fail\n", 0lu)
+                }
+                outer++
+            }
+
+            bool mkdir_ok = filemkdir("bench_v2_dir")
+            bool rmdir_ok = fileremovedir("bench_v2_dir")
+            if (!mkdir_ok || !rmdir_ok) { printf("T25 mkdir fail\n", 0lu) }
+        }
+
+        luint g1 = GetTickCount64()
+        printf("G7 file I/O            : %llu ms\n", g1 - g0)
+    }
+
+    // ============ G8: 泛型（dynamic_array / hash_table / sort / swap） ============
+    {
+        luint g0 = GetTickCount64()
+
+        // T26 dynamic_array<int>
+        {
+            int r = bench_dyn_int()
+            if (r == -1) { printf("T26 fail\n", 0lu) }
+        }
+
+        // T27 dynamic_array<double> / <string>
+        {
+            int rd = bench_dyn_double()
+            int rs = bench_dyn_string()
+            if (rd == -1 || rs == -1) { printf("T27 fail\n", 0lu) }
+        }
+
+        // T28 hash_table<int,int>
+        {
+            int r = bench_ht_int()
+            if (r == -1) { printf("T28 fail\n", 0lu) }
+        }
+
+        // T29 hash_table<int,string>
+        {
+            int r = bench_ht_string()
+            if (r == -1) { printf("T29 fail\n", 0lu) }
+        }
+
+        // T30 sort<int>
+        {
+            int r = bench_sort_int()
+            if (r == -1) { printf("T30 fail\n", 0lu) }
+        }
+
+        // T31 sort<double>
+        {
+            int r = bench_sort_double()
+            if (r == -1) { printf("T31 fail\n", 0lu) }
+        }
+
+        // T32 swap_generic
+        {
+            int ri = bench_swap_int()
+            int rs = bench_swap_string()
+            if (ri == -1 || rs == -1) { printf("T32 fail\n", 0lu) }
+        }
+
+        luint g1 = GetTickCount64()
+        printf("G8 generics            : %llu ms\n", g1 - g0)
+    }
+
+    // ============ G9: 命名空间 / 全局变量 ============
+    {
+        luint g0 = GetTickCount64()
+
+        // T33 命名空间
+        {
+            int r = bench_ns::add(1, 2)
+            int c = bench_ns::NS_CONST
+            if (r != 3 || c != 100) { printf("T33 fail\n", 0lu) }
+        }
+
+        // T34 全局变量与常量
+        {
+            int i = 0
+            int sum = 0
+            while (i < 30000000) {
+                global_counter = global_counter + 1
+                global_state = global_state + 1lu
+                sum = sum + GLOBAL_CONST
+                i++
+            }
+            if (global_counter < 0 || sum == -1) { printf("T34 fail\n", 0lu) }
+        }
+
+        luint g1 = GetTickCount64()
+        printf("G9 namespace/globals   : %llu ms\n", g1 - g0)
+    }
+
+    luint t_all_end = GetTickCount64()
+    printf("--------------------------------\n", 0lu)
+    printf("TOTAL                  : %llu ms\n", t_all_end - t_all_start)
+
+    return 0
+}
+
+@uncond FULL

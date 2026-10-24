@@ -1,0 +1,36 @@
+// sl__dynamic_array__pass__003.glt
+// expect output
+// 2 alpha beta | gamma beta | beta 1 | zeta gamma | gamma | 4 [delta][] | 1 gamma | gamma | 1 gamma | 0 true | omega  end
+
+guide "generics.glt"
+access namespace sl
+
+int main() {
+    dynamic_array_generic<string>
+    dynamic_array names = dynamic_array(2)
+    push(&names, "alpha")
+    push(&names, "beta")
+    output(length(&names), " ", get(&names, 0), " ", get(&names, 1), " | ")
+    set(&names, 0, "gamma")
+    output(front(&names), " ", back(&names), " | ")
+    string popped = pop(&names)
+    output(popped, " ", length(&names), " | ")
+    push(&names, "delta")
+    insert(&names, 0, "zeta")
+    output(get(&names, 0), " ", get(&names, 1), " | ")
+    erase(&names, 0)
+    output(get(&names, 0), " | ")
+    resize(&names, 4)
+    output(length(&names), " [", get(&names, 1), "][", get(&names, 3), "] | ")
+    resize(&names, 1)
+    output(length(&names), " ", get(&names, 0), " | ")
+    string* raw = data_ptr(&names)
+    output(raw[0], " | ")
+    dynamic_array copy = copy(names)
+    output(length(&copy), " ", get(&copy, 0), " | ")
+    clear(&names)
+    output(length(&names), " ", empty(&names), " | ")
+    push(&names, "omega")
+    output(get(&names, 0), " ", get(&names, 9), " end")
+    return 0
+}

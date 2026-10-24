@@ -1,0 +1,13 @@
+// lang__cast__pass__013.glt
+// expect output
+// 7.0
+
+generics Widen<T> {
+    T widen(int v) {
+        return cast<T>(v)
+    }
+}
+int main() {
+    output(Widen<double>.widen(7))
+    return 0
+}

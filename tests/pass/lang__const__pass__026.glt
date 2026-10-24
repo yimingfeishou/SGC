@@ -1,0 +1,9 @@
+// lang__const__pass__026.glt
+// expect output
+// 1
+
+int main() {
+    const int x = 1 / 0
+    output(x)
+    return 0
+}

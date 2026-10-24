@@ -1,0 +1,15 @@
+// lang__null__pass__003.glt
+// expect output
+// true 42 []
+
+int main() {
+    file f = null
+    output(f == null)
+    int value = 0
+    input(value)
+    output(" ", value)
+    string text = ""
+    input(text)
+    output(" [", text, "]")
+    return 0
+}

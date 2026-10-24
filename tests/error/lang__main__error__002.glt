@@ -1,0 +1,10 @@
+// lang__main__error__002.glt
+// expect exit nonzero
+
+int main(int count, char* array[]) {
+    return 7
+}
+
+int call_main(int count, char* array[]) {
+    return main(count, array)
+}

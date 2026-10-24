@@ -1,0 +1,10 @@
+// integ__str_func__pass__003.glt
+// expect output
+// hello from extern
+
+extern int puts from libucrt (string text)
+
+int main() {
+    puts("hello from extern")
+    return 0
+}

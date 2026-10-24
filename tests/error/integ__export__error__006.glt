@@ -1,0 +1,6 @@
+// integ__export__error__006.glt
+// expect error ER 0125
+
+export int main() {
+    return 0
+}

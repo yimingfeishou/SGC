@@ -1,0 +1,15 @@
+// lang__function__pass__006.glt
+// expect output
+// escapes ok
+
+@cond LETTER = '\x41'
+@cond TAB = '\t'
+
+int main() {
+    @if (LETTER == 65 && TAB == 9) {
+        output("escapes ok")
+    } @else {
+        output("escapes bad")
+    }
+    return 0
+}

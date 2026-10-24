@@ -1,0 +1,33 @@
+// lang__const__pass__016.glt
+// expect output
+// 3 4
+// 6
+
+struct Point {
+    int x
+    int y
+}
+
+const Point make_point(int x, int y) {
+    Point p = {x, y}
+    return p
+}
+
+const Point origin = make_point(3, 4)
+
+const int sum_three() {
+    int arr[3] = {1, 2, 3}
+    int total = 0
+    for (int i = 0; i < 3; i++) {
+        total = total + arr[i]
+    }
+    return total
+}
+
+const int total = sum_three()
+
+int main() {
+    output(origin.x, " ", origin.y, "\n")
+    output(total, "\n")
+    return 0
+}

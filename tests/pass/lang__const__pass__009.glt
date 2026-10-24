@@ -1,0 +1,17 @@
+// lang__const__pass__009.glt
+// expect output
+// 2 2 1
+
+int main() {
+    const int value = 1
+    {
+        const int value = 2
+        output(value, " ")
+    }
+    {
+        const int restored = value + 1
+        output(restored, " ")
+    }
+    output(value)
+    return 0
+}

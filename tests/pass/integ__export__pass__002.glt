@@ -1,0 +1,42 @@
+// integ__export__pass__002.glt
+// expect output
+// hello gallt
+// 5
+// 6.0
+// false true
+// ab
+// 42
+
+export int add(int a, int b) {
+    return a + b
+}
+
+export double scaled(double value, int factor) {
+    return value * factor
+}
+
+export bool is_even(int value) {
+    return value % 2 == 0
+}
+
+export void greet(string name) {
+    output("hello ", name, "\n")
+}
+
+export string join(string first, string second) {
+    return strconcat(first, second)
+}
+
+int helper(int value) {
+    return value * 2
+}
+
+int main() {
+    greet("gallt")
+    output(add(2, 3), "\n")
+    output(scaled(1.5, 4), "\n")
+    output(is_even(7), " ", is_even(8), "\n")
+    output(join("a", "b"), "\n")
+    output(helper(21), "\n")
+    return 0
+}

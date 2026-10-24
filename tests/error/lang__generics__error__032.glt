@@ -1,0 +1,14 @@
+// lang__generics__error__032.glt
+// expect exit nonzero
+
+generics Chain<T> {
+    struct Link {
+        Chain<T*>.Link* next
+    }
+}
+
+int main() {
+    Chain<int>
+    output(1, "\n")
+    return 0
+}

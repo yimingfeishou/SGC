@@ -1,0 +1,21 @@
+// lang__heap__pass__005.glt
+// expect output
+// null ok:123
+
+int main() {
+    int* p = heap(int, -5)
+    if (p != null) {
+        p[0] = 12345
+        p[1] = 54321
+        output("wrote:", p[0], " ", p[1])
+    } else {
+        output("null")
+    }
+    int* q = heap(int, 3)
+    q[0] = 1
+    q[1] = 2
+    q[2] = 3
+    output(" ok:", q[0], q[1], q[2])
+    free(q)
+    return 0
+}

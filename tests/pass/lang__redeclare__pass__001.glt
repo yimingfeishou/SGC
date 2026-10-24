@@ -1,0 +1,18 @@
+// lang__redeclare__pass__001.glt
+// expect output
+// dup2 
+
+int main() {
+    switch (2) {
+        case (1) {
+            output("dup1 ")
+        }
+        case (2) {
+            output("dup2 ")
+        }
+        case (2) {
+            output("dup3 ")
+        }
+    }
+    return 0
+}

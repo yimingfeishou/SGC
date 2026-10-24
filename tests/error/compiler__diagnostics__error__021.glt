@@ -1,0 +1,15 @@
+// compiler__diagnostics__error__021.glt
+// expect error ER 0019
+
+int main() {
+    int i = 3.9
+    int j = -3.9
+    double d = 2.5
+    float f = 2.5
+    output(i, " ", j, " ", int(d), " ", int(f), " ", int(-2.5))
+    char c = 300
+    uchar u = 300
+    bool b = 5
+    output(" ", int(c), " ", int(u), " ", int(b))
+    return 0
+}

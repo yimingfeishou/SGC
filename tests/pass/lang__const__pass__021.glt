@@ -1,0 +1,56 @@
+// lang__const__pass__021.glt
+// expect output
+// 10000000000
+// 1
+// 3.5
+// 0.5
+// B
+// 4
+// true
+
+const lint scale_lint(lint value, lint factor) {
+    return value * factor
+}
+
+const luint keep_low_bits(luint value, luint mask) {
+    return value & mask
+}
+
+const double average(double a, double b) {
+    return (a + b) / 2.0
+}
+
+const float half_of(float value) {
+    return value / 2.0
+}
+
+const char next_char(char value) {
+    return value + 1
+}
+
+const uchar wrap_uchar(uchar value, int step) {
+    return value + step
+}
+
+const bool is_even(int value) {
+    return value % 2 == 0
+}
+
+const lint big = scale_lint(100000, 100000)
+const luint low = keep_low_bits(4097lu, 255lu)
+const double avg = average(3.0, 4.0)
+const float half = half_of(1.0)
+const char letter = next_char('A')
+const uchar byte = wrap_uchar(250, 10)
+const bool even = is_even(10)
+
+int main() {
+    output(big, "\n")
+    output(low, "\n")
+    output(avg, "\n")
+    output(half, "\n")
+    output(letter, "\n")
+    output(cast<int>(byte), "\n")
+    output(even, "\n")
+    return 0
+}

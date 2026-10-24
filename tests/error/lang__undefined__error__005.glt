@@ -1,0 +1,7 @@
+// lang__undefined__error__005.glt
+// expect error ER 0001
+
+int main() {
+    int value = undefined_object.field
+    return 0
+}

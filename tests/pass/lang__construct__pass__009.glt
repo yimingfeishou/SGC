@@ -1,0 +1,18 @@
+// lang__construct__pass__009.glt
+// expect output
+// 5
+
+generics Box<T> {
+    struct Box {
+        T value
+        constructor (T v) {
+            value = v
+        }
+    }
+}
+int main() {
+    Box<int>.Box* b = construct Box<int>.Box(5)
+    output(b->value)
+    destruct b
+    return 0
+}

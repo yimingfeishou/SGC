@@ -1,0 +1,17 @@
+// lang__generics__error__031.glt
+// expect error ER 0077
+
+generics Box<int> {
+    struct Box {
+        int value
+    }
+}
+generics Box<T> {
+    struct Box {
+        T value
+    }
+}
+int main() {
+    Box<int>.Box b = {1}
+    return 0
+}

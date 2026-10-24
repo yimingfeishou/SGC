@@ -1,0 +1,8 @@
+// lang__main__pass__001.glt
+// expect output
+// link options ok
+
+int main() {
+    output("link options ok\n")
+    return 0
+}

@@ -1,0 +1,14 @@
+// lang__str_parse__error__004.glt
+// expect error ER 0032
+
+struct Point {
+    int x
+    int y
+}
+
+int main() {
+    Point p = {1, 2}
+    string s = cast<string>(p)
+    output("[", s, "]")
+    return 0
+}

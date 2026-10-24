@@ -1,0 +1,27 @@
+// lang__lifecycle__pass__005.glt
+// expect output
+// 5D
+
+struct Tracked {
+    int value
+
+    constructor (int initial) {
+        value = initial
+    }
+
+    destructor () {
+        output("D")
+    }
+}
+
+int main() {
+    Tracked* item = construct Tracked(3)
+    {
+        int* item = heap(int, 1)
+        item[0] = 5
+        output(item[0])
+        free(item)
+    }
+    destruct item
+    return 0
+}

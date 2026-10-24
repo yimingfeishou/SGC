@@ -1,0 +1,9 @@
+// lang__const__error__017.glt
+// expect error ER 0108
+
+int main() {
+    int x = 1
+    const int* p = &x
+    *p = 5
+    return 0
+}

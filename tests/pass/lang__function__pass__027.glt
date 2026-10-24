@@ -1,0 +1,9 @@
+// lang__function__pass__027.glt
+// expect output
+// 100000.0
+
+int main() {
+    float a = 1e+5
+    output(a)
+    return 0
+}

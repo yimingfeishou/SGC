@@ -1,0 +1,15 @@
+// lang__cast__pass__016.glt
+// expect output
+// u
+
+int main() {
+    int x = 0 - 1
+    switch (x) {
+        case (4294967295u) {
+            output("u")
+        } case (1u) {
+            output("i")
+        }
+    }
+    return 0
+}

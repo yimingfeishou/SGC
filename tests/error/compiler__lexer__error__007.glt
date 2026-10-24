@@ -1,0 +1,5 @@
+// compiler__lexer__error__007.glt
+// expect error ER 0027
+
+/*ab
+cd*/undefined_thing

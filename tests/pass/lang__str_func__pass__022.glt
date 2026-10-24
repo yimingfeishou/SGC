@@ -1,0 +1,13 @@
+// lang__str_func__pass__022.glt
+// expect output
+// m
+
+struct Q {
+    string s
+    int z = 3
+}
+
+int main() {
+    output("m")
+    return 0
+}

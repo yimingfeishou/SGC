@@ -1,0 +1,15 @@
+// compiler__diagnostics__error__005.glt
+// expect error ER 0012
+
+struct Point {
+    int x
+}
+
+int main() {
+    int value = 1
+    int* slot = &value
+    Point p = {2}
+    input(slot)
+    input(p)
+    return 0
+}

@@ -1,0 +1,8 @@
+// lang__array__pass__002.glt
+// expect output
+
+int main() {
+    int a[3] = {1, 2, 3}
+    int x = a[5]
+    return 0
+}

@@ -1,0 +1,21 @@
+// lang__generics__pass__052.glt
+// expect output
+// 9
+// 9
+
+const int square(int x) {
+    return x * x
+}
+const int plus(int a, int b) {
+    return a + b
+}
+generics G<T: int, T N> {
+    int value() {
+        return N
+    }
+}
+int main() {
+    output(G<int, plus(square(2), 5)>.value(), "\n")
+    output(G<int, square(2) + 5>.value(), "\n")
+    return 0
+}

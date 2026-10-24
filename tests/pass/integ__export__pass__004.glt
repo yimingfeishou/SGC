@@ -1,0 +1,22 @@
+// integ__export__pass__004.glt
+// expect output
+// hello world
+// 5 8
+
+export int add(int a, int b) {
+    return a + b
+}
+
+export void greet(string name) {
+    output("hello ", name, "\n")
+}
+
+int helper(int value) {
+    return value * 2
+}
+
+int main() {
+    greet("world")
+    output(add(2, 3), " ", helper(4), "\n")
+    return 0
+}

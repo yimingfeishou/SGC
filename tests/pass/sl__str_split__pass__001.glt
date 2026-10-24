@@ -1,0 +1,11 @@
+// sl__str_split__pass__001.glt
+// expect output
+// [a][b][c]
+
+guide "common.glt"
+
+int main() {
+    string s = "a,b,c"
+    output("[", sl::string_split(s, ",", 0), "][", sl::string_split(s, ",", 1), "][", sl::string_split(s, ",", 2), "]\n")
+    return 0
+}

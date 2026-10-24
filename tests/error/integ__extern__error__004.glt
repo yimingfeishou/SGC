@@ -1,0 +1,8 @@
+// integ__extern__error__004.glt
+// expect error ER 0019
+
+extern int printf(string from "c" ...)
+
+int main() {
+    return 0
+}

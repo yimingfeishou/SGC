@@ -1,0 +1,19 @@
+// lang__emit__pass__005.glt
+// expect output
+// 5 7
+
+struct example {
+    int v
+}
+
+generics Wrapper<T> {
+    emit T.typename + " make_" + T.typename + "(" + T.typename + " value) {\n"
+    emit "    return value\n"
+    emit "}\n"
+}
+
+int main() {
+    example e = {7}
+    output(Wrapper<int>.make_int(5), " ", Wrapper<example>.make_example(e).v, "\n")
+    return 0
+}

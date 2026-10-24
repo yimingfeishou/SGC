@@ -1,0 +1,13 @@
+// lang__op_overload__error__008.glt
+// expect error ER 0118
+
+struct S {
+    int v
+    operator + (S a, S b) {
+        return a.v
+    }
+}
+
+int main() {
+    return 0
+}

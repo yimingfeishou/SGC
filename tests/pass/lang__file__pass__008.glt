@@ -1,0 +1,25 @@
+// lang__file__pass__008.glt
+// expect output
+// 9
+// [line one]
+// type something: read=[typed text] len=10
+
+int main() {
+    string path = "tests/work/str_io_probe.txt"
+    file* handle = fileopen(path, "w")
+    if (handle == null) {
+        output("open failed\n")
+        return 1
+    }
+    int written = strwritefile(handle, "line one\n")
+    fileclose(handle)
+    output(written, "\n")
+    file* reader = fileopen(path, "r")
+    string line = filereadline(reader)
+    output("[", line, "]\n")
+    fileclose(reader)
+    output("type something: ")
+    string typed = strread()
+    output("read=[", typed, "] len=", strlen(typed), "\n")
+    return 0
+}

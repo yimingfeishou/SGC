@@ -1,0 +1,7 @@
+// lang__array__error__003.glt
+// expect error ER 0014
+
+int main() {
+    int a[] = {}
+    return 0
+}

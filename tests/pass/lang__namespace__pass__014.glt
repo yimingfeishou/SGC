@@ -1,0 +1,20 @@
+// lang__namespace__pass__014.glt
+// expect output
+// 12
+
+generics Emitted<T: int> {
+    emit "namespace emitted_values {\n"
+    emit "int offset() {\n"
+    emit "    return 7\n"
+    emit "}\n"
+    emit "}\n"
+    emit "access namespace emitted_values\n"
+    emit "T add_offset(T value) {\n"
+    emit "    return value + offset()\n"
+    emit "}\n"
+}
+
+int main() {
+    output(Emitted<int>::add_offset(5))
+    return 0
+}

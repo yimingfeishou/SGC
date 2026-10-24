@@ -1,0 +1,15 @@
+// lang__function__pass__005.glt
+// expect output
+// seven
+
+@cond BASE = 2
+@cond TOTAL = BASE * 3 + 1
+
+int main() {
+    @if (TOTAL == 7) {
+        output("seven")
+    } @else {
+        output("other")
+    }
+    return 0
+}

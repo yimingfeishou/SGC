@@ -1,0 +1,7 @@
+// compiler__lexer__error__005.glt
+// expect error ER 0024
+
+int main() {
+    int x = 10x
+    return 0
+}

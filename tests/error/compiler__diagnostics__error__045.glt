@@ -1,0 +1,11 @@
+// compiler__diagnostics__error__045.glt
+// expect error ER 0012
+
+const char shift_char(char c, int n) {
+    return c + n
+}
+const char ch = shift_char("A", 1)
+int main() {
+    output(ch, "\n")
+    return 0
+}

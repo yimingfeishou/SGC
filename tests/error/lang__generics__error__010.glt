@@ -1,0 +1,12 @@
+// lang__generics__error__010.glt
+// expect error ER 0134
+
+void sink(int... rest) {
+    output(rest.length)
+}
+
+int main() {
+    int plain = 1
+    sink(plain...)
+    return 0
+}

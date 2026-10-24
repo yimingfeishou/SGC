@@ -1,0 +1,13 @@
+// lang__generics__error__037.glt
+// expect error ER 0101
+
+generics Bad<T> {
+    emit "generics Inner<U> {\n"
+    emit "    U value\n"
+    emit "}\n"
+}
+
+int main() {
+    Bad<int>
+    return 0
+}

@@ -1,0 +1,14 @@
+// lang__pointer__pass__011.glt
+// expect output
+// 7 true true
+
+int main() {
+    int x = 7
+    int* p = &x
+    void* raw = p
+    int* back = raw
+    output(*back, " ", p == raw)
+    void* nothing = null
+    output(" ", nothing == null)
+    return 0
+}

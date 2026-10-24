@@ -1,0 +1,17 @@
+// lang__str_func__pass__014.glt
+// expect output
+// hi
+
+struct S {
+    string s
+    constructor (string v) {
+        s = v
+    }
+}
+int main() {
+    string t = "hi"
+    S* p = construct S(t)
+    output(p->s)
+    destruct p
+    return 0
+}

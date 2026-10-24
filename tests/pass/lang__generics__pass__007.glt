@@ -1,0 +1,21 @@
+// lang__generics__pass__007.glt
+// expect output
+// 44
+
+int order
+
+int record(int value) {
+    order = order * 10 + value
+    return value
+}
+
+generics Captured<T> {
+    T value = record(4)
+}
+
+int main() {
+    Captured<int>
+    output(order)
+    output(value)
+    return 0
+}

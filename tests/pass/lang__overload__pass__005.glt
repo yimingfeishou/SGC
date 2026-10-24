@@ -1,0 +1,35 @@
+// lang__overload__pass__005.glt
+// expect output
+// 33
+
+struct A {
+    int v
+}
+
+struct B {
+    int v
+}
+
+struct Box {
+    int x
+}
+
+int pick(A a, int n = 10) {
+    return a.v + n
+}
+
+int pick(B b, int n = 20) {
+    return b.v + n
+}
+
+int operator << (Box lhs, int rhs) {
+    return lhs.x + rhs
+}
+
+int main() {
+    A a = {1}
+    B b = {2}
+    int r = pick(a) + pick(b)
+    output(r)
+    return 0
+}

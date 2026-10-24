@@ -1,0 +1,20 @@
+// lang__default_arg__pass__004.glt
+// expect output
+// default statement
+// case 2
+
+int main() {
+    switch (3) {
+        case (1) {
+            output("case 1\n")
+            fallthrough
+        }
+        output("default statement\n")
+        fallthrough
+        case (2) {
+            output("case 2\n")
+        }
+        output("default statement\n")
+    }
+    return 0
+}

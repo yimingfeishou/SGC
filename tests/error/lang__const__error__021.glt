@@ -1,0 +1,13 @@
+// lang__const__error__021.glt
+// expect error ER 0065
+
+generics FixedArray<T, int N> {
+    struct FixedArray {
+        T data[N]
+    }
+}
+int main() {
+    int n = 3
+    FixedArray<int, n>.FixedArray a
+    return 0
+}

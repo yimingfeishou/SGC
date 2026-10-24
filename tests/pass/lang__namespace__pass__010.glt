@@ -1,0 +1,30 @@
+// lang__namespace__pass__010.glt
+// expect output
+// 2 7
+
+@cond FEATURE = 2
+
+namespace tools {
+    @if (FEATURE == 1) {
+        int version() {
+            return 1
+        }
+    } @else {
+        int version() {
+            return 2
+        }
+
+        struct Pair {
+            int a
+            int b
+        }
+    }
+}
+
+access namespace tools
+
+int main() {
+    Pair p = {3, 4}
+    output(version(), " ", p.a + p.b)
+    return 0
+}

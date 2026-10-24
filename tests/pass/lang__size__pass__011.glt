@@ -1,0 +1,15 @@
+// lang__size__pass__011.glt
+// expect output
+// 4
+
+generics Inner<U> {
+    int probe() { return size(U) }
+}
+
+struct S { int x }
+
+int main() {
+    Inner<S>
+    output(probe(), "\n")
+    return 0
+}

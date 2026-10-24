@@ -1,0 +1,8 @@
+// compiler__lexer__error__009.glt
+// expect error ER 0019
+
+int main() {
+    float a = 1e+
+    output(a)
+    return 0
+}

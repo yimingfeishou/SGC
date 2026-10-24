@@ -1,0 +1,30 @@
+// sl__emit__error__001.glt
+// expect error ER 0101
+
+guide "generics.glt"
+access namespace sl
+
+generics Test<T: struct> {
+    emit {
+        luint test_offset(T* p) {
+            return sl::offset_generic<T, "x">.offset(p)
+        }
+    }
+}
+
+generics TestShort<T: struct> {
+    emit {
+        luint test_offset_short(T* p) {
+            return offset_generic<T, "x">.offset(p)
+        }
+    }
+}
+
+struct S { int x }
+
+int main() {
+    S s
+    output(Test<S>.test_offset(&s), "\n")
+    output(TestShort<S>.test_offset_short(&s), "\n")
+    return 0
+}

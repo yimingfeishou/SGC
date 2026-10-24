@@ -1,0 +1,49 @@
+// lang__struct__pass__017.glt
+// expect output
+// 3 3 3
+
+struct S {
+    int x
+
+    constructor () {
+        x = 0
+    }
+
+    copy_assignment (S* other) {
+        x = other->x
+    }
+
+    move_assignment (S* other) {
+        x = other->x
+    }
+
+    destructor () {
+        return
+    }
+}
+
+struct Outer {
+    S inner
+}
+
+int main() {
+    S a
+    a.x = 3
+
+    Outer o
+    o.inner.x = 0
+    o.inner = a
+    output(o.inner.x, " ")
+
+    S arr[2]
+    arr[0].x = 0
+    arr[0] = a
+    output(arr[0].x, " ")
+
+    S v
+    v.x = 0
+    S* q = &v
+    *q = a
+    output(v.x)
+    return 0
+}

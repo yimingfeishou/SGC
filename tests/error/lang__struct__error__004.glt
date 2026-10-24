@@ -1,0 +1,9 @@
+// lang__struct__error__004.glt
+// expect error ER 0042
+
+struct S { int a }
+int main() {
+    S s = {1}
+    int b = s.b
+    return 0
+}

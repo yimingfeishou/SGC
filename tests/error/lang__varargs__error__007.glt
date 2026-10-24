@@ -1,0 +1,11 @@
+// lang__varargs__error__007.glt
+// expect error ER 0141
+
+int sum_all(int... rest) {
+    return rest.length
+}
+
+int main() {
+    int fixed(int, int)* = &sum_all
+    return fixed(1, 2)
+}

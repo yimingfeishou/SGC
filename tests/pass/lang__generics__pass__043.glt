@@ -1,0 +1,15 @@
+// lang__generics__pass__043.glt
+// expect output
+// 9
+
+generics Box<T> {
+    struct Inner {
+        T k
+    }
+}
+int main() {
+    Box<int>.Inner in = {9}
+    Box<int>.Inner* p = cast<Box<int>.Inner*>(&in)
+    output(p->k)
+    return 0
+}

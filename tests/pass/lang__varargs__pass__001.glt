@@ -1,0 +1,26 @@
+// lang__varargs__pass__001.glt
+// expect output
+// [nums]123
+// [empty]
+// [fwd]456
+// [fwd0]
+
+void log(string tag, int... values) {
+    output("[", tag, "]")
+    for (int i = 0; i < values.length; i++) {
+        output(values[i])
+    }
+    output("\n")
+}
+
+void forward(string tag, int... values) {
+    log(tag, values...)
+}
+
+int main() {
+    log("nums", 1, 2, 3)
+    log("empty")
+    forward("fwd", 4, 5, 6)
+    forward("fwd0")
+    return 0
+}

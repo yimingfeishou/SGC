@@ -1,0 +1,12 @@
+// lang__function__pass__030.glt
+// expect output
+// 51
+
+const uint mask(uint v, uint bits) {
+    return (v << bits) | v
+}
+const uint m = mask(3, 4)
+int main() {
+    output(m, "\n")
+    return 0
+}

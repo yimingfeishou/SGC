@@ -1,0 +1,13 @@
+// lang__generics__pass__044.glt
+// expect output
+// 4
+
+generics Sized<T, int N> {
+    int length() {
+        return cast<int>(N)
+    }
+}
+int main() {
+    output(Sized<int, 4>.length())
+    return 0
+}

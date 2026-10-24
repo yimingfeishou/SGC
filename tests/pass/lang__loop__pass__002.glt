@@ -1,0 +1,15 @@
+// lang__loop__pass__002.glt
+// expect output
+// 3
+
+int main() {
+    int i = 0
+    for (;;) {
+        i++
+        if (i > 2) {
+            break
+        }
+    }
+    output(i, "\n")
+    return 0
+}

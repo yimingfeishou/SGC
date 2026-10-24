@@ -1,0 +1,12 @@
+// lang__const_fn__pass__006.glt
+// expect output
+// 5
+
+const int size_of_text(string s) {
+    return strlen(s) + 1
+}
+const int n = size_of_text("abcd")
+int main() {
+    output(n, "\n")
+    return 0
+}

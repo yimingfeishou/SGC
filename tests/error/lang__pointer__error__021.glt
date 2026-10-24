@@ -1,0 +1,12 @@
+// lang__pointer__error__021.glt
+// expect error ER 0019
+
+int add(int a, int b) {
+    return a + b
+}
+int main() {
+    void* v = void*(&add)
+    int(int, int)* f = int(int, int)*(v)
+    output(f(1, 2))
+    return 0
+}

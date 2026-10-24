@@ -1,0 +1,15 @@
+// lang__function__pass__045.glt
+// expect output
+// 1
+
+struct P {
+    int x
+}
+
+P g
+
+int main() {
+    g.x = 1
+    output(g.x)
+    return 0
+}

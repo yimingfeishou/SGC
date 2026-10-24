@@ -1,0 +1,30 @@
+// lang__generics__pass__030.glt
+// expect output
+// [relay]0 1 2 3 99 
+// [empty]0 99 
+// [twice]7 8 7 8 
+// [twice]
+
+void log(string tag, int... values) {
+    output("[", tag, "]")
+    for (int i = 0; i < values.length; i++) {
+        output(values[i], " ")
+    }
+    output("\n")
+}
+
+void relay(string tag, int... values) {
+    log(tag, 0, values..., 99)
+}
+
+void twice(int... values) {
+    log("twice", values..., values...)
+}
+
+int main() {
+    relay("relay", 1, 2, 3)
+    relay("empty")
+    twice(7, 8)
+    twice()
+    return 0
+}

@@ -1,0 +1,16 @@
+// lang__if__pass__011.glt
+// expect output
+// yes
+// 4
+
+const int square(int x) {
+    return x * x
+}
+int main() {
+    if (square(2) == 4) {
+        output("yes", "\n")
+    }
+    int arr[square(2)] = {1,2,3,4}
+    output(arr[3], "\n")
+    return 0
+}

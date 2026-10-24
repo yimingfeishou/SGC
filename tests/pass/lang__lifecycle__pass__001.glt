@@ -1,0 +1,21 @@
+// lang__lifecycle__pass__001.glt
+// expect output
+// 113
+
+struct Inner {
+    int value
+    constructor () {
+        value = 11
+    }
+}
+
+struct Outer {
+    Inner inner
+    int count = 3
+}
+
+int main() {
+    Outer item
+    output(item.inner.value, item.count)
+    return 0
+}

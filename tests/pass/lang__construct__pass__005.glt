@@ -1,0 +1,43 @@
+// lang__construct__pass__005.glt
+// expect output
+// 7 8 hi ho
+
+generics Box<T> {
+    struct Inner {
+        T k
+        constructor (T v) {
+            k = v
+        }
+    }
+
+    struct Outer {
+        Inner inner
+        constructor (Inner i) {
+            inner = i
+        }
+    }
+}
+
+struct Name {
+    string text
+    constructor (string t) {
+        text = t
+    }
+}
+
+int main() {
+    Box<int>.Outer* first = construct Box<int>.Outer(Box<int>.Inner(7))
+    Box<int>.Inner seed = Box<int>.Inner(8)
+    Box<int>.Outer* second = construct Box<int>.Outer(seed)
+    Name* third = construct Name("hi")
+    string text = "ho"
+    Name* fourth = construct Name(text)
+
+    output(first->inner.k, " ", second->inner.k, " ", third->text, " ", fourth->text)
+
+    destruct first
+    destruct second
+    destruct third
+    destruct fourth
+    return 0
+}

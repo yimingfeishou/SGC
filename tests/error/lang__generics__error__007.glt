@@ -1,0 +1,21 @@
+// lang__generics__error__007.glt
+// expect error ER 0069
+
+generics First<T> {
+    T value() {
+        return 1
+    }
+}
+
+generics Second<T> {
+    T value() {
+        return 2
+    }
+}
+
+int main() {
+    output(First<int>::value())
+    output(Second<int>::value())
+    output(value())
+    return 0
+}

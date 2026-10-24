@@ -1,0 +1,8 @@
+// lang__literal__error__002.glt
+// expect error ER 0019
+
+int main() {
+    string s = literal"abc
+    output(s, "\n")
+    return 0
+}

@@ -1,0 +1,7 @@
+// integ__multi_file__error__002.glt
+// expect error ER 0049
+
+guide "no_such_library_file.glt"
+int main() {
+    return 0
+}

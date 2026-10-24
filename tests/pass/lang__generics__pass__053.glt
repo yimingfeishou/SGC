@@ -1,0 +1,16 @@
+// lang__generics__pass__053.glt
+// expect output
+// id_7
+
+const string tag_of(string prefix, string suffix) {
+    return prefix + "_" + suffix
+}
+generics Named<T: string, T N> {
+    string name() {
+        return N
+    }
+}
+int main() {
+    output(Named<string, tag_of("id", "7")>.name(), "\n")
+    return 0
+}

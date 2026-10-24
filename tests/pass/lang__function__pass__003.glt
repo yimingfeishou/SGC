@@ -1,0 +1,18 @@
+// lang__function__pass__003.glt
+// expect output
+// two
+
+@cond MODE = 2
+
+int main() {
+    @if (MODE == 1) {
+        output("one")
+    } @else {
+        @if (MODE == 2) {
+            output("two")
+        } @else {
+            output("other")
+        }
+    }
+    return 0
+}

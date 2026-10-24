@@ -1,0 +1,46 @@
+// sl__generics__error__001.glt
+// expect error ER 0009
+
+guide "generics.glt"
+access namespace sl
+
+int compare_int(int a, int b) {
+    if (a < b) {
+        return -1
+    }
+    if (a > b) {
+        return 1
+    }
+    return 0
+}
+
+int main() {
+    output(sort_generic<int>.sort(null, 3, &compare_int), " ")
+    int data[3] = {3, 1, 2}
+    output(sort_generic<int>.sort(data, 0, null), " ")
+    output(sort_generic<int>.sort(data, 0, &compare_int), " ")
+    output(sort_generic<int>.sort(data, 3, &compare_int), " ")
+    output(data[0], data[1], data[2], " ")
+
+    int a = 1
+    int b = 2
+    output(swap_generic<int>.swap(&a, &b), " ", a, b, " ")
+    output(swap_generic<int>.swap(null, &b), " ")
+
+    dynamic_array_generic<int>.dynamic_array arr
+    output(length(&arr), " ", get_capacity(&arr), " ", empty(&arr), " ")
+    output(get(&arr, 0), " ", front(&arr), " ", back(&arr), " ")
+    output(pop(&arr), " ", insert(&arr, 1, 5), " ", erase(&arr, 0), " ")
+    output(resize(&arr, -1), " ", reserve(&arr, 1073741824), " ")
+    push(&arr, 9)
+    push(&arr, 8)
+    push(&arr, 7)
+    output(length(&arr), " ", get(&arr, 1), " ", back(&arr), " ")
+    set(&arr, 1, 42)
+    output(get(&arr, 1), " ", insert(&arr, 1, 11), " ", length(&arr), " ", get(&arr, 1), " ")
+    output(erase(&arr, 0), " ", length(&arr), " ", front(&arr), " ")
+    output(resize(&arr, 4), " ", length(&arr), " ", get(&arr, 3), " ")
+    clear(&arr)
+    output(length(&arr), " ", empty(&arr))
+    return 0
+}

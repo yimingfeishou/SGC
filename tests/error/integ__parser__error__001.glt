@@ -1,0 +1,10 @@
+// integ__parser__error__001.glt
+// expect error ER 0019
+
+clib("../string.lib")
+
+extern int gets blah from stringlib ()
+
+int main() {
+    return 0
+}
