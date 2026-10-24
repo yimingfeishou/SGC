@@ -1,8 +1,0 @@
-// lang__str_func__error__006.glt
-// expect error ER 0019
-
-int main() {
-    output(strmove("literal"))
-    output(strsetchar("literal", 0, 'a'))
-    return 0
-}

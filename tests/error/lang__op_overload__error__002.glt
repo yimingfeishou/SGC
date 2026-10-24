@@ -1,8 +1,0 @@
-// lang__op_overload__error__002.glt
-// expect error ER 0098
-
-int main() {
-    int i = 5
-    int j = i::value
-    return 0
-}

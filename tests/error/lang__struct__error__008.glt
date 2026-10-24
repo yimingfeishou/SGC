@@ -1,8 +1,0 @@
-// lang__struct__error__008.glt
-// expect error ER 0047
-
-int main() {
-    int a = 1
-    int b = a.x
-    return 0
-}

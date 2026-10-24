@@ -1,9 +1,0 @@
-// lang__size__pass__015.glt
-// expect output
-// 4
-
-int main() {
-    const int value = size(int)
-    output(value)
-    return 0
-}

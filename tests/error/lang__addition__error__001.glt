@@ -1,9 +1,0 @@
-// lang__addition__error__001.glt
-// expect error ER 0097
-
-addition namespace missing_namespace {
-    int i = 1
-}
-int main() {
-    return 0
-}

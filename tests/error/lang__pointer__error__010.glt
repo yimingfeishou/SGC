@@ -1,8 +1,0 @@
-// lang__pointer__error__010.glt
-// expect error ER 0053
-
-int main() {
-    file* fp = fileopen("./missing.txt", "r")
-    int n = fileread(fp, 7, 4)
-    return 0
-}

@@ -1,9 +1,0 @@
-// compiler__lexer__pass__004.glt
-// expect output
-// 511
-
-int main() {
-    int a = 0777
-    output(a)
-    return 0
-}

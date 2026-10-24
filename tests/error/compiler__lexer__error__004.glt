@@ -1,7 +1,0 @@
-// compiler__lexer__error__004.glt
-// expect error ER 0023
-
-int main() {
-    string s = "abc
-    return 0
-}

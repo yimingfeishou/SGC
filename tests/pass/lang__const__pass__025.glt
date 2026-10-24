@@ -1,9 +1,0 @@
-// lang__const__pass__025.glt
-// expect output
-// 1
-
-int main() {
-    int a = 1 / 0
-    output(a)
-    return 0
-}

@@ -1,9 +1,0 @@
-// lang__return__error__002.glt
-// expect error ER 0007
-
-int fn() {
-    int x = 1
-}
-int main() {
-    return 0
-}

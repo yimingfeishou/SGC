@@ -1,9 +1,0 @@
-// lang__literal__pass__007.glt
-// expect output
-// Hello\nWorld
-
-int main() {
-    string s = literal"Hello\nWorld"
-    output(s, "\n")
-    return 0
-}

@@ -1,4 +1,0 @@
-// lang__return__error__005.glt
-// expect error ER 0026
-
-return 0

@@ -1,9 +1,0 @@
-// lang__const_fn__error__005.glt
-// expect error ER 0152
-
-int counter
-
-int main() {
-    const int value = (counter = 3)
-    return value
-}

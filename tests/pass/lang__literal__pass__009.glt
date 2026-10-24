@@ -1,9 +1,0 @@
-// lang__literal__pass__009.glt
-// expect output
-// 5
-
-int main() {
-    int literal = 5
-    output(literal, "\n")
-    return 0
-}

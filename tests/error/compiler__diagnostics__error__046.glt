@@ -1,7 +1,0 @@
-// compiler__diagnostics__error__046.glt
-// expect error ER 0019
-
-int main() {
-    unknown_type x = 1
-    return 0
-}

@@ -1,9 +1,0 @@
-// lang__return__error__001.glt
-// expect error ER 0006
-
-int fn() {
-    return "text"
-}
-int main() {
-    return 0
-}

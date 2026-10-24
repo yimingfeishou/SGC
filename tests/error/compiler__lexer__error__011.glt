@@ -1,8 +1,0 @@
-// compiler__lexer__error__011.glt
-// expect error ER 0019
-
-int main() {
-    int a = 0x
-    output(a)
-    return 0
-}

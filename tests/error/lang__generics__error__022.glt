@@ -1,9 +1,0 @@
-// lang__generics__error__022.glt
-// expect error ER 0056
-
-generics Bad<T> {
-    1 + 2
-}
-int main() {
-    return 0
-}

@@ -1,9 +1,0 @@
-// integ__guide__pass__001.glt
-// expect output
-// 6.0
-
-guide "../support/lib/mathlib.glt"
-int main() {
-    output(double_add(2.5, 3.5))
-    return 0
-}

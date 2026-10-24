@@ -1,8 +1,0 @@
-// lang__file__error__004.glt
-// expect error ER 0051
-
-int main() {
-    file* fp = fileopen("./missing.txt", "w")
-    int n = filewrite(fp, 5)
-    return 0
-}

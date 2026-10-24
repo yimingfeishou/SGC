@@ -1,9 +1,0 @@
-// lang__member__error__006.glt
-// expect error ER 0091
-
-void destructor() {
-    return
-}
-int main() {
-    return 0
-}

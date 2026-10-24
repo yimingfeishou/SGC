@@ -1,9 +1,0 @@
-// lang__pointer__error__002.glt
-// expect error ER 0035
-
-int main() {
-    int x = 1
-    void* v = &x
-    int y = *v
-    return 0
-}

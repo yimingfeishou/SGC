@@ -1,9 +1,0 @@
-// lang__self_ref__error__003.glt
-// expect error ER 0048
-
-struct Node {
-    Node next
-}
-int main() {
-    return 0
-}

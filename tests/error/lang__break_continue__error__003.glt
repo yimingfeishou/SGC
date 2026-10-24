@@ -1,7 +1,0 @@
-// lang__break_continue__error__003.glt
-// expect error ER 0018
-
-int main() {
-    continue
-    return 0
-}

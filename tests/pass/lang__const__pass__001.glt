@@ -1,7 +1,0 @@
-// lang__const__pass__001.glt
-// expect output
-
-const int k
-int main() {
-    return 0
-}

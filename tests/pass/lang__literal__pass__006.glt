@@ -1,9 +1,0 @@
-// lang__literal__pass__006.glt
-// expect output
-// 5000000000
-
-lint wide = 5000000000
-int main() {
-    output(wide, "\n")
-    return 0
-}

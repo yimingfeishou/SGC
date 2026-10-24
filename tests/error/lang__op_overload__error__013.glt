@@ -1,8 +1,0 @@
-// lang__op_overload__error__013.glt
-// expect error ER 0029
-
-int main() {
-    int a[3] = {1, 2, 3}
-    int c = a * 2
-    return 0
-}

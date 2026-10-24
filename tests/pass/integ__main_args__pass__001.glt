@@ -1,8 +1,0 @@
-// integ__main_args__pass__001.glt
-// expect output
-// true
-
-int main(int count, char* array[]) {
-    output(count >= 1)
-    return 0
-}

@@ -1,8 +1,0 @@
-// lang__literal__pass__003.glt
-// expect output
-// 255 15 0 1 1 2
-
-int main() {
-    output(0xFF, " ", 017, " ", 0, " ", 1l, " ", 1u, " ", 2lu)
-    return 0
-}

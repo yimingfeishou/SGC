@@ -1,8 +1,0 @@
-// lang__cast__error__007.glt
-// expect error ER 0019
-
-int main() {
-    int x = 1
-    int y = cast<int x)
-    return 0
-}

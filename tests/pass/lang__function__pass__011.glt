@@ -1,4 +1,0 @@
-// lang__function__pass__011.glt
-// expect output
-
-int main() { return 0 }

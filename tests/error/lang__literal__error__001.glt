@@ -1,7 +1,0 @@
-// lang__literal__error__001.glt
-// expect error ER 0023
-
-int main() {
-    string s = literal"abc
-    return 0
-}

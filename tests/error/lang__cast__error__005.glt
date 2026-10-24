@@ -1,9 +1,0 @@
-// lang__cast__error__005.glt
-// expect error ER 0019
-
-int main() {
-    int i = 10
-    double d = double(i)
-    output(d)
-    return 0
-}

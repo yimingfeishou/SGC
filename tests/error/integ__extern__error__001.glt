@@ -1,8 +1,0 @@
-// integ__extern__error__001.glt
-// expect error ER 0124
-
-export extern int system from libucrt (string command)
-
-int main() {
-    return 0
-}

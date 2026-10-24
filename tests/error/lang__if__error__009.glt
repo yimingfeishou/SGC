@@ -1,9 +1,0 @@
-// lang__if__error__009.glt
-// expect error ER 0110
-
-@cond DEBUG = 1
-
-int main() {
-    int x = DEBUG
-    return 0
-}

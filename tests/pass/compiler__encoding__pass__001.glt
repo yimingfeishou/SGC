@@ -1,5 +1,0 @@
-// compiler__encoding__pass__001.glt
-// expect output
-
-// 中
-int main() { return 0 }

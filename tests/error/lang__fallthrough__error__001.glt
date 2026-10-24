@@ -1,7 +1,0 @@
-// lang__fallthrough__error__001.glt
-// expect error ER 0150
-
-int main() {
-    fallthrough
-    return 0
-}

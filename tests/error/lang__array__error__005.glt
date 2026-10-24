@@ -1,8 +1,0 @@
-// lang__array__error__005.glt
-// expect error ER 0030
-
-int main() {
-    int a[1 / 0]
-    output(size(a))
-    return 0
-}

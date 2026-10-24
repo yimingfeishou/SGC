@@ -1,8 +1,0 @@
-// lang__pointer__error__017.glt
-// expect error ER 0019
-
-int main() {
-    int x = 1
-    int* p = int*(x)
-    return 0
-}

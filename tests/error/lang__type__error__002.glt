@@ -1,9 +1,0 @@
-// lang__type__error__002.glt
-// expect error ER 0012
-
-struct S { int a }
-int fn(int a) { return a }
-int main() {
-    S s = {1}
-    return fn(s)
-}

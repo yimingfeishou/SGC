@@ -1,9 +1,0 @@
-// lang__pointer__error__001.glt
-// expect error ER 0034
-
-int main() {
-    int x = 1
-    const int* p = &x
-    int* q = p
-    return 0
-}

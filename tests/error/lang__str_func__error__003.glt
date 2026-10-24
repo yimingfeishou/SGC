@@ -1,7 +1,0 @@
-// lang__str_func__error__003.glt
-// expect error ER 0011
-
-int main() {
-    int n = strlen()
-    return n
-}

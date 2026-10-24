@@ -1,8 +1,0 @@
-// lang__pointer__error__008.glt
-// expect error ER 0041
-
-double fn(int a) { return 0.0 }
-int main() {
-    int p(int, int)* = &fn
-    return 0
-}

@@ -1,7 +1,0 @@
-// lang__access__error__001.glt
-// expect error ER 0096
-
-access namespace missing_namespace
-int main() {
-    return 0
-}

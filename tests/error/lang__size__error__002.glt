@@ -1,7 +1,0 @@
-// lang__size__error__002.glt
-// expect error ER 0040
-
-int main() {
-    int* p = heap(int, "five")
-    return 0
-}

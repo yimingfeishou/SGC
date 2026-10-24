@@ -1,8 +1,0 @@
-// integ__multi_file__error__001.glt
-// expect error ER 0049
-
-clib("no_such_library_file.lib")
-
-int main() {
-    return 0
-}

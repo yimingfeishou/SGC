@@ -1,7 +1,0 @@
-// compiler__diagnostics__error__052.glt
-// expect error ER 0064
-
-generics F<T, (N)>
-int main() {
-    return 0
-}

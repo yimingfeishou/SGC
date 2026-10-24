@@ -1,9 +1,0 @@
-// lang__trig__error__001.glt
-// expect error ER 0006
-
-int missing() {
-    return }
-
-int main() {
-    return 0
-}

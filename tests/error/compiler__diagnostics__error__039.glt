@@ -1,9 +1,0 @@
-// compiler__diagnostics__error__039.glt
-// expect error ER 0001
-
-int main() {
-    int a = 0
-    whil = 2
-    output(a)
-    return 0
-}

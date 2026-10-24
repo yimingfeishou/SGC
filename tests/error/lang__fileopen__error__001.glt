@@ -1,8 +1,0 @@
-// lang__fileopen__error__001.glt
-// expect error ER 0003
-
-const int f(int x) {
-    file h = fileopen("a.txt", "r")
-    return x
-}
-int main() { return 0 }

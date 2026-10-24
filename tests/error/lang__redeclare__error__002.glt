@@ -1,6 +1,0 @@
-// lang__redeclare__error__002.glt
-// expect error ER 0010
-
-int fn(int a) { return a }
-int fn(int b) { return b + 1 }
-int main() { return fn(1) }

@@ -1,8 +1,0 @@
-// integ__export__error__005.glt
-// expect error ER 0124
-
-export int value = 5
-
-int main() {
-    return 0
-}

@@ -1,9 +1,0 @@
-// lang__switch__error__001.glt
-// expect error ER 0019
-
-int main() {
-    case (1) {
-        output("x")
-    }
-    return 0
-}

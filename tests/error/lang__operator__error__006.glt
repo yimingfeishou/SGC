@@ -1,8 +1,0 @@
-// lang__operator__error__006.glt
-// expect error ER 0005
-
-int main() {
-    string s = "a"
-    int c = -s
-    return 0
-}

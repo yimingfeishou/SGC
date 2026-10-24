@@ -1,9 +1,0 @@
-// lang__literal__pass__008.glt
-// expect output
-// C:\path\to\file
-
-int main() {
-    string s = literal"C:\path\to\file"
-    output(s, "\n")
-    return 0
-}

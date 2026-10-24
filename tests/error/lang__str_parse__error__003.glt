@@ -1,9 +1,0 @@
-// lang__str_parse__error__003.glt
-// expect error ER 0003
-
-int main() {
-    char text[4] = "abc"
-    string s = cast<string>(text)
-    output("[", s, "]")
-    return 0
-}

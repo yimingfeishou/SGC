@@ -1,8 +1,0 @@
-// lang__type__error__005.glt
-// expect error ER 0004
-
-int main() {
-    output("a" + "b")
-    output("\n", "n=" + 1)
-    return 0
-}

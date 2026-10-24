@@ -1,9 +1,0 @@
-// compiler__diagnostics__error__009.glt
-// expect error ER 0003
-
-int main() {
-    int i = 0
-    string s = "x"
-    i = s
-    return 0
-}

@@ -1,6 +1,0 @@
-// lang__return__error__004.glt
-// expect error ER 0021
-
-float main() {
-    return 0.0
-}

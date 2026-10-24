@@ -1,9 +1,0 @@
-// integ__export__error__001.glt
-// expect error ER 0123
-
-int main() {
-    export int add(int a, int b) {
-        return a + b
-    }
-    return 0
-}

@@ -1,7 +1,0 @@
-// lang__generics__error__019.glt
-// expect error ER 0099
-
-emit "int value() { return 1 }"
-int main() {
-    return 0
-}

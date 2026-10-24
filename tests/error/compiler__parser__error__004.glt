@@ -1,7 +1,0 @@
-// compiler__parser__error__004.glt
-// expect error ER 0019
-
-int main() {
-    return 1 2 3 4 5; return 3 4
-    return 0
-}

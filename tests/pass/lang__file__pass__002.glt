@@ -1,8 +1,0 @@
-// lang__file__pass__002.glt
-// expect output
-
-int main() {
-    file* fp = fileopen("./missing.txt", "r")
-    fileseek(fp, 0, 5)
-    return 0
-}

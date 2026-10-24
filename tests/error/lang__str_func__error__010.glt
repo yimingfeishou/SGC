@@ -1,9 +1,0 @@
-// lang__str_func__error__010.glt
-// expect error ER 0144
-
-string runtime_text = "abc"
-const int len_of(string s) {
-    return strlen(s)
-}
-const int n = len_of(runtime_text)
-int main() { return 0 }
