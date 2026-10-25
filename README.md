@@ -35,6 +35,20 @@ sgc --version
 
 For more usage instructions, please enter `--help` within SGC to view them.
 
+### Tests
+
+- The test directory is `./tests`. After entering this directory, you can run `python run_tests.py` for full testing, and the final results will be output to the `./results` directory (created if it does not exist).
+- This script depends on the following environment variables to work:
+
+```text
+SGC_LLVM_BIN # Set the LLVM backend location.
+SGC_STDLIB # Set the Gallt standard library location.
+SGC_CLANG # Set the location of the SGC compiled with Clang.
+SGC_MSVC # Set the location of the SGC compiled with MSVC.
+```
+
+- Running this script requires Python 3.10 or later, and the above environment variables to be set.
+
 ### Notes
 
 - This is an early preview release. Some syntax and edge cases may still be incomplete or incorrect.
@@ -77,6 +91,20 @@ sgc --version
 ```
 
 更多用法，请在 SGC 内输入 `--help` 以查看。
+
+### 测试
+
+- 测试目录为 `./tests`，进入该目录后，可以使用 `python run_tests.py` 进行完整测试，最终结果将会输出到 `./results` 目录中（若没有则创建）。
+- 该脚本依赖以下环境变量才能工作：
+
+```text
+SGC_LLVM_BIN # 设置 LLVM 后端位置。
+SGC_STDLIB # 设置 Gallt 标准库位置。
+SGC_CLANG # 设置使用 Clang 编译的 SGC 的位置。
+SGC_MSVC # 设置使用了 MSVC 编译的 SGC 的位置。
+```
+
+- 运行该脚本需要 Python 3.10 及以上版本，且设置了如上环境变量。
 
 ### 注意事项
 
