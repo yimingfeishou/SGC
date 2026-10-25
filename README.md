@@ -37,7 +37,7 @@ For more usage instructions, please enter `--help` within SGC to view them.
 
 ### Tests
 
-- The test directory is `./tests`. After entering this directory, you can run `python run_tests.py` for full testing, and the final results will be output to the `./results` directory (if the script does not exist, it will be created automatically).
+- The test directory is `./tests`. After entering this directory, you can run `python run_tests.py` for full testing, and the final results will be output to the `./results` directory (if the directory does not exist, the script will automatically create it).
 - This script depends on the following environment variables to work:
 
 ```text
@@ -94,7 +94,7 @@ sgc --version
 
 ### 测试
 
-- 测试目录为 `./tests`，进入该目录后，可以使用 `python run_tests.py` 进行完整测试，最终结果将会输出到 `./results` 目录中（若不存在脚本则会自动创建）。
+- 测试目录为 `./tests`，进入该目录后，可以使用 `python run_tests.py` 进行完整测试，最终结果将会输出到 `./results` 目录中（若不存在该目录，脚本则会自动创建）。
 - 该脚本依赖以下环境变量才能工作：
 
 ```text
