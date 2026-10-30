@@ -1,7 +1,7 @@
 // lang__self_ref__error__004.glt
 // expect error ER 0151
 
-const int loop_forever(int n) {
+int loop_forever(int n) const {
     return loop_forever(n + 1)
 }
 const int bad = loop_forever(0)

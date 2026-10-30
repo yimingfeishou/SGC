@@ -6,11 +6,11 @@
 // 9
 // 5
 
-const int square(int x) {
+int square(int x) const {
     return x * x
 }
 
-const int width_of(int n) {
+int width_of(int n) const {
     return n * 2
 }
 

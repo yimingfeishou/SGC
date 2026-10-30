@@ -607,8 +607,11 @@ namespace gallt {
             return symbol->function_node;
         }
 
-        const AST::FunctionDefinition* best = nullptr;
-        int best_rank = 0;
+        struct Candidate {
+            const AST::FunctionDefinition* function = nullptr;
+            std::vector<int> ranks;
+        };
+        std::vector<Candidate> viable;
 
         for (Symbol& symbol : *set) {
             const AST::FunctionDefinition* function = symbol.function_node;
@@ -621,28 +624,70 @@ namespace gallt {
                 continue;
             }
 
-            int total = 0;
-            bool viable = true;
+            Candidate candidate;
+            candidate.function = function;
+            bool candidate_viable = true;
 
             for (std::size_t i = 0; i < arguments.size(); ++i) {
                 const int rank = conversion_rank(arguments[i].type,
                     function->parameters[i]);
                 if (rank < 0) {
-                    viable = false;
+                    candidate_viable = false;
                     break;
                 }
-                total += rank;
+                candidate.ranks.push_back(rank);
             }
 
-            if (!viable) { continue; }
-
-            if (best == nullptr || total < best_rank) {
-                best = function;
-                best_rank = total;
+            if (candidate_viable) {
+                viable.push_back(std::move(candidate));
             }
         }
 
-        return best;
+        int best = -1;
+        bool ambiguous = false;
+
+        for (std::size_t i = 0; i < viable.size(); ++i) {
+            bool is_best = true;
+
+            for (std::size_t j = 0; j < viable.size(); ++j) {
+                if (i == j) { continue; }
+
+                bool better = false;
+                bool worse = false;
+                const std::vector<int>& left = viable[i].ranks;
+                const std::vector<int>& right = viable[j].ranks;
+
+                for (std::size_t k = 0; k < left.size(); ++k) {
+                    if (left[k] < right[k]) { better = true; }
+                    if (left[k] > right[k]) { worse = true; }
+                }
+
+                if (!better || worse) {
+                    is_best = false;
+                    break;
+                }
+            }
+
+            if (is_best) {
+                if (best != -1) {
+                    ambiguous = true;
+                } else {
+                    best = static_cast<int>(i);
+                }
+            }
+        }
+
+        if (ambiguous || best < 0) {
+            if (!viable.empty()) {
+                report_error_template(
+                    viable.front().function->location,
+                    ErrorCode::OverloadAmbiguous,
+                    std::vector<std::string>{ name });
+            }
+            return nullptr;
+        }
+
+        return viable[static_cast<std::size_t>(best)].function;
     }
 
     void TypeChecker::record_constexpr_declaration(AST::VariableDeclaration* decl) {

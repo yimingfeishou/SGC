@@ -17,10 +17,28 @@ namespace gallt {
     using namespace type_checker_detail;
 
     TypeChecker::TypeChecker(DiagnosticEngine& diag, bool require_main,
-        bool extended_semantics)
+        bool extended_semantics, std::optional<std::uint64_t> constexpr_depth,
+        std::optional<std::uint64_t> constexpr_max_steps,
+        std::optional<std::uint64_t> constexpr_max_integer_exponent)
         : diag_(diag), require_main_(require_main),
         extended_semantics_(extended_semantics) {
         configure_constexpr_host();
+
+        if (constexpr_depth.has_value() && *constexpr_depth > 0) {
+            constexpr_interpreter_.set_call_depth_limit(
+                static_cast<std::size_t>(*constexpr_depth));
+        }
+
+        if (constexpr_max_steps.has_value() && *constexpr_max_steps > 0) {
+            constexpr_interpreter_.set_max_steps(
+                static_cast<std::size_t>(*constexpr_max_steps));
+        }
+
+        if (constexpr_max_integer_exponent.has_value() &&
+            *constexpr_max_integer_exponent > 0) {
+            constexpr_interpreter_.set_max_integer_exponent(
+                *constexpr_max_integer_exponent);
+        }
     }
 
     bool TypeChecker::check_program(AST::Program* program) {
@@ -46,6 +64,7 @@ namespace gallt {
                     }
                     struct_scopes_.back()[struct_def->name] = struct_def;
                     Symbol sym = Symbol::make_struct(struct_def->name, struct_def->location, struct_def);
+                    sym.type.resolved_struct = struct_def;
                     if (!sym_table_.declare(sym)) {
                         report_error(struct_def->location, ErrorCode::RedefinedIdentifier,
                             "struct '" + struct_def->name + "' already declared");
@@ -149,6 +168,7 @@ namespace gallt {
 
             owner_.struct_scopes_.back()[def->name] = def;
             Symbol sym = Symbol::make_struct(def->name, def->location, def);
+            sym.type.resolved_struct = def;
 
             if (!owner_.sym_table_.declare(sym)) {
                 owner_.report_error(def->location, ErrorCode::RedefinedIdentifier,
@@ -334,12 +354,17 @@ namespace gallt {
         if (current_function_ != nullptr &&
             current_function_->owning_struct != nullptr &&
             current_function_->owning_struct->name == name) {
+            auto global = struct_defs_.find(name);
+            if (global != struct_defs_.end() &&
+                global->second != current_function_->owning_struct) {
+                return global->second;
+            }
             return current_function_->owning_struct;
         }
 
-        for (auto it = struct_scopes_.rbegin(); it != struct_scopes_.rend(); ++it) {
-            auto found = it->find(name);
-            if (found != it->end()) { return found->second; }
+        for (std::size_t i = struct_scopes_.size(); i > 1; --i) {
+            auto found = struct_scopes_[i - 1].find(name);
+            if (found != struct_scopes_[i - 1].end()) { return found->second; }
         }
 
         auto it = struct_defs_.find(name);
@@ -347,10 +372,52 @@ namespace gallt {
         return nullptr;
     }
 
+    void TypeChecker::bind_struct_type_identity(AST::Type& type,
+        const AST::StructDefinition* preferred) const {
+        if (type.kind == AST::TypeKind::Pointer ||
+            type.kind == AST::TypeKind::Array ||
+            type.kind == AST::TypeKind::Function) {
+            if (type.pointee_type) { bind_struct_type_identity(*type.pointee_type, preferred); }
+            if (type.element_type) { bind_struct_type_identity(*type.element_type, preferred); }
+            if (type.return_type) { bind_struct_type_identity(*type.return_type, preferred); }
+            for (AST::Type& parameter : type.parameter_types) {
+                bind_struct_type_identity(parameter, preferred);
+            }
+            if (type.variadic_element_type) {
+                bind_struct_type_identity(*type.variadic_element_type, preferred);
+            }
+            return;
+        }
+
+        if (type.kind != AST::TypeKind::Struct) {
+            return;
+        }
+
+        for (std::size_t i = struct_scopes_.size(); i > 1; --i) {
+            auto found = struct_scopes_[i - 1].find(type.struct_name);
+            if (found != struct_scopes_[i - 1].end()) {
+                type.resolved_struct = found->second;
+                return;
+            }
+        }
+
+        if (preferred != nullptr && preferred->name == type.struct_name) {
+            type.resolved_struct = const_cast<AST::StructDefinition*>(preferred);
+            return;
+        }
+
+        auto found = struct_defs_.find(type.struct_name);
+        if (found != struct_defs_.end()) {
+            type.resolved_struct = found->second;
+        }
+    }
+
     const AST::StructDefinition::Member* TypeChecker::get_struct_member(const AST::Type& struct_type,
         std::string_view member_name) const {
         if (struct_type.kind != TypeKind::Struct) { return nullptr; }
-        auto* def = get_struct_definition(struct_type.struct_name);
+        auto* def = struct_type.resolved_struct != nullptr
+            ? struct_type.resolved_struct
+            : get_struct_definition(struct_type.struct_name);
         if (!def) { return nullptr; }
 
         for (const auto& m : def->members) {

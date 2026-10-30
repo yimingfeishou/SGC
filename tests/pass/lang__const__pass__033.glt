@@ -1,7 +1,7 @@
 // lang__const__pass__033.glt
 // expect output
 
-const void noop(int x) {
+void noop(int x) const {
     int y = x
     y = y + 1
 }

@@ -1,7 +1,7 @@
 // lang__str_func__error__011.glt
 // expect error ER 0004
 
-const string mix(string s, int n) {
+string mix(string s, int n) const {
     return s + n
 }
 const string t = mix("v", 3)

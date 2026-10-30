@@ -1,0 +1,21 @@
+// sl__generics__pass__011.glt
+// expect output
+// true false true false 7 7 none true | false true false true 0 parse true | false -1 true | true true true
+
+guide "generics.glt"
+access namespace sl
+
+int main() {
+    result_generic<int, string>
+    result good = ok(7)
+    output(has_value(&good), " ", has_error(&good), " ", is_ok(&good), " ", is_error(&good), " ", *value_ptr(&good), " ", value_or(&good, 0), " ", error_or(&good, "none"), " ", error_ptr(&good) == null, " | ")
+
+    result bad = error("parse")
+    output(has_value(&bad), " ", has_error(&bad), " ", is_ok(&bad), " ", is_error(&bad), " ", value_or(&bad, 0), " ", *error_ptr(&bad), " ", value_ptr(&bad) == null, " | ")
+
+    output(has_value(null), " ", value_or(null, -1), " ", value_ptr(null) == null, " | ")
+
+    result_generic<bool, int>.result flag = result_generic<bool, int>.ok(true)
+    output(result_generic<bool, int>.has_value(&flag), " ", *result_generic<bool, int>.value_ptr(&flag), " ", result_generic<bool, int>.error_ptr(&flag) == null)
+    return 0
+}

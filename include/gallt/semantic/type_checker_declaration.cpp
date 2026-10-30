@@ -324,8 +324,10 @@ namespace gallt {
             std::string pname = (i < node->param_names.size() && !node->param_names[i].empty())
                 ? node->param_names[i]
                 : "_param" + std::to_string(i);
+            AST::Type parameter_type = node->parameters[i];
+            bind_struct_type_identity(parameter_type, node->owning_struct);
             Symbol param_sym = Symbol::make_parameter(
-                pname, node->parameters[i],
+                pname, std::move(parameter_type),
                 node->location, i
             );
             if (!sym_table_.declare(param_sym)) {
@@ -556,6 +558,8 @@ namespace gallt {
     }
 
     void TypeChecker::check_variable_declaration(AST::VariableDeclaration* decl) {
+        bind_struct_type_identity(decl->type, current_function_ != nullptr
+            ? current_function_->owning_struct : nullptr);
         const bool object_is_const = decl->type.is_const ||
             (decl->type.kind == TypeKind::Array && decl->type.element_type &&
                 decl->type.element_type->is_const);

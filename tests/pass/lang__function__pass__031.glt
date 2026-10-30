@@ -2,7 +2,7 @@
 // expect output
 // B
 
-const char shift_char(char c, int n) {
+char shift_char(char c, int n) const {
     return c + n
 }
 const char ch = shift_char('A', 1)

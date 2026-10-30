@@ -1,0 +1,20 @@
+// lang__nested__error__004.glt
+// expect error ER 0001
+
+struct X {
+    int w = 1
+
+    constructor () {
+        struct X {
+            int y
+            int z
+        }
+
+        output(size(X.z))
+    }
+}
+
+int main() {
+    X item = X()
+    return 0
+}

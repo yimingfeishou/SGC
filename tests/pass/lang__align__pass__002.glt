@@ -2,7 +2,7 @@
 // expect output
 // 12
 
-const int width() {
+int width() const {
     return size(int) + align(double)
 }
 const int w = width()

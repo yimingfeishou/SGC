@@ -352,7 +352,8 @@ namespace pal {
                 ::WriteFile(handle, "\n", 1, &written, nullptr);
             }
 
-            ::ExitProcess(static_cast<UINT>(exit_failure_code()));
+            ::TerminateProcess(::GetCurrentProcess(),
+                static_cast<UINT>(exit_failure_code()));
             return EXCEPTION_CONTINUE_SEARCH;
         }
     }

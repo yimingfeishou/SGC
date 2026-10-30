@@ -126,19 +126,27 @@ namespace gallt {
 
     const AST::StructDefinition* CodeGenerator::lookup_struct_definition(
         const std::string& name) const {
+        for (auto it = struct_scopes_.rbegin(); it != struct_scopes_.rend(); ++it) {
+            auto found = it->find(name);
+            if (found != it->end()) { return found->second; }
+        }
+
         if (current_function_ != nullptr &&
             current_function_->owning_struct != nullptr &&
             current_function_->owning_struct->name == name) {
             return current_function_->owning_struct;
         }
 
-        for (auto it = struct_scopes_.rbegin(); it != struct_scopes_.rend(); ++it) {
-            auto found = it->find(name);
-            if (found != it->end()) { return found->second; }
-        }
-
         auto found = struct_by_name_.find(name);
         return found == struct_by_name_.end() ? nullptr : found->second;
+    }
+
+    const AST::StructDefinition* CodeGenerator::lookup_struct_definition(
+        const AST::Type& type) const {
+        if (type.kind != TypeKind::Struct) { return nullptr; }
+        return type.resolved_struct != nullptr
+            ? type.resolved_struct
+            : lookup_struct_definition(type.struct_name);
     }
 
     std::string CodeGenerator::llvm_type(const AST::Type& type) {
@@ -165,7 +173,7 @@ namespace gallt {
                 (type.element_type ? llvm_type(*type.element_type) : "i8") + "]";
         }
         case TypeKind::Struct:
-            return struct_type_name(type.struct_name);
+            return struct_type_name(lookup_struct_definition(type));
         }
         return "void";
     }
@@ -445,14 +453,15 @@ namespace gallt {
             break;
         }
         case TypeKind::Struct: {
-            auto found = struct_by_name_.find(type.struct_name);
-            if (found == struct_by_name_.end() || found->second == nullptr) {
+            const AST::StructDefinition* found =
+                lookup_struct_definition(type.struct_name);
+            if (found == nullptr) {
                 text = "!DICompositeType(tag: DW_TAG_structure_type, name: \"" +
                     escape_metadata_string(type.struct_name) + "\", size: " +
                     std::to_string(type_size(type) * 8) + ")";
                 break;
             }
-            AST::StructDefinition* def = found->second;
+            const AST::StructDefinition* def = found;
             std::vector<unsigned> member_ids;
             std::size_t offset = 0;
 
@@ -1057,9 +1066,9 @@ namespace gallt {
             }
             bool destructible = false;
             if (var->type.kind == TypeKind::Struct) {
-                auto def_it = struct_by_name_.find(var->type.struct_name);
-                destructible = def_it != struct_by_name_.end() &&
-                    def_it->second != nullptr && def_it->second->needs_destruction;
+                const AST::StructDefinition* def =
+                    lookup_struct_definition(var->type.struct_name);
+                destructible = def != nullptr && def->needs_destruction;
             }
             if (!destructible && !type_contains_string(var->type)) { continue; }
             emit_destroy_string_at(var->type, "@glt_g_" + var->name);
@@ -1256,6 +1265,9 @@ namespace gallt {
         struct_scopes_.clear();
         struct_name_scopes_.clear();
         push_scope();
+        if (func->owning_struct != nullptr) {
+            struct_scopes_.back()[func->owning_struct->name] = func->owning_struct;
+        }
         emitted_labels_.clear();
         current_label_.clear();
         current_function_ = func;

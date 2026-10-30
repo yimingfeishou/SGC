@@ -1,0 +1,18 @@
+// lang__construct__pass__019.glt
+// expect output
+// 1 2
+
+struct Point {
+    int x
+    int y
+    constructor (int ix, int iy) {
+        x = ix
+        y = iy
+    }
+}
+
+int main() {
+    Point* values[1] = { construct Point(1, 2) }
+    output(values[0]->x, " ", values[0]->y, "\n")
+    return 0
+}

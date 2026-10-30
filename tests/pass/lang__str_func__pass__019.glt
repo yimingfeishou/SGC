@@ -2,7 +2,7 @@
 // expect output
 // true
 
-const bool same(string a, string b) {
+bool same(string a, string b) const {
     if (strcompare(a, b) == 0) {
         return true
     }

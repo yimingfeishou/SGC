@@ -2,7 +2,7 @@
 // expect output
 // HELLO!
 
-const string shout(string s) {
+string shout(string s) const {
     return strupper(strtrim(s)) + "!"
 }
 const string t = shout("  hello  ")

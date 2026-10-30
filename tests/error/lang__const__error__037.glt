@@ -2,7 +2,7 @@
 // expect error ER 0144
 
 int runtime_size = 4
-const int square(int x) {
+int square(int x) const {
     return x * x
 }
 int main() {

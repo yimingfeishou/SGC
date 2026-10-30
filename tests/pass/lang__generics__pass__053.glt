@@ -2,7 +2,7 @@
 // expect output
 // id_7
 
-const string tag_of(string prefix, string suffix) {
+string tag_of(string prefix, string suffix) const {
     return prefix + "_" + suffix
 }
 generics Named<T: string, T N> {

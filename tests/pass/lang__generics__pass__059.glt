@@ -1,0 +1,32 @@
+// lang__generics__pass__059.glt
+// expect output
+// 42 7 true true true
+
+generics Project<T...> {
+    T[0] first(T[0] value) {
+        return value
+    }
+
+    T.first first_type(T.first value) {
+        return value
+    }
+
+    bool head_is_integer() {
+        return T[0].is_integer
+    }
+
+    bool head_is_int() {
+        return T[0].is_same<int>
+    }
+
+    bool tail_is_double() {
+        return T.last.is_same<double>
+    }
+}
+
+int main() {
+    output(Project<int, double>.first(42), " ", Project<int, double>.first_type(7), " ")
+    output(Project<int, double>.head_is_integer(), " ", Project<int, double>.head_is_int(), " ")
+    output(Project<int, double>.tail_is_double())
+    return 0
+}

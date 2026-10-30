@@ -1267,10 +1267,10 @@ namespace gallt {
     }
 
     std::unique_ptr<IfStatement> Parser::parse_if_statement(bool compile_time,
-        bool member_block) {
+        bool member_block, bool expect_const) {
         SourceLocation loc = current_location();
 
-        if (compile_time) {
+        if (compile_time && expect_const) {
             expect(TokenType::Keyword_Const, "expected 'const'");
         }
 
@@ -1290,12 +1290,46 @@ namespace gallt {
             return nullptr;
         }
 
-        if (current_.type != TokenType::LeftBrace) {
-            report_error(ErrorCode::MissingBraces, "if statement must be followed by a block");
-            return nullptr;
-        }
+        auto parse_branch = [&](const std::string& context)
+            -> std::unique_ptr<Block> {
+            if (current_.type == TokenType::LeftBrace) {
+                return member_block
+                    ? parse_generic_member_block() : parse_block();
+            }
 
-        auto then_block = member_block ? parse_generic_member_block() : parse_block();
+            if (current_.type == TokenType::Newline ||
+                current_.type == TokenType::EndOfFile ||
+                current_.type == TokenType::RightBrace) {
+                report_error(ErrorCode::MissingBraces,
+                    context + " must be followed by a block");
+                return nullptr;
+            }
+
+            if (member_block) {
+                SourceLocation branch_loc = current_location();
+                const std::size_t first_token = mark();
+                std::unique_ptr<Statement> item = parse_generic_member_item();
+                if (item == nullptr) {
+                    return nullptr;
+                }
+                const std::size_t end_token = mark();
+                for (std::size_t i = first_token; i < end_token; ++i) {
+                    if (tokens_[i].location.line != branch_loc.line) {
+                        report_error(ErrorCode::MissingBraces,
+                            context + " block form must occupy one logical line");
+                        return nullptr;
+                    }
+                }
+                std::vector<std::unique_ptr<Statement>> statements;
+                statements.push_back(std::move(item));
+                return std::make_unique<Block>(
+                    branch_loc, std::move(statements));
+            }
+
+            return parse_control_body(false, context);
+        };
+
+        auto then_block = parse_branch("if statement");
 
         if (then_block == nullptr) {
             return nullptr;
@@ -1313,14 +1347,20 @@ namespace gallt {
         }
 
         if (match(TokenType::Keyword_Else)) {
-            skip_newlines();
-
-            if (current_.type != TokenType::LeftBrace) {
-                report_error(ErrorCode::MissingBraces, "else statement must be followed by a block");
-                return nullptr;
+            if (current_.type == TokenType::Keyword_If) {
+                std::unique_ptr<IfStatement> nested =
+                    parse_if_statement(compile_time, member_block, false);
+                if (nested == nullptr) {
+                    return nullptr;
+                }
+                SourceLocation else_loc = nested->location;
+                std::vector<std::unique_ptr<Statement>> statements;
+                statements.push_back(std::move(nested));
+                else_block = std::make_unique<Block>(
+                    else_loc, std::move(statements));
+            } else {
+                else_block = parse_branch("else statement");
             }
-
-            else_block = member_block ? parse_generic_member_block() : parse_block();
 
             if (else_block == nullptr) {
                 return nullptr;
@@ -1395,12 +1435,7 @@ namespace gallt {
             return nullptr;
         }
 
-        if (current_.type != TokenType::LeftBrace) {
-            report_error(ErrorCode::MissingBraces, "for loop body must be a block");
-            return nullptr;
-        }
-
-        auto body = parse_block();
+        auto body = parse_control_body(false, "for loop");
 
         if (body == nullptr) {
             return nullptr;
@@ -1431,12 +1466,7 @@ namespace gallt {
             return nullptr;
         }
 
-        if (current_.type != TokenType::LeftBrace) {
-            report_error(ErrorCode::MissingBraces, "while loop body must be a block");
-            return nullptr;
-        }
-
-        auto body = parse_block();
+        auto body = parse_control_body(false, "while loop");
 
         if (body == nullptr) {
             return nullptr;
@@ -1511,13 +1541,7 @@ namespace gallt {
                     return nullptr;
                 }
 
-                if (current_.type != TokenType::LeftBrace) {
-                    report_error(ErrorCode::MissingBraces,
-                        "case branch must be followed by a block");
-                    return nullptr;
-                }
-
-                auto body = parse_block();
+                auto body = parse_control_body(false, "case branch");
 
                 if (body == nullptr) {
                     return nullptr;
@@ -1601,6 +1625,41 @@ namespace gallt {
 
         expect_stmt_end("return statement");
         return std::make_unique<ReturnStatement>(loc, std::move(value));
+    }
+
+    std::unique_ptr<Block> Parser::parse_control_body(
+        bool require_block, const std::string& context) {
+        if (current_.type == TokenType::LeftBrace) {
+            return parse_block();
+        }
+
+        if (require_block || current_.type == TokenType::Newline ||
+            current_.type == TokenType::EndOfFile ||
+            current_.type == TokenType::RightBrace) {
+            report_error(ErrorCode::MissingBraces,
+                context + " must be followed by a block");
+            return nullptr;
+        }
+
+        SourceLocation loc = current_location();
+        const std::size_t first_token = mark();
+        std::unique_ptr<Statement> statement = parse_statement();
+        if (statement == nullptr) {
+            return nullptr;
+        }
+
+        const std::size_t end_token = mark();
+        for (std::size_t i = first_token; i < end_token; ++i) {
+            if (tokens_[i].location.line != loc.line) {
+                report_error(ErrorCode::MissingBraces,
+                    context + " block form must occupy one logical line");
+                return nullptr;
+            }
+        }
+
+        std::vector<std::unique_ptr<Statement>> statements;
+        statements.push_back(std::move(statement));
+        return std::make_unique<Block>(loc, std::move(statements));
     }
 
     std::unique_ptr<Block> Parser::parse_block() {

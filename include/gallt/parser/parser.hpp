@@ -52,6 +52,7 @@ namespace gallt {
 
         std::unordered_set<std::string> declared_type_names_;
         std::unordered_set<std::string> declared_value_names_;
+        std::vector<std::unordered_set<std::string>> generic_type_pack_scopes_;
 
         int loop_depth_ = 0;
 
@@ -157,8 +158,11 @@ namespace gallt {
         bool const_if_allowed() const;
         std::unique_ptr<AST::TopLevel> parse_condition_statement();
         std::unique_ptr<AST::Statement> parse_condition_node(bool top_level);
-        std::unique_ptr<AST::ConditionalBlock> parse_conditional_block(bool top_level);
+        std::unique_ptr<AST::ConditionalBlock> parse_conditional_block(
+            bool top_level, bool consume_endif = true);
         std::unique_ptr<AST::Statement> parse_conditional_branch_top_level();
+        std::unique_ptr<AST::Statement> parse_conditional_block_form_branch(
+            bool top_level);
         std::unique_ptr<AST::Expression> parse_condition_expression();
         std::unique_ptr<AST::Statement> parse_top_level_block();
         std::unique_ptr<AST::Statement> parse_generic_compile_time_item();
@@ -167,6 +171,7 @@ namespace gallt {
         bool check_identifier_name(std::string& out, const char* context);
         std::unique_ptr<AST::TopLevel> parse_generic_definition();
         std::unique_ptr<AST::Block> parse_generic_member_block();
+        std::unique_ptr<AST::Statement> parse_generic_member_item();
         void skip_generic_definition_tail();
         bool generic_param_list_is_primary_shaped() const;
         std::vector<AST::GenericArgument> parse_generic_arguments();
@@ -187,7 +192,7 @@ namespace gallt {
         std::unique_ptr<AST::Statement> parse_declaration_or_statement();
         std::unique_ptr<AST::VariableDeclaration> parse_variable_declaration();
         std::unique_ptr<AST::IfStatement> parse_if_statement(bool compile_time = false,
-            bool member_block = false);
+            bool member_block = false, bool expect_const = true);
         std::unique_ptr<AST::ForStatement> parse_for_statement();
         std::unique_ptr<AST::WhileStatement> parse_while_statement();
         std::unique_ptr<AST::SwitchCaseStatement> parse_switch_statement();
@@ -195,6 +200,8 @@ namespace gallt {
         std::unique_ptr<AST::ContinueStatement> parse_continue_statement();
         std::unique_ptr<AST::FallthroughStatement> parse_fallthrough_statement();
         std::unique_ptr<AST::ReturnStatement> parse_return_statement();
+        std::unique_ptr<AST::Block> parse_control_body(
+            bool require_block, const std::string& context);
         std::unique_ptr<AST::Block> parse_block();
         std::unique_ptr<AST::ExpressionStatement> parse_expression_statement();
         std::unique_ptr<AST::EmptyStatement> parse_empty_statement();
@@ -202,6 +209,7 @@ namespace gallt {
         AST::Type parse_type(bool allow_void = true,
             bool allow_function_suffix = true);
         AST::Type parse_type_specifier(bool allow_void = true);
+        bool is_active_type_pack(const std::string& name) const;
 
         std::optional<AST::Type> parse_function_pointer_suffix(AST::Type base_type);
 

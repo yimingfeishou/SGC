@@ -1,5 +1,7 @@
 #include "generic_expander.hpp"
 #include "constant_folding.hpp"
+#include <algorithm>
+#include <cstdlib>
 #include <cstdio>
 #include <string>
 #include <vector>
@@ -32,19 +34,163 @@ namespace gallt {
             return ConstexprValue::make_integer(int_value, type);
         }
 
+        int constexpr_arithmetic_position(const AST::Type& type) {
+            switch (type.kind) {
+            case AST::TypeKind::Char:
+            case AST::TypeKind::Bool:
+                return 0;
+            case AST::TypeKind::Uchar:
+                return 1;
+            case AST::TypeKind::Int:
+                return 2;
+            case AST::TypeKind::Uint:
+                return 3;
+            case AST::TypeKind::Lint:
+                return 4;
+            case AST::TypeKind::Luint:
+                return 5;
+            case AST::TypeKind::Float:
+                return 6;
+            case AST::TypeKind::Double:
+                return 7;
+            default:
+                return -1;
+            }
+        }
+
+        int constexpr_conversion_rank(const AST::Type& from,
+            const AST::Type& to) {
+            AST::Type source = from;
+            AST::Type target = to;
+            source.is_const = false;
+            target.is_const = false;
+
+            if (source == target) { return 0; }
+
+            const int source_position =
+                constexpr_arithmetic_position(source);
+            const int target_position =
+                constexpr_arithmetic_position(target);
+
+            if (target.kind == AST::TypeKind::String &&
+                source_position >= 0) {
+                return 200;
+            }
+
+            if (source_position < 0 || target_position < 0) {
+                return -1;
+            }
+
+            const bool small_integer =
+                source.kind == AST::TypeKind::Bool ||
+                source.kind == AST::TypeKind::Char ||
+                source.kind == AST::TypeKind::Uchar;
+            const bool integral_promotion = small_integer &&
+                (target.kind == AST::TypeKind::Int ||
+                    target.kind == AST::TypeKind::Uint);
+            const bool floating_promotion =
+                source.kind == AST::TypeKind::Float &&
+                target.kind == AST::TypeKind::Double;
+            int distance = std::abs(target_position - source_position);
+            if (distance == 0) { distance = 1; }
+            return (integral_promotion || floating_promotion ? 100 : 200) +
+                distance;
+        }
+
     }
 
     const AST::FunctionDefinition* GenericExpander::find_constexpr_function(
-        const std::string& name, std::size_t arity) const {
+        const std::string& name,
+        const std::vector<ConstexprValue>& arguments) const {
         auto found = func_defs_.find(name);
-        if (found == func_defs_.end() || found->second == nullptr) {
+        if (found == func_defs_.end()) {
             return nullptr;
         }
 
-        const AST::FunctionDefinition* function = found->second;
-        if (!function->is_constexpr_function) { return nullptr; }
-        if (function->parameters.size() != arity) { return nullptr; }
-        return function;
+        struct Candidate {
+            const AST::FunctionDefinition* function = nullptr;
+            std::vector<int> ranks;
+        };
+        std::vector<Candidate> viable;
+
+        for (const AST::FunctionDefinition* function : found->second) {
+            if (function == nullptr || !function->is_constexpr_function ||
+                function->is_variadic) {
+                continue;
+            }
+
+            const std::size_t parameter_count = function->parameters.size();
+            std::size_t required = parameter_count;
+            for (std::size_t i = function->param_defaults.size();
+                i > 0; --i) {
+                if (function->param_defaults[i - 1] != nullptr) {
+                    required = i - 1;
+                } else {
+                    break;
+                }
+            }
+
+            if (arguments.size() < required ||
+                arguments.size() > parameter_count) {
+                continue;
+            }
+
+            Candidate candidate;
+            candidate.function = function;
+            bool viable_candidate = true;
+
+            for (std::size_t i = 0; i < arguments.size(); ++i) {
+                const int rank = constexpr_conversion_rank(
+                    arguments[i].type, function->parameters[i]);
+                if (rank < 0) {
+                    viable_candidate = false;
+                    break;
+                }
+                candidate.ranks.push_back(rank);
+            }
+
+            if (viable_candidate) {
+                viable.push_back(std::move(candidate));
+            }
+        }
+
+        int best = -1;
+        bool ambiguous = false;
+
+        for (std::size_t i = 0; i < viable.size(); ++i) {
+            bool is_best = true;
+
+            for (std::size_t j = 0; j < viable.size(); ++j) {
+                if (i == j) { continue; }
+
+                bool better = false;
+                bool worse = false;
+                const std::vector<int>& left = viable[i].ranks;
+                const std::vector<int>& right = viable[j].ranks;
+                const std::size_t count = std::min(left.size(), right.size());
+
+                for (std::size_t k = 0; k < count; ++k) {
+                    if (left[k] < right[k]) { better = true; }
+                    if (left[k] > right[k]) { worse = true; }
+                }
+
+                if (!better || worse) {
+                    is_best = false;
+                    break;
+                }
+            }
+
+            if (is_best) {
+                if (best != -1) {
+                    ambiguous = true;
+                } else {
+                    best = static_cast<int>(i);
+                }
+            }
+        }
+
+        if (ambiguous || best < 0) { return nullptr; }
+        return viable[static_cast<std::size_t>(best)].function;
     }
 
     ConstexprInterpreter GenericExpander::make_constexpr_interpreter(
@@ -73,7 +219,7 @@ namespace gallt {
 
         host.resolve_function = [this](const std::string& name,
             const std::vector<ConstexprValue>& arguments) {
-            return find_constexpr_function(name, arguments.size());
+            return find_constexpr_function(name, arguments);
         };
 
         host.layout_of_type = [this, &sub](const AST::Type& type,
@@ -92,7 +238,11 @@ namespace gallt {
             return found == struct_defs_.end() ? nullptr : found->second;
         };
 
-        return ConstexprInterpreter(std::move(host));
+        ConstexprInterpreter interpreter(std::move(host));
+        interpreter.set_max_steps(constexpr_max_steps_);
+        interpreter.set_max_integer_exponent(
+            constexpr_max_integer_exponent_);
+        return interpreter;
     }
 
     bool GenericExpander::constexpr_string_value(const AST::Expression* expr,
@@ -137,6 +287,14 @@ namespace gallt {
                                 return true;
                             }
                         }
+                    }
+                } else {
+                    AST::Type receiver_type;
+                    std::string receiver_name;
+                    if (property_receiver_type(postfix->base.get(), sub,
+                        receiver_type, receiver_name)) {
+                        out = receiver_type.to_source_string();
+                        return true;
                     }
                 }
             }
@@ -241,16 +399,86 @@ namespace gallt {
 
         if (name.empty()) { return false; }
 
-        const AST::FunctionDefinition* function = find_constexpr_function(name,
-            call->arguments.size());
-        if (function == nullptr) { return false; }
-
         std::vector<ConstexprValue> arguments;
         arguments.reserve(call->arguments.size());
 
-        for (std::size_t i = 0; i < call->arguments.size(); ++i) {
+        for (const auto& argument : call->arguments) {
             ConstexprValue value;
+            std::string text;
+            if (constexpr_string_value(argument.get(), sub, text)) {
+                value = ConstexprValue::make_string(std::move(text));
+            } else {
+                ConstantValue numeric;
+                if (!constexpr_numeric_value(argument.get(), sub, numeric)) {
+                    return false;
+                }
+                if (numeric.is_string) { return false; }
+
+                AST::Type type = numeric.is_float
+                    ? AST::Type::make_double() : AST::Type::make_int();
+
+                if (auto* primary = dynamic_cast<const PrimaryExpression*>(
+                    argument.get())) {
+                    if (primary->kind == PrimaryExpression::Kind::Literal) {
+                        switch (primary->literal_token.type) {
+                        case TokenType::IntegerLiteral:
+                            type = AST::Type::integer_literal_type(
+                                primary->literal_token.lexeme);
+                            break;
+                        case TokenType::FloatLiteral:
+                            type = AST::Type::float_literal_type(
+                                primary->literal_token.lexeme);
+                            break;
+                        case TokenType::CharLiteral:
+                            type = AST::Type::make_char();
+                            break;
+                        case TokenType::BoolLiteral:
+                            type = AST::Type::make_bool();
+                            break;
+                        default:
+                            break;
+                        }
+                    } else if (primary->kind ==
+                        PrimaryExpression::Kind::Identifier) {
+                        auto declared =
+                            sub.constant_types.find(primary->identifier);
+                        if (declared != sub.constant_types.end()) {
+                            type = declared->second;
+                        }
+                    }
+                }
+
+                value = numeric.is_float
+                    ? ConstexprValue::make_floating(
+                        numeric.float_value, type)
+                    : ConstexprValue::make_integer(
+                        numeric.int_value, type);
+            }
+            arguments.push_back(std::move(value));
+        }
+
+        const AST::FunctionDefinition* function =
+            find_constexpr_function(name, arguments);
+        if (function == nullptr) { return false; }
+
+        for (std::size_t i = 0; i < arguments.size(); ++i) {
+            ConstexprValue converted;
             if (!constexpr_argument_value(call->arguments[i].get(), sub,
+                function->parameters[i], converted)) {
+                return false;
+            }
+            arguments[i] = std::move(converted);
+        }
+
+        for (std::size_t i = arguments.size();
+            i < function->parameters.size(); ++i) {
+            if (i >= function->param_defaults.size() ||
+                function->param_defaults[i] == nullptr) {
+                return false;
+            }
+            ConstexprValue value;
+            if (!constexpr_argument_value(
+                function->param_defaults[i].get(), sub,
                 function->parameters[i], value)) {
                 return false;
             }
@@ -266,6 +494,7 @@ namespace gallt {
         ConstexprValue& out) {
         if (expr == nullptr) { return false; }
         std::unique_ptr<Expression> rewritten = clone_expression(expr, sub);
+        drain_deferred_instantiations(true);
         if (rewritten == nullptr) { return false; }
         ConstexprInterpreter interpreter = make_constexpr_interpreter(sub);
         return interpreter.evaluate(rewritten.get(), out);
@@ -275,6 +504,7 @@ namespace gallt {
         const AST::Expression* expr, const Substitution& sub, ConstantValue& out) {
         if (expr == nullptr) { return false; }
         std::unique_ptr<Expression> rewritten = clone_expression(expr, sub);
+        drain_deferred_instantiations(true);
         if (rewritten == nullptr) { return false; }
 
         ConstantEvaluationContext context;

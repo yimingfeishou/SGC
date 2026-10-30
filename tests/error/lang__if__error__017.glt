@@ -1,0 +1,14 @@
+// lang__if__error__017.glt
+// expect error ER 0017
+
+@cond VALUE = 1
+
+@if (VALUE == 1)
+int choose() {
+    return 1
+}
+
+int main() {
+    output(choose(), "\n")
+    return 0
+}

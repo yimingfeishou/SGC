@@ -66,6 +66,24 @@ namespace gallt {
             return false;
         }
 
+        if (arg.expression != nullptr) {
+            ConstantValue resolved;
+            if (resolve_constant_argument(arg, &sub, resolved)) {
+                arg.expression.reset();
+                arg.expression_constant = false;
+                arg.is_string_constant = resolved.is_string;
+                arg.string_constant = resolved.string_value;
+                arg.float_constant = resolved.is_float;
+                arg.float_value = resolved.float_value;
+                arg.int_value = resolved.int_value;
+                if (resolved.is_string) {
+                    arg.constant_actual_type = AST::Type::make_string();
+                }
+                arg.text = arg.normalize();
+                return true;
+            }
+        }
+
         auto found = sub.constants.find(arg.text);
 
         if (found == sub.constants.end()) { return true; }
@@ -88,6 +106,63 @@ namespace gallt {
     bool GenericExpander::substitute_type(const Type& in, const Substitution& sub, Type& out) {
         switch (in.kind) {
         case TypeKind::Array: {
+            if (in.pack_projection != PackProjectionKind::None &&
+                in.element_type != nullptr &&
+                in.element_type->kind == TypeKind::Struct &&
+                !in.element_type->generic_ref) {
+                auto pack = sub.type_packs.find(in.element_type->struct_name);
+                if (pack == sub.type_packs.end()) {
+                    report(in.pack_projection_location,
+                        ErrorCode::ParameterPackPropertyNotApplicable,
+                        std::vector<std::string>{
+                            "type", in.element_type->struct_name });
+                    out = Type::make_void();
+                    return false;
+                }
+
+                long long raw_index = 0;
+                bool resolved = true;
+                if (in.pack_projection == PackProjectionKind::First) {
+                    resolved = !pack->second.empty();
+                } else if (in.pack_projection == PackProjectionKind::Last) {
+                    resolved = !pack->second.empty();
+                    raw_index = resolved
+                        ? static_cast<long long>(pack->second.size() - 1) : 0;
+                } else if (in.pack_projection_index != nullptr) {
+                    ConstantValue value;
+                    resolved = evaluate_constant_with_members(
+                        in.pack_projection_index.get(), sub, value);
+                    if (resolved && value.is_float) {
+                        report(in.pack_projection_location,
+                            ErrorCode::PackSubscriptNotInteger,
+                            std::vector<std::string>{
+                                in.pack_projection_index_text });
+                        out = Type::make_void();
+                        return false;
+                    }
+                    raw_index = value.int_value;
+                } else if (in.array_size.has_value()) {
+                    raw_index = static_cast<long long>(*in.array_size);
+                } else {
+                    resolved = false;
+                }
+
+                if (!resolved || raw_index < 0 ||
+                    static_cast<size_t>(raw_index) >= pack->second.size()) {
+                    report(in.pack_projection_location,
+                        ErrorCode::ExpressionSyntaxError,
+                        std::string("type parameter pack index is out of bounds"));
+                    out = Type::make_void();
+                    return false;
+                }
+
+                out = pack->second[static_cast<size_t>(raw_index)];
+                if (in.is_const) {
+                    out.is_const = true;
+                }
+                return true;
+            }
+
             if (in.element_type && in.element_type->kind == TypeKind::Struct &&
                 !in.element_type->generic_ref && in.array_size.has_value()) {
                 auto pack = sub.type_packs.find(in.element_type->struct_name);
@@ -138,6 +213,28 @@ namespace gallt {
                 }
 
                 expand_pack_arguments(ref.arguments, sub, in.generic_ref->location);
+                if (ref.member.empty()) {
+                    auto instance_key = ensure_instantiation(ref, true);
+                    if (!instance_key.has_value()) { return false; }
+
+                    auto members = instance_struct_members_.find(*instance_key);
+                    if (members == instance_struct_members_.end() ||
+                        members->second.size() != 1) {
+                        report(ref.location,
+                            ErrorCode::GenericMemberNotInInstantiation,
+                            std::vector<std::string>{
+                                ref.generic_name, ref.generic_name });
+                        return false;
+                    }
+
+                    ref.member = members->second.front();
+                }
+
+                if (defer_instantiation_dependency(ref)) {
+                    out = Type::make_struct(ref.mangle());
+                    return true;
+                }
+
                 auto mangled = ensure_instantiation(ref, false);
                 if (!mangled.has_value()) { return false; }
                 out = Type::make_struct(*mangled);
@@ -148,11 +245,17 @@ namespace gallt {
             if (member != sub.members.end()) {
                 GenericRef dependency = sub.instance;
                 dependency.member = in.struct_name;
-                ensure_instantiation(dependency, false);
+                if (!defer_instantiation_dependency(dependency)) {
+                    ensure_instantiation(dependency, false);
+                }
             }
 
             auto found = sub.types.find(in.struct_name);
             if (found != sub.types.end()) {
+                if (found->second.generic_ref) {
+                    return substitute_type(found->second, sub, out);
+                }
+
                 out = found->second;
                 return true;
             }
@@ -195,6 +298,12 @@ namespace gallt {
                         report(type.generic_ref->location, ErrorCode::GenericMemberNotInInstantiation, std::vector<std::string>{ ref.generic_name, ref.generic_name });
                         break;
                     }
+                }
+
+                if (defer_instantiation_dependency(ref)) {
+                    type.struct_name = ref.mangle();
+                    type.generic_ref.reset();
+                    break;
                 }
 
                 auto mangled = ensure_instantiation(ref, false);
@@ -536,6 +645,49 @@ namespace gallt {
 
     GenericExpander::PatternOrder GenericExpander::compare_pattern_type(const Type& a,
         const Type& b) const {
+        std::function<bool(const Type&, const Type&)> matches;
+        matches = [&](const Type& pattern, const Type& actual) -> bool {
+            if (pattern.kind == TypeKind::Array) {
+                if (actual.kind != TypeKind::Array || !pattern.element_type ||
+                    !actual.element_type) {
+                    return false;
+                }
+
+                if (pattern.array_size.has_value() &&
+                    (!actual.array_size.has_value() ||
+                        *pattern.array_size != *actual.array_size)) {
+                    return false;
+                }
+
+                return matches(*pattern.element_type, *actual.element_type);
+            }
+
+            if (pattern.kind == TypeKind::Pointer) {
+                if (actual.kind != TypeKind::Pointer || !pattern.pointee_type ||
+                    !actual.pointee_type) {
+                    return false;
+                }
+
+                return matches(*pattern.pointee_type, *actual.pointee_type);
+            }
+
+            if (pattern.kind == TypeKind::Struct &&
+                is_free_identifier(pattern.struct_name, struct_defs_)) {
+                return true;
+            }
+
+            return pattern == actual;
+        };
+
+        if (a.kind == TypeKind::Array && b.kind == TypeKind::Array) {
+            const bool a_matches_b = matches(a, b);
+            const bool b_matches_a = matches(b, a);
+            if (a_matches_b && b_matches_a) { return PatternOrder::Equal; }
+            if (b_matches_a) { return PatternOrder::Better; }
+            if (a_matches_b) { return PatternOrder::Worse; }
+            return PatternOrder::Incomparable;
+        }
+
         bool a_free = (a.kind == TypeKind::Struct &&
             is_free_identifier(a.struct_name, struct_defs_));
         bool b_free = (b.kind == TypeKind::Struct &&

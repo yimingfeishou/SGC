@@ -1,5 +1,5 @@
 // lang__generics__error__044.glt
-// expect error ER 0065
+// expect error ER 0042
 
 generics Blob<T, int N> {
     struct Blob {

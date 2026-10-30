@@ -1,0 +1,17 @@
+// lang__const_fn__pass__008.glt
+// expect output
+// 2096128
+
+int sum_down(int n) const {
+    if (n <= 0) {
+        return 0
+    }
+    return n + sum_down(n - 1)
+}
+
+const int result = sum_down(2047)
+
+int main() {
+    output(result, "\n")
+    return 0
+}

@@ -365,7 +365,7 @@ namespace gallt {
                 std::string op;
                 switch (comp->op) {
                 case AST::ComparisonExpression::Operator::Equal: op = "oeq"; break;
-                case AST::ComparisonExpression::Operator::NotEqual: op = "one"; break;
+                case AST::ComparisonExpression::Operator::NotEqual: op = "une"; break;
                 case AST::ComparisonExpression::Operator::Greater: op = "ogt"; break;
                 case AST::ComparisonExpression::Operator::Less: op = "olt"; break;
                 case AST::ComparisonExpression::Operator::GreaterEqual: op = "oge"; break;
@@ -1091,6 +1091,8 @@ namespace gallt {
 
                 std::string ptr = new_temp("strdata");
                 std::size_t array_len = bytes.empty() ? 1u : bytes.size();
+                emit_line("call void @llvm.memset.p0.i64(ptr " + temp +
+                    ", i8 0, i64 32, i1 false)");
                 emit_line(ptr + " = getelementptr [" + std::to_string(array_len) +
                     " x i8], ptr @" + global + ", i64 0, i64 0");
                 emit_line("call void @gallt_string_init(ptr " + temp +
@@ -1299,9 +1301,9 @@ namespace gallt {
                 type_contains_string(operand_type);
 
             if (!needs_cleanup && operand_type.kind == AST::TypeKind::Struct) {
-                auto def_it = struct_by_name_.find(operand_type.struct_name);
-                needs_cleanup = def_it != struct_by_name_.end() && def_it->second != nullptr &&
-                    def_it->second->needs_destruction;
+                const AST::StructDefinition* def =
+                    lookup_struct_definition(operand_type.struct_name);
+                needs_cleanup = def != nullptr && def->needs_destruction;
             }
 
             if (needs_cleanup) {
@@ -1425,14 +1427,15 @@ namespace gallt {
                 }
 
                 if (struct_type.kind != TypeKind::Struct) { return std::string(); }
-                auto struct_it = struct_by_name_.find(struct_type.struct_name);
-                if (struct_it == struct_by_name_.end()) { return std::string(); }
+                const AST::StructDefinition* struct_def =
+                    lookup_struct_definition(struct_type);
+                if (struct_def == nullptr) { return std::string(); }
 
                 size_t index = 0;
                 bool found = false;
 
-                for (size_t i = 0; i < struct_it->second->members.size(); ++i) {
-                    if (struct_it->second->members[i].name == post->member_name) {
+                for (size_t i = 0; i < struct_def->members.size(); ++i) {
+                    if (struct_def->members[i].name == post->member_name) {
                         index = i;
                         found = true;
                         break;
@@ -1646,6 +1649,14 @@ namespace gallt {
         case AST::PostfixExpression::Operator::Cast: {
             ExprValue operand = gen_expr(expr->base.get());
             out.value = convert_value(operand.value, operand.type, expr->cast_type);
+            if (expr->cast_type.kind == TypeKind::String &&
+                operand.type.kind == TypeKind::String &&
+                !operand.owned_string.empty()) {
+                out.address = operand.address;
+                out.owned_string = operand.owned_string;
+                operand.owned_string.clear();
+            }
+            destroy_owned_string(operand);
             return out;
         }
         case AST::PostfixExpression::Operator::Increment:
@@ -1737,15 +1748,16 @@ namespace gallt {
             }
 
             if (direct != nullptr) {
-                auto struct_it = struct_by_name_.find(direct->identifier);
-                if (struct_it != struct_by_name_.end() && struct_it->second != nullptr &&
-                    struct_it->second->constructor_names.empty() &&
+                const AST::StructDefinition* def =
+                    lookup_struct_definition(direct->identifier);
+                if (def != nullptr &&
+                    def->constructor_names.empty() &&
                     expr->arguments.empty()) {
-                    AST::StructDefinition* def = struct_it->second;
                     require_lifecycle_functions(def);
                     AST::Type temp_type = AST::Type::make_struct(direct->identifier);
                     std::string storage = emit_alloca(llvm_type(temp_type), "value_temp");
-                    std::string callee = function_reference("__sgc_ctor$" + def->name);
+                    std::string callee = function_reference(
+                        lifecycle_symbol(def, LifecycleKind::Constructor));
                     if (!callee.empty()) {
                         emit_line("call void " + callee + "(ptr " + storage + ")");
                     }
@@ -1764,9 +1776,10 @@ namespace gallt {
                     return out;
                 }
 
-                if (struct_it != struct_by_name_.end() && struct_it->second != nullptr &&
-                    !struct_it->second->constructor_names.empty()) {
-                    AST::StructDefinition* def = struct_it->second;
+                const AST::StructDefinition* ctor_def =
+                    lookup_struct_definition(direct->identifier);
+                if (ctor_def != nullptr && !ctor_def->constructor_names.empty()) {
+                    const AST::StructDefinition* def = ctor_def;
                     require_lifecycle_functions(def);
                     AST::Type temp_type = AST::Type::make_struct(direct->identifier);
                     std::string storage = emit_alloca(llvm_type(temp_type), "value_temp");
@@ -1871,12 +1884,12 @@ namespace gallt {
                                 if (!object_address.empty()) { address = object_address; }
                             }
 
-                            auto it = struct_by_name_.find(owner.struct_name);
-                            if (it != struct_by_name_.end() && it->second != nullptr) {
-                            AST::StructDefinition* def = it->second;
+                        const AST::StructDefinition* def =
+                            lookup_struct_definition(owner.struct_name);
+                        if (def != nullptr) {
                             std::string symbol = def->destructor_name;
                             if (symbol.empty()) {
-                                symbol = "__sgc_dtor$" + def->name;
+                                symbol = lifecycle_symbol(def, LifecycleKind::Destructor);
                             }
 
                             std::string callee = function_reference(symbol);
@@ -2079,9 +2092,9 @@ namespace gallt {
                     sret_storage = emit_alloca(llvm_type(return_type), "sret_temp");
                     bool needs_cleanup = type_contains_string(return_type);
                     if (!needs_cleanup) {
-                        auto def_it = struct_by_name_.find(return_type.struct_name);
-                        needs_cleanup = def_it != struct_by_name_.end() &&
-                            def_it->second != nullptr && def_it->second->needs_destruction;
+                        const AST::StructDefinition* def =
+                            lookup_struct_definition(return_type.struct_name);
+                        needs_cleanup = def != nullptr && def->needs_destruction;
                     }
                     if (needs_cleanup) {
                         CleanupRecord record;
@@ -2201,6 +2214,8 @@ namespace gallt {
         }
 
         std::string result = emit_alloca(llvm_type(Type::make_string()), "scalarstring");
+        emit_line("call void @llvm.memset.p0.i64(ptr " + result +
+            ", i8 0, i64 32, i1 false)");
         if (owned_temp != nullptr) { *owned_temp = true; }
 
         switch (v.type.kind) {

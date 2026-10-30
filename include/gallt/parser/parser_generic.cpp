@@ -28,6 +28,32 @@ namespace gallt {
         return nullptr;
     }
 
+    std::unique_ptr<Statement> Parser::parse_generic_member_item() {
+        if (current_.type == TokenType::Keyword_Emit ||
+            at_const_if_statement()) {
+            return parse_generic_compile_time_item();
+        }
+
+        if (current_.type == TokenType::Keyword_Struct ||
+            at_struct_attribute() || is_type_start_keyword(current_.type) ||
+            current_.type == TokenType::Identifier) {
+            std::unique_ptr<TopLevel> member = parse_top_level();
+            if (member == nullptr) {
+                return nullptr;
+            }
+            if (auto* statement = dynamic_cast<Statement*>(member.get())) {
+                member.release();
+                return std::unique_ptr<Statement>(statement);
+            }
+
+            auto wrapper = std::make_unique<TopLevelBlock>(member->location);
+            wrapper->items.push_back(std::move(member));
+            return wrapper;
+        }
+
+        return parse_statement();
+    }
+
     std::unique_ptr<Block> Parser::parse_generic_member_block() {
         SourceLocation loc = current_location();
         if (!expect(TokenType::LeftBrace, "expected '{' to start block")) {
@@ -51,28 +77,7 @@ namespace gallt {
                 continue;
             }
 
-            std::unique_ptr<Statement> item;
-
-            if (current_.type == TokenType::Keyword_Emit || at_const_if_statement()) {
-                item = parse_generic_compile_time_item();
-            } else if (current_.type == TokenType::Keyword_Struct ||
-                at_struct_attribute() || is_type_start_keyword(current_.type) ||
-                current_.type == TokenType::Identifier) {
-                std::unique_ptr<TopLevel> member = parse_top_level();
-
-                if (member != nullptr) {
-                    if (auto* statement = dynamic_cast<Statement*>(member.get())) {
-                        member.release();
-                        item = std::unique_ptr<Statement>(statement);
-                    } else {
-                        auto wrapper = std::make_unique<TopLevelBlock>(member->location);
-                        wrapper->items.push_back(std::move(member));
-                        item = std::move(wrapper);
-                    }
-                }
-            } else {
-                item = parse_statement();
-            }
+            std::unique_ptr<Statement> item = parse_generic_member_item();
 
             if (item != nullptr) {
                 block->statements.push_back(std::move(item));
@@ -256,6 +261,7 @@ namespace gallt {
         switch (lookahead_type(after)) {
         case TokenType::Dot:
         case TokenType::ColonColon:
+        case TokenType::Greater:
         case TokenType::Identifier:
         case TokenType::Star:
         case TokenType::Semicolon:
@@ -1190,6 +1196,26 @@ namespace gallt {
         if (!expect(TokenType::LeftBrace, "expected '{' to open generic block")) {
             return nullptr;
         }
+
+        generic_type_pack_scopes_.emplace_back();
+        for (const GenericParameter& parameter : def->parameters) {
+            if (parameter.is_type && parameter.is_pack && !parameter.name.empty()) {
+                generic_type_pack_scopes_.back().insert(parameter.name);
+            }
+        }
+
+        struct TypePackScopeGuard {
+            explicit TypePackScopeGuard(
+                std::vector<std::unordered_set<std::string>>& scopes)
+                : scopes_(scopes) {
+            }
+
+            ~TypePackScopeGuard() {
+                scopes_.pop_back();
+            }
+
+            std::vector<std::unordered_set<std::string>>& scopes_;
+        } type_pack_scope(generic_type_pack_scopes_);
 
         skip_newlines();
 

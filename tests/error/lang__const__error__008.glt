@@ -3,7 +3,7 @@
 
 int runtime_size = 3
 
-const int square(int x) {
+int square(int x) const {
     return x * x
 }
 

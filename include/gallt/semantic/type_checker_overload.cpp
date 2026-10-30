@@ -265,31 +265,37 @@ namespace gallt {
 
         std::string scope = current_function_ != nullptr
             ? name_namespace_prefix(current_function_->name) : std::string();
+        std::unordered_set<AST::FunctionDefinition*> collected;
 
         for (;;) {
+            bool found_in_scope = false;
             for (AST::FunctionDefinition* candidate : found->second) {
                 auto candidate_scope = operator_namespaces_.find(candidate);
                 if (candidate_scope != operator_namespaces_.end() &&
                     candidate_scope->second == scope) {
-                    result.push_back(candidate);
+                    found_in_scope = true;
+                    if (collected.insert(candidate).second) {
+                        result.push_back(candidate);
+                    }
                 }
             }
 
-            if (!result.empty() || scope.empty()) {
-                break;
-            }
+            if (found_in_scope || scope.empty()) { break; }
 
             const std::size_t separator = scope.rfind('$');
             scope = separator == std::string::npos
                 ? std::string() : scope.substr(0, separator);
         }
 
-        if (!result.empty()) {
-            return result;
-        }
-
         for (AST::FunctionDefinition* candidate : found->second) {
-            if (operator_associated_with_operands(candidate, operand_types)) {
+            auto candidate_scope = operator_namespaces_.find(candidate);
+            if (candidate_scope == operator_namespaces_.end() ||
+                candidate_scope->second.empty()) {
+                continue;
+            }
+
+            if (operator_associated_with_operands(candidate, operand_types) &&
+                collected.insert(candidate).second) {
                 result.push_back(candidate);
             }
         }

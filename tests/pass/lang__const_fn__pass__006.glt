@@ -2,7 +2,7 @@
 // expect output
 // 5
 
-const int size_of_text(string s) {
+int size_of_text(string s) const {
     return strlen(s) + 1
 }
 const int n = size_of_text("abcd")

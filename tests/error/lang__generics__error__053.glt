@@ -1,7 +1,7 @@
 // lang__generics__error__053.glt
 // expect error ER 0144
 
-const int square(int x) {
+int square(int x) const {
     return x * x
 }
 generics G<T> {

@@ -43,15 +43,28 @@ namespace gallt {
             Array, Pointer, Struct, Function, Error
         };
 
+        enum class PackProjectionKind {
+            None,
+            Index,
+            First,
+            Last
+        };
+
         struct Type {
             TypeKind kind;
 
             std::shared_ptr<Type> element_type;
             std::optional<size_t> array_size;
+            bool array_suffix_from_type_specifier = false;
+            PackProjectionKind pack_projection = PackProjectionKind::None;
+            std::shared_ptr<Expression> pack_projection_index;
+            std::string pack_projection_index_text;
+            SourceLocation pack_projection_location;
 
             std::shared_ptr<Type> pointee_type;
 
             std::string struct_name;
+            StructDefinition* resolved_struct = nullptr;
 
             std::shared_ptr<GenericRef> generic_ref;
 
@@ -96,6 +109,22 @@ namespace gallt {
                 Type t(TypeKind::Array);
                 t.element_type = elem;
                 t.array_size = size;
+                return t;
+            }
+
+            static Type make_pack_projection(std::shared_ptr<Type> elem,
+                PackProjectionKind kind, std::optional<size_t> size = std::nullopt,
+                std::shared_ptr<Expression> index = nullptr,
+                std::string index_text = std::string(),
+                SourceLocation location = SourceLocation{}) {
+                Type t(TypeKind::Array);
+                t.element_type = elem;
+                t.array_size = size;
+                t.array_suffix_from_type_specifier = true;
+                t.pack_projection = kind;
+                t.pack_projection_index = std::move(index);
+                t.pack_projection_index_text = std::move(index_text);
+                t.pack_projection_location = location;
                 return t;
             }
 

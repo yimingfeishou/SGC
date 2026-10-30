@@ -1,7 +1,7 @@
 // lang__const_fn__error__002.glt
 // expect error ER 0148
 
-const int f(int x) {
+int f(int x) const {
     strwrite("hi")
     return x
 }

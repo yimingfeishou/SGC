@@ -2,7 +2,7 @@
 // expect output
 // 12
 
-const int add(int a, int b = 7) {
+int add(int a, int b = 7) const {
     return a + b
 }
 const int r = add(5)

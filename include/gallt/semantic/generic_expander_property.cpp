@@ -103,6 +103,11 @@ namespace gallt {
         }
 
         if (auto* e = dynamic_cast<const PostfixExpression*>(expr)) {
+            if (e->op == PostfixExpression::Operator::Subscript) {
+                return expression_text(e->base.get()) + "[" +
+                    expression_text(e->subscript_expr.get()) + "]";
+            }
+
             if (e->op == PostfixExpression::Operator::Dot) {
                 return expression_text(e->base.get()) + "." + e->member_name;
             }
@@ -177,39 +182,45 @@ namespace gallt {
     std::unique_ptr<Expression> GenericExpander::rewrite_property_expression(
         const PostfixExpression* expr, const Substitution& sub) {
         if (expr == nullptr || expr->op != PostfixExpression::Operator::Dot) { return nullptr; }
-        auto* prim = dynamic_cast<const PrimaryExpression*>(expr->base.get());
-        if (prim == nullptr || prim->kind != PrimaryExpression::Kind::Identifier) {
+        std::string parameter;
+        AST::Type receiver_type;
+        if (!property_receiver_type(expr->base.get(), sub, receiver_type, parameter)) {
             return nullptr;
         }
 
-        const std::string& parameter = prim->identifier;
-        bool is_type_param = (sub.types.find(parameter) != sub.types.end());
-        bool is_constant_param =
-            (sub.constant_types.find(parameter) != sub.constant_types.end());
-        if (!is_type_param && !is_constant_param) { return nullptr; }
-
         if (expr->member_name == "size" || expr->member_name == "align") {
             long long value = 0;
-
-            if (!eval_size_align_property(parameter, expr->member_name, sub, value)) {
+            std::size_t size = 0;
+            std::size_t align = 0;
+            const bool resolved = layout_of_composite_type(
+                receiver_type, size, align, sub);
+            if (!resolved) {
                 report(expr->location, ErrorCode::CompileTimePropertyNotApplicable,
                     std::vector<std::string>{ expr->member_name, parameter });
                 value = 0;
+            } else {
+                value = static_cast<long long>(
+                    expr->member_name == "align" ? align : size);
             }
 
             return make_constant_literal(expr->location,
                 ConstantValue{ value, 0.0, false, false, std::string() });
         }
         if (expr->member_name == "typename") {
-            if (!is_type_param) {
-                report(expr->location, ErrorCode::CompileTimePropertyNotApplicable, std::vector<std::string>{ expr->member_name, parameter });
-                return make_constant_literal(expr->location,
-                ConstantValue{ 0LL, 0.0, false, false, std::string() });
-            }
-
             ConstantValue value;
             value.is_string = true;
-            value.string_value = sub.types.at(parameter).to_source_string();
+            if (auto* prim = dynamic_cast<const PrimaryExpression*>(expr->base.get())) {
+                auto constant_type = sub.constant_types.find(prim->identifier);
+                if (constant_type != sub.constant_types.end() &&
+                    constant_type->second.kind == TypeKind::String) {
+                    auto constant = sub.constants.find(prim->identifier);
+                    if (constant != sub.constants.end() && constant->second.is_string) {
+                        value.string_value = constant->second.string_value;
+                        return make_constant_literal(expr->location, value);
+                    }
+                }
+            }
+            value.string_value = receiver_type.to_source_string();
             return make_constant_literal(expr->location, value);
         }
 
@@ -227,6 +238,61 @@ namespace gallt {
         }
 
         return nullptr;
+    }
+
+    bool GenericExpander::property_receiver_type(const Expression* receiver,
+        const Substitution& sub, AST::Type& out, std::string& name) {
+        if (receiver == nullptr) { return false; }
+
+        if (auto* prim = dynamic_cast<const PrimaryExpression*>(receiver)) {
+            if (prim->kind != PrimaryExpression::Kind::Identifier) { return false; }
+            name = prim->identifier;
+            return param_type_of(name, sub, out);
+        }
+
+        auto* access = dynamic_cast<const PostfixExpression*>(receiver);
+        if (access == nullptr) { return false; }
+
+        std::string pack_name;
+        if (!pack_identifier_name(access->base.get(), pack_name)) { return false; }
+        auto type_pack = sub.type_packs.find(pack_name);
+        if (type_pack == sub.type_packs.end()) { return false; }
+
+        long long raw_index = 0;
+        bool resolved = true;
+        if (access->op == PostfixExpression::Operator::Subscript) {
+            ConstantValue value;
+            resolved = evaluate_constant_with_members(
+                access->subscript_expr.get(), sub, value);
+            if (resolved && value.is_float) {
+                report(access->location, ErrorCode::PackSubscriptNotInteger,
+                    std::vector<std::string>{
+                        expression_text(access->subscript_expr.get()) });
+                return false;
+            }
+            raw_index = value.int_value;
+        } else if (access->op == PostfixExpression::Operator::Dot &&
+            access->member_name == "first") {
+            resolved = !type_pack->second.empty();
+        } else if (access->op == PostfixExpression::Operator::Dot &&
+            access->member_name == "last") {
+            resolved = !type_pack->second.empty();
+            raw_index = resolved
+                ? static_cast<long long>(type_pack->second.size() - 1) : 0;
+        } else {
+            return false;
+        }
+
+        if (!resolved || raw_index < 0 ||
+            static_cast<size_t>(raw_index) >= type_pack->second.size()) {
+            report(access->location, ErrorCode::ExpressionSyntaxError,
+                std::string("type parameter pack index is out of bounds"));
+            return false;
+        }
+
+        out = type_pack->second[static_cast<size_t>(raw_index)];
+        name = expression_text(receiver);
+        return true;
     }
 
     bool GenericExpander::param_type_of(const std::string& name,
@@ -406,33 +472,40 @@ namespace gallt {
         const std::string& property, const std::vector<const Expression*>& args,
         const Substitution& sub, bool& out) {
         auto* prim = dynamic_cast<const PrimaryExpression*>(receiver);
-        if (prim == nullptr || prim->kind != PrimaryExpression::Kind::Identifier) {
-            return false;
-        }
-        const std::string& parameter = prim->identifier;
+        std::string parameter;
         AST::Type type;
-        bool is_type_param = (sub.types.find(parameter) != sub.types.end());
-        bool is_constant_param = (sub.constant_types.find(parameter) != sub.constant_types.end());
+        bool is_type_param = false;
+        if (prim != nullptr && prim->kind == PrimaryExpression::Kind::Identifier) {
+            parameter = prim->identifier;
+            is_type_param = (sub.types.find(parameter) != sub.types.end());
 
-        if (is_pack_name(sub, parameter)) {
-            if (property != "empty") { return false; }
-            auto type_pack = sub.type_packs.find(parameter);
-            auto const_pack = sub.const_packs.find(parameter);
-            if (type_pack != sub.type_packs.end()) {
-                out = type_pack->second.empty();
-                return true;
+            if (is_pack_name(sub, parameter)) {
+                if (property != "empty") { return false; }
+                auto type_pack = sub.type_packs.find(parameter);
+                auto const_pack = sub.const_packs.find(parameter);
+                if (type_pack != sub.type_packs.end()) {
+                    out = type_pack->second.empty();
+                    return true;
+                }
+                if (const_pack != sub.const_packs.end()) {
+                    out = const_pack->second.empty();
+                    return true;
+                }
+                return false;
             }
-            if (const_pack != sub.const_packs.end()) {
-                out = const_pack->second.empty();
-                return true;
-            }
-            return false;
-        }
 
-        if (!is_type_param && !is_constant_param) {
-            return false;
+            const bool is_constant_param =
+                (sub.constant_types.find(parameter) != sub.constant_types.end());
+            if (!is_type_param && !is_constant_param) {
+                return false;
+            }
+            if (!param_type_of(parameter, sub, type)) { return false; }
+        } else {
+            if (!property_receiver_type(receiver, sub, type, parameter)) {
+                return false;
+            }
+            is_type_param = true;
         }
-        if (!param_type_of(parameter, sub, type)) { return false; }
 
         if (property == "is_same" || property == "is_convertible" ||
             property == "has_member") {
@@ -682,7 +755,14 @@ namespace gallt {
                 auto* prim = dynamic_cast<const PrimaryExpression*>(receiver);
 
                 if (prim == nullptr || prim->kind != PrimaryExpression::Kind::Identifier) {
-                    return false;
+                    AST::Type receiver_type;
+                    std::string receiver_name;
+                    if (!property_receiver_type(receiver, sub,
+                        receiver_type, receiver_name)) {
+                        return false;
+                    }
+                    value = receiver_type.to_source_string();
+                    return true;
                 }
 
                 if (sub.types.find(prim->identifier) == sub.types.end()) { return false; }

@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-const std::string VERSION = "0.5.0-1023 Preview";
+const std::string VERSION = "0.5.0-1030 Preview";
 
 namespace gallt {
 
@@ -41,6 +41,9 @@ namespace gallt {
             return pal::exit_success_code();
         case CommandMode::Compile:
             return run_compiler(options);
+        case CommandMode::License:
+            std::cout << license_text();
+            return pal::exit_success_code();
         case CommandMode::Invalid:
             break;
         }

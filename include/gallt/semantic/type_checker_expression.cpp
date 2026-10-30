@@ -435,7 +435,8 @@ namespace gallt {
                 ? expr->right.get() : expr->left.get());
             if (!is_equal_op) {
                 report_error(expr->location, ErrorCode::BinaryOperatorTypeMismatch,
-                    "relational comparison is not allowed for function pointers");
+                    "relational comparison is not allowed for operands of type '" +
+                    left.to_string() + "' and '" + right.to_string() + "'");
                 reported = true;
             } else if (other_is_null) {
                 ok = true;
@@ -744,6 +745,20 @@ namespace gallt {
 
                 if (cached != expression_types_.end()) {
                     return cached->second;
+                }
+            }
+        }
+
+        if (expr->op == AST::PostfixExpression::Operator::Dot ||
+            expr->op == AST::PostfixExpression::Operator::Arrow) {
+            if (auto* prim = dynamic_cast<AST::PrimaryExpression*>(expr->base.get())) {
+                if (prim->kind == AST::PrimaryExpression::Kind::Identifier) {
+                    const Symbol* base_symbol = sym_table_.lookup(prim->identifier);
+                    if (base_symbol != nullptr && base_symbol->kind == SymbolKind::Struct) {
+                        report_error_template(expr->location,
+                            ErrorCode::UndefinedIdentifier, { prim->identifier });
+                        return AST::Type::make_error();
+                    }
                 }
             }
         }

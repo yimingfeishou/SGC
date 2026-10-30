@@ -2,7 +2,7 @@
 // expect output
 // 6
 
-const int size_of(int n) {
+int size_of(int n) const {
     return n + 1
 }
 int main() {

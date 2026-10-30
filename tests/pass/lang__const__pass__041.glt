@@ -2,7 +2,7 @@
 // expect output
 // 169
 
-const int square(int value) {
+int square(int value) const {
     return value ** 2
 }
 

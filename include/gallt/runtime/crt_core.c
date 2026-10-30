@@ -57,6 +57,11 @@ static void gallt_string_free_contents(gallt_string* s) {
     memset(s, 0, sizeof(*s));
 }
 
+static void gallt_string_store(gallt_string* out, gallt_string replacement) {
+    gallt_string_free_contents(out);
+    *out = replacement;
+}
+
 static gallt_string gallt_string_from_bytes_impl(const char* data, int64_t len) {
     gallt_string result;
     memset(&result, 0, sizeof(result));
@@ -87,7 +92,8 @@ static gallt_string gallt_string_from_bytes_impl(const char* data, int64_t len) 
 void gallt_string_init(gallt_string* out, const char* data, int64_t len) {
     if (data == NULL || len < 0) { len = 0; }
     if (out != NULL) {
-        *out = gallt_string_from_bytes_impl(data == NULL ? "" : data, len);
+        gallt_string_store(out,
+            gallt_string_from_bytes_impl(data == NULL ? "" : data, len));
     }
 }
 
@@ -95,8 +101,7 @@ void gallt_string_assign(gallt_string* dest, const gallt_string* src) {
     if (dest == NULL || src == NULL) { return; }
     gallt_string replacement = gallt_string_from_bytes_impl(
         gallt_string_data_ptr(src), src->length);
-    gallt_string_free_contents(dest);
-    *dest = replacement;
+    gallt_string_store(dest, replacement);
 }
 
 void gallt_string_destroy(gallt_string* s) {
@@ -124,7 +129,7 @@ void gallt_string_concat(gallt_string* out, const gallt_string* a, const gallt_s
         if (la > 0) { memcpy(replacement.data.bytes, pa, (size_t)la); }
         if (lb > 0) { memcpy(replacement.data.bytes + la, pb, (size_t)lb); }
         replacement.data.bytes[total] = '\0';
-        *out = replacement;
+        gallt_string_store(out, replacement);
         return;
     }
 
@@ -133,7 +138,7 @@ void gallt_string_concat(gallt_string* out, const gallt_string* a, const gallt_s
     if (buffer == NULL) {
         replacement.length = 0;
         replacement.capacity = 0;
-        *out = replacement;
+        gallt_string_store(out, replacement);
         return;
     }
 
@@ -142,7 +147,7 @@ void gallt_string_concat(gallt_string* out, const gallt_string* a, const gallt_s
     buffer[total] = '\0';
     replacement.capacity = total + 1;
     replacement.data.heap = buffer;
-    *out = replacement;
+    gallt_string_store(out, replacement);
 }
 
 static int gallt_format_fp(double v, char* buffer, size_t size) {
@@ -242,8 +247,7 @@ void gallt_input_string(gallt_string* p) {
     gallt_string replacement = gallt_string_from_bytes_impl(
         buffer == NULL ? "" : buffer, (int64_t)len);
     free(buffer);
-    gallt_string_free_contents(p);
-    *p = replacement;
+    gallt_string_store(p, replacement);
 }
 
 static gallt_string gallt_string_from_int64(int64_t v) {
@@ -253,49 +257,51 @@ static gallt_string gallt_string_from_int64(int64_t v) {
 }
 
 void gallt_string_from_i32(gallt_string* out, int32_t v) {
-    if (out != NULL) { *out = gallt_string_from_int64(v); }
+    if (out != NULL) { gallt_string_store(out, gallt_string_from_int64(v)); }
 }
 
 void gallt_string_from_u32(gallt_string* out, uint32_t v) {
     if (out == NULL) { return; }
     char buffer[64];
     int n = snprintf(buffer, sizeof(buffer), "%u", (unsigned)v);
-    *out = gallt_string_from_bytes_impl(buffer, n < 0 ? 0 : n);
+    gallt_string_store(out, gallt_string_from_bytes_impl(buffer, n < 0 ? 0 : n));
 }
 
 void gallt_string_from_i64(gallt_string* out, int64_t v) {
-    if (out != NULL) { *out = gallt_string_from_int64(v); }
+    if (out != NULL) { gallt_string_store(out, gallt_string_from_int64(v)); }
 }
 
 void gallt_string_from_u64(gallt_string* out, uint64_t v) {
     if (out == NULL) { return; }
     char buffer[64];
     int n = snprintf(buffer, sizeof(buffer), "%llu", (unsigned long long)v);
-    *out = gallt_string_from_bytes_impl(buffer, n < 0 ? 0 : n);
+    gallt_string_store(out, gallt_string_from_bytes_impl(buffer, n < 0 ? 0 : n));
 }
 
 void gallt_string_from_char(gallt_string* out, char v) {
-    if (out != NULL) { *out = gallt_string_from_bytes_impl(&v, 1); }
+    if (out != NULL) {
+        gallt_string_store(out, gallt_string_from_bytes_impl(&v, 1));
+    }
 }
 
 void gallt_string_from_bool(gallt_string* out, unsigned char v) {
     if (out == NULL) { return; }
-    *out = v ? gallt_string_from_bytes_impl("true", 4)
-             : gallt_string_from_bytes_impl("false", 5);
+    gallt_string_store(out, v ? gallt_string_from_bytes_impl("true", 4)
+                              : gallt_string_from_bytes_impl("false", 5));
 }
 
 void gallt_string_from_f32(gallt_string* out, float v) {
     if (out == NULL) { return; }
     char buffer[64];
     int n = gallt_format_fp((double)v, buffer, sizeof(buffer));
-    *out = gallt_string_from_bytes_impl(buffer, n < 0 ? 0 : n);
+    gallt_string_store(out, gallt_string_from_bytes_impl(buffer, n < 0 ? 0 : n));
 }
 
 void gallt_string_from_f64(gallt_string* out, double v) {
     if (out == NULL) { return; }
     char buffer[64];
     int n = gallt_format_fp(v, buffer, sizeof(buffer));
-    *out = gallt_string_from_bytes_impl(buffer, n < 0 ? 0 : n);
+    gallt_string_store(out, gallt_string_from_bytes_impl(buffer, n < 0 ? 0 : n));
 }
 
 void* gallt_alloc_bytes(int64_t size) {

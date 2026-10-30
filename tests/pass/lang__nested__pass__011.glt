@@ -1,0 +1,30 @@
+// lang__nested__pass__011.glt
+// expect output
+// 72
+
+struct X {
+    int value
+
+    constructor () {
+        struct X {
+            int local
+        }
+
+        X item = {7}
+        output(item.local)
+    }
+
+    destructor () {
+        struct X {
+            int local
+        }
+
+        X item = {2}
+        output(item.local)
+    }
+}
+
+int main() {
+    X item = X()
+    return 0
+}

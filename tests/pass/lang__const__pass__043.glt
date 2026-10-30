@@ -1,0 +1,17 @@
+// lang__const__pass__043.glt
+// expect output
+// 7
+
+const int read_value(int* p) {
+    return *p
+}
+
+int* const identity(int* p) {
+    return p
+}
+
+int main() {
+    int value = 7
+    output(read_value(identity(&value)), "\n")
+    return 0
+}

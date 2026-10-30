@@ -1,0 +1,22 @@
+// lang__generics__pass__065.glt
+// expect output
+// 1
+
+generics First<T> {
+    int f() {
+        return 1
+    }
+}
+
+generics Second<T> {
+    int g() {
+        First<int>
+        return f()
+    }
+}
+
+int main() {
+    Second<int>
+    output(g(), "\n")
+    return 0
+}

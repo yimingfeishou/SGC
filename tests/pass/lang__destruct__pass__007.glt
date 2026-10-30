@@ -1,0 +1,25 @@
+// lang__destruct__pass__007.glt
+// expect output
+// 21543
+
+struct Item {
+    int id
+
+    destructor () {
+        output(id)
+    }
+}
+
+struct Holder {
+    Item first
+    Item second
+}
+
+int main() {
+    {
+        Holder holder = {{1}, {2}}
+    }
+
+    Item items[3] = {{3}, {4}, {5}}
+    return 0
+}

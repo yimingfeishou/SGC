@@ -1,7 +1,7 @@
 // lang__loop__error__001.glt
 // expect error ER 0151
 
-const int spin() {
+int spin() const {
     int i = 0
     while (true) {
         i = i + 1

@@ -5,7 +5,7 @@ int twice(int x) {
     return x * 2
 }
 
-const int f(int x) {
+int f(int x) const {
     return twice(x)
 }
 

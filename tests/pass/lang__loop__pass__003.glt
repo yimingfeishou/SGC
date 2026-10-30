@@ -1,0 +1,12 @@
+// lang__loop__pass__003.glt
+// expect output
+// 6 3
+
+int main() {
+    int total = 0
+    for (int i = 0; i < 4; i++) total += i
+    int count = 0
+    while (count < 3) count++
+    output(total, " ", count, "\n")
+    return 0
+}

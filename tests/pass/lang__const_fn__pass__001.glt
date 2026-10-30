@@ -4,15 +4,15 @@
 // 268435455
 // 48
 
-const int arith_shift(int value, int count) {
+int arith_shift(int value, int count) const {
     return value >> count
 }
 
-const int logical_shift(uint value, int count) {
+int logical_shift(uint value, int count) const {
     return value >> count
 }
 
-const int left_shift(int value, int count) {
+int left_shift(int value, int count) const {
     return value << count
 }
 

@@ -1,0 +1,63 @@
+// sl__hash_table__pass__004.glt
+// expect output
+// false | 6 3 | 4 40 2 | true 100 | true false | false | false
+
+guide "generics.glt"
+access namespace sl
+
+int hash_key_total = 0
+int hash_value_total = 0
+int hash_visit_count = 0
+
+void hash_visit(hash_table_generic<int, int>.hash_table_entry entry) {
+    hash_key_total = hash_key_total + entry.key
+    hash_value_total = hash_value_total + entry.value
+    hash_visit_count = hash_visit_count + 1
+}
+
+int main() {
+    hash_table_generic<int, int>
+    hash_table table = hash_table(4)
+    set(&table, 1, 10)
+    set(&table, 2, 20)
+    set(&table, 3, 30)
+
+    iterator boundary = end(&table)
+    output(iterator_valid(&boundary), " | ")
+    iterator it = begin(&table)
+    int keys = 0
+    int count = 0
+    while (iterator_valid(&it)) {
+        hash_table_entry entry = iterator_value(&it)
+        keys = keys + entry.key
+        count = count + 1
+        iterator_next(&it)
+    }
+    output(keys, " ", count, " | ")
+
+    erase(&table, 2)
+    hash_key_total = 0
+    hash_value_total = 0
+    hash_visit_count = 0
+    for_each(&table, &hash_visit)
+    output(hash_key_total, " ", hash_value_total, " ", hash_visit_count, " | ")
+
+    iterator stable = begin(&table)
+    set(&table, 1, 100)
+    int updated = 0
+    get(&table, 1, &updated)
+    output(iterator_valid(&stable), " ", updated, " | ")
+
+    iterator manual = begin(&table)
+    bool manual_before = iterator_valid(&manual)
+    iterator_invalidate(&manual)
+    output(manual_before, " ", iterator_valid(&manual), " | ")
+
+    erase(&table, 3)
+    output(iterator_valid(&stable), " | ")
+
+    iterator cleared = begin(&table)
+    clear(&table)
+    output(iterator_valid(&cleared))
+    return 0
+}

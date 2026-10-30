@@ -1,0 +1,20 @@
+// lang__generics__pass__060.glt
+// expect output
+// 4 9.0
+
+generics ArraySize<T> {
+    int bytes() {
+        return T.size
+    }
+}
+
+generics Pick<int N, T...> {
+    T[N] value(T[N] input) {
+        return input
+    }
+}
+
+int main() {
+    output(ArraySize<int[1]>.bytes(), " ", Pick<1, int, double>.value(9))
+    return 0
+}

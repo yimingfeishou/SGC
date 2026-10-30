@@ -2,7 +2,7 @@
 // expect output
 // 1
 
-const bool flag(int x) {
+bool flag(int x) const {
     return x > 0
 }
 generics G<T: int> {

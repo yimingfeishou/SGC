@@ -1,0 +1,4 @@
+// compiler__encoding__pass__002.glt
+// expect output
+
+int main() { return 0 }

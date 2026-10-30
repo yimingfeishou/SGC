@@ -1,0 +1,14 @@
+// lang__if__pass__012.glt
+// expect output
+// -1 0 1
+
+int classify(int value) {
+    if (value < 0) return -1
+    else if (value == 0) return 0
+    else return 1
+}
+
+int main() {
+    output(classify(-1), " ", classify(0), " ", classify(1), "\n")
+    return 0
+}

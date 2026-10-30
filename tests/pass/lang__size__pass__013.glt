@@ -2,7 +2,7 @@
 // expect output
 // 4 9
 
-const int square(int x) {
+int square(int x) const {
     return x * x
 }
 const int width = square(3)

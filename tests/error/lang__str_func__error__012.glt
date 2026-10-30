@@ -1,7 +1,7 @@
 // lang__str_func__error__012.glt
 // expect error ER 0004
 
-const bool same(string a, string b) {
+bool same(string a, string b) const {
     if (a == b) {
         return true
     }

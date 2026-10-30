@@ -8,6 +8,7 @@
 int helper() {
     return 4
 }
+@endif
 
 int main() {
     output(helper())

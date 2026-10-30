@@ -3,6 +3,7 @@
 
 #include "../parser/ast.hpp"
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <string>
 #include <unordered_map>
@@ -47,6 +48,10 @@ namespace gallt {
 
     class ConstexprInterpreter {
     public:
+        static constexpr std::size_t kDefaultCallDepth = 2048;
+        static constexpr std::size_t kDefaultMaxSteps = 200000;
+        static constexpr std::uint64_t kDefaultMaxIntegerExponent = 64;
+
         struct Host {
             std::function<bool(const std::string& name, ConstexprValue& out)>
                 lookup_constant;
@@ -78,6 +83,12 @@ namespace gallt {
 
         void reset_failure() { failure_ = ConstexprFailure::None; }
 
+        void set_call_depth_limit(std::size_t limit) { call_depth_limit_ = limit; }
+        void set_max_steps(std::size_t limit) { max_steps_ = limit; }
+        void set_max_integer_exponent(std::uint64_t limit) {
+            max_integer_exponent_ = limit;
+        }
+
         static bool coerce(const ConstexprValue& value, const AST::Type& target,
             ConstexprValue& out);
 
@@ -96,15 +107,22 @@ namespace gallt {
         };
 
         struct Control {
-            enum class Kind { Normal, Break, Return } kind = Kind::Normal;
+            enum class Kind {
+                Normal, Break, Continue, Fallthrough, Return, TailCall
+            } kind = Kind::Normal;
             ConstexprValue value;
+            const AST::FunctionDefinition* tail_function = nullptr;
+            std::vector<ConstexprValue> tail_arguments;
         };
 
         Host host_;
         std::vector<std::unordered_map<std::string, ConstexprValue>> scopes_;
         ConstexprFailure failure_ = ConstexprFailure::None;
         std::size_t call_depth_ = 0;
+        std::size_t call_depth_limit_ = kDefaultCallDepth;
         std::size_t steps_ = 0;
+        std::size_t max_steps_ = kDefaultMaxSteps;
+        std::uint64_t max_integer_exponent_ = kDefaultMaxIntegerExponent;
 
         bool fail(ConstexprFailure failure);
 
@@ -114,6 +132,9 @@ namespace gallt {
         bool eval_call(const AST::PostfixExpression* expr, ConstexprValue& out);
         bool eval_named_call(const std::string& name,
             const AST::PostfixExpression* call, ConstexprValue& out);
+        bool prepare_tail_call(const AST::PostfixExpression* call,
+            const AST::FunctionDefinition*& function,
+            std::vector<ConstexprValue>& arguments);
         bool eval_string_builtin(const std::string& name,
             const std::vector<ConstexprValue>& arguments, ConstexprValue& out);
         bool apply_arithmetic(ArithmeticOp op, const ConstexprValue& left,
@@ -132,6 +153,7 @@ namespace gallt {
         Control exec_if(const AST::IfStatement* stmt);
         Control exec_for(const AST::ForStatement* stmt);
         Control exec_while(const AST::WhileStatement* stmt);
+        Control exec_switch(const AST::SwitchCaseStatement* stmt);
         Control exec_assignment(const AST::AssignmentExpression* expr);
 
         bool eval_initializer(const AST::Initializer* init, const AST::Type& type,

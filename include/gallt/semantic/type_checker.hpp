@@ -5,8 +5,10 @@
 #include "constexpr_function.hpp"
 #include "../common/diagnostics.hpp"
 #include "../parser/ast.hpp"
+#include <cstdint>
 #include <deque>
 #include <memory>
+#include <optional>
 #include <vector>
 #include <string>
 #include <unordered_map>
@@ -17,7 +19,11 @@ namespace gallt {
     class TypeChecker {
     public:
         TypeChecker(DiagnosticEngine& diag, bool require_main = true,
-            bool extended_semantics = false);
+            bool extended_semantics = false,
+            std::optional<std::uint64_t> constexpr_depth = std::nullopt,
+            std::optional<std::uint64_t> constexpr_max_steps = std::nullopt,
+            std::optional<std::uint64_t> constexpr_max_integer_exponent =
+                std::nullopt);
         ~TypeChecker() = default;
 
         TypeChecker(const TypeChecker&) = delete;
@@ -211,6 +217,8 @@ namespace gallt {
         bool is_file_pointer_type(const AST::Type& type) const;
 
         AST::StructDefinition* get_struct_definition(const std::string& name) const;
+        void bind_struct_type_identity(AST::Type& type,
+            const AST::StructDefinition* preferred = nullptr) const;
 
         const AST::StructDefinition::Member* get_struct_member(const AST::Type& struct_type,
             std::string_view member_name) const;

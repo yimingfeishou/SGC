@@ -1,0 +1,25 @@
+// lang__generics__pass__063.glt
+// expect output
+// 6 123
+
+int state = 0
+
+int mark(int value) {
+    state = state * 10 + value
+    return value
+}
+
+generics Leaf<int N> {
+    int value = mark(N)
+}
+
+generics Root<T> {
+    int use() {
+        return Leaf<1>.value + Leaf<2>.value + Leaf<3>.value
+    }
+}
+
+int main() {
+    output(Root<int>.use(), " ", state, "\n")
+    return 0
+}

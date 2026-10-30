@@ -1,0 +1,23 @@
+// lang__nested__pass__013.glt
+// expect output
+// 554
+
+struct X {
+    int w = 5
+
+    constructor () {
+        struct X {
+            int y
+            int z
+        }
+
+        output(w)
+        X a
+        output(w, size(a.z))
+    }
+}
+
+int main() {
+    X item = X()
+    return 0
+}

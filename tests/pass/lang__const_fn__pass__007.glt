@@ -2,7 +2,7 @@
 // expect output
 // 1073741824
 
-const int big() {
+int big() const {
     return 2 ** 30
 }
 const int b = big()

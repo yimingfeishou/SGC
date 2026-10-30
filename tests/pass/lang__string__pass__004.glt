@@ -1,0 +1,10 @@
+// lang__string__pass__004.glt
+// expect output
+// 32 8 abxy
+
+int main() {
+    string concatenated = cast<string>(strconcat("a", "b"))
+    string added = cast<string>("x" + "y")
+    output(size(strconcat("c", "d")), " ", align("p" + "q"), " ", concatenated, added)
+    return 0
+}

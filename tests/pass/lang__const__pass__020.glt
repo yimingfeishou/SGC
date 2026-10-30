@@ -4,18 +4,18 @@
 // true
 // 81
 
-const int order(string a, string b) {
+int order(string a, string b) const {
     return strcompare(a, b)
 }
 
-const bool same(string a, string b) {
+bool same(string a, string b) const {
     if (strcompare(a, b) == 0) {
         return true
     }
     return false
 }
 
-const int next_power_of(int base, int limit) {
+int next_power_of(int base, int limit) const {
     int value = 1
     while (true) {
         if (value > limit) {

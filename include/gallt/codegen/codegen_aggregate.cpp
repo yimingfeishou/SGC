@@ -27,7 +27,7 @@ namespace gallt {
             std::string array_ir = llvm_type(type);
             std::size_t n = type.array_size.value_or(0);
 
-            for (std::size_t i = 0; i < n; ++i) {
+            for (std::size_t i = n; i-- > 0;) {
                 std::string elem = new_temp("cleanup_elem");
                 emit_line(elem + " = getelementptr " + array_ir +
                     ", ptr " + address + ", i64 0, i64 " + std::to_string(i));
@@ -38,10 +38,9 @@ namespace gallt {
         }
 
         if (type.kind == TypeKind::Struct) {
-            auto it = struct_by_name_.find(type.struct_name);
-            if (it == struct_by_name_.end()) { return; }
+            const AST::StructDefinition* def = lookup_struct_definition(type.struct_name);
+            if (def == nullptr) { return; }
             std::string struct_ir = llvm_type(type);
-            const AST::StructDefinition* def = it->second;
             require_lifecycle_functions(def);
 
             if (!def->destructor_name.empty()) {
@@ -53,14 +52,15 @@ namespace gallt {
             }
 
             if (lifecycle_owner_ != def) {
-                std::string callee = function_reference("__sgc_dtor$" + def->name);
+                std::string callee = function_reference(
+                    lifecycle_symbol(def, LifecycleKind::Destructor));
                 if (!callee.empty()) {
                     emit_line("call void " + callee + "(ptr " + address + ")");
                     return;
                 }
             }
 
-            for (std::size_t i = 0; i < def->members.size(); ++i) {
+            for (std::size_t i = def->members.size(); i-- > 0;) {
                 std::string field = new_temp("cleanup_field");
                 emit_line(field + " = getelementptr " + struct_ir +
                     ", ptr " + address + ", i32 0, i32 " + std::to_string(i));
@@ -202,7 +202,8 @@ namespace gallt {
         }
 
         if (ctor_index == 0) {
-            std::string callee = function_reference("__sgc_ctor$" + def->name);
+            std::string callee = function_reference(
+                lifecycle_symbol(def, LifecycleKind::Constructor));
             if (callee.empty()) { return false; }
             emit_line("call void " + callee + "(ptr " + address + ")");
             return true;
@@ -255,9 +256,9 @@ namespace gallt {
         const AST::Type& struct_type, AST::ArrayInitializer* init) {
         require_lifecycle_functions(struct_type);
 
-        auto it = struct_by_name_.find(struct_type.struct_name);
-        if (it == struct_by_name_.end() || it->second == nullptr) { return; }
-        AST::StructDefinition* def = it->second;
+        AST::StructDefinition* def = const_cast<AST::StructDefinition*>(
+            lookup_struct_definition(struct_type.struct_name));
+        if (def == nullptr) { return; }
 
         if (init != nullptr && init->elements.empty()) {
             if (emit_struct_default_constructor(address, def, init->location)) {
@@ -314,11 +315,11 @@ namespace gallt {
 
             if (!handled) {
                 if (member.type.kind == TypeKind::Struct) {
-                    auto member_def = struct_by_name_.find(member.type.struct_name);
-                    if (member_def != struct_by_name_.end() &&
-                        member_def->second != nullptr) {
+                    const AST::StructDefinition* member_def =
+                        lookup_struct_definition(member.type.struct_name);
+                    if (member_def != nullptr) {
                         handled = emit_struct_default_constructor(field_ptr,
-                            member_def->second, member.location);
+                            member_def, member.location);
                     }
                 }
             }
@@ -361,11 +362,12 @@ namespace gallt {
             }
 
             if (member.type.kind == TypeKind::Struct) {
-                auto found = struct_by_name_.find(member.type.struct_name);
+                const AST::StructDefinition* found =
+                    lookup_struct_definition(member.type.struct_name);
 
-                if (found != struct_by_name_.end() &&
-                    default_constructor_index(found->second) >= 0) {
-                    emit_struct_default_constructor(field_ptr, found->second,
+                if (found != nullptr &&
+                    default_constructor_index(found) >= 0) {
+                    emit_struct_default_constructor(field_ptr, found,
                         member.location);
                 }
             }

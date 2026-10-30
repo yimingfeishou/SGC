@@ -2,7 +2,7 @@
 // expect output
 // 51
 
-const uint mask(uint v, uint bits) {
+uint mask(uint v, uint bits) const {
     return (v << bits) | v
 }
 const uint m = mask(3, 4)

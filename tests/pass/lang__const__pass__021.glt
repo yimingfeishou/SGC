@@ -8,31 +8,31 @@
 // 4
 // true
 
-const lint scale_lint(lint value, lint factor) {
+lint scale_lint(lint value, lint factor) const {
     return value * factor
 }
 
-const luint keep_low_bits(luint value, luint mask) {
+luint keep_low_bits(luint value, luint mask) const {
     return value & mask
 }
 
-const double average(double a, double b) {
+double average(double a, double b) const {
     return (a + b) / 2.0
 }
 
-const float half_of(float value) {
+float half_of(float value) const {
     return value / 2.0
 }
 
-const char next_char(char value) {
+char next_char(char value) const {
     return value + 1
 }
 
-const uchar wrap_uchar(uchar value, int step) {
+uchar wrap_uchar(uchar value, int step) const {
     return value + step
 }
 
-const bool is_even(int value) {
+bool is_even(int value) const {
     return value % 2 == 0
 }
 

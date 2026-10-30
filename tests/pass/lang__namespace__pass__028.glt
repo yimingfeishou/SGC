@@ -1,0 +1,20 @@
+// lang__namespace__pass__028.glt
+// expect output
+// 1
+
+generics EmitNamespace<T> {
+    emit {
+        namespace GeneratedNamespace {
+            int get() {
+                return 1
+            }
+        }
+    }
+}
+
+EmitNamespace<int>
+
+int main() {
+    output(GeneratedNamespace::get(), "\n")
+    return 0
+}

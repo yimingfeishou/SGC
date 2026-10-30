@@ -5,7 +5,7 @@ struct Holder {
     int* data
 }
 
-const int f(Holder h) {
+int f(Holder h) const {
     return 0
 }
 

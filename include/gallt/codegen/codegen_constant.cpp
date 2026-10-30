@@ -261,9 +261,9 @@ namespace gallt {
         }
 
         if (type.kind == TypeKind::Struct) {
-            auto it = struct_by_name_.find(type.struct_name);
-            if (it == struct_by_name_.end() || it->second == nullptr) { return false; }
-            AST::StructDefinition* def = it->second;
+            const AST::StructDefinition* def =
+                lookup_struct_definition(type.struct_name);
+            if (def == nullptr) { return false; }
             if (arr_init->elements.size() > def->members.size()) { return false; }
             std::string text = "{";
 
@@ -321,11 +321,11 @@ namespace gallt {
         if (decl == nullptr) { return false; }
 
         if (decl->type.kind == TypeKind::Struct) {
-            auto definition = struct_by_name_.find(decl->type.struct_name);
+            const AST::StructDefinition* definition =
+                lookup_struct_definition(decl->type.struct_name);
             const bool has_user_constructor =
-                definition != struct_by_name_.end() &&
-                definition->second != nullptr &&
-                !definition->second->constructor_names.empty();
+                definition != nullptr &&
+                !definition->constructor_names.empty();
             const bool empty_initializer =
                 decl->initializer == nullptr ||
                 (dynamic_cast<AST::ArrayInitializer*>(
@@ -338,12 +338,12 @@ namespace gallt {
 
         if (decl->initializer == nullptr) {
             if (decl->type.kind == TypeKind::Struct) {
-                auto definition = struct_by_name_.find(decl->type.struct_name);
-                bool all_zero = definition != struct_by_name_.end() &&
-                    definition->second != nullptr;
+                const AST::StructDefinition* definition =
+                    lookup_struct_definition(decl->type.struct_name);
+                bool all_zero = definition != nullptr;
                 if (all_zero) {
                     for (const AST::StructDefinition::Member& member :
-                        definition->second->members) {
+                        definition->members) {
                         if (member.initializer != nullptr) {
                             all_zero = false;
                             break;
@@ -429,17 +429,14 @@ namespace gallt {
         scopes_.back()[decl->name] = std::move(info);
         emit_debug_local_variable(decl->name, decl->type, address, decl->location);
 
-        if (type_contains_string(decl->type)) {
+        if (type_needs_cleanup(decl->type)) {
             register_string_cleanup(address, decl->type);
+        }
+
+        if (type_contains_string(decl->type)) {
             std::string n = std::to_string(type_size(decl->type));
             emit_line("call void @llvm.memset.p0.i64(ptr " + address +
                 ", i8 0, i64 " + n + ", i1 false)");
-        } else if (decl->type.kind == TypeKind::Struct) {
-            auto it = struct_by_name_.find(decl->type.struct_name);
-            if (it != struct_by_name_.end() && it->second != nullptr &&
-                it->second->needs_destruction) {
-                register_string_cleanup(address, decl->type);
-            }
         }
 
         if (!decl->initializer) {
@@ -537,12 +534,12 @@ namespace gallt {
             return type.array_size.value_or(0) *
                 (type.element_type ? type_size(*type.element_type) : 0u);
         case TypeKind::Struct: {
-            auto it = struct_by_name_.find(type.struct_name);
-            if (it == struct_by_name_.end()) { return 0; }
+            const AST::StructDefinition* def = lookup_struct_definition(type);
+            if (def == nullptr) { return 0; }
             std::size_t offset = 0;
             std::size_t align = 1;
 
-            for (const auto& m : it->second->members) {
+            for (const auto& m : def->members) {
                 std::size_t a = type_align(m.type);
                 align = std::max(align, a);
                 offset = round_up(offset, a);
@@ -575,11 +572,11 @@ namespace gallt {
         case TypeKind::Array:
             return type.element_type ? type_align(*type.element_type) : 1u;
         case TypeKind::Struct: {
-            auto it = struct_by_name_.find(type.struct_name);
-            if (it == struct_by_name_.end()) { return 1; }
+            const AST::StructDefinition* def = lookup_struct_definition(type);
+            if (def == nullptr) { return 1; }
             std::size_t align = 1;
 
-            for (const auto& m : it->second->members) {
+            for (const auto& m : def->members) {
                 align = std::max(align, type_align(m.type));
             }
 

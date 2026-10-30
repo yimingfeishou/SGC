@@ -68,6 +68,11 @@ namespace {
                 continue;
             }
 
+            if (arg == L"--license" || arg == L"-L") {
+                out.mode = CommandMode::License;
+                continue;
+            }
+
             if (arg == L"--compile" || arg == L"-C") {
                 out.mode = CommandMode::Compile;
                 continue;
@@ -134,6 +139,8 @@ namespace {
                 out.debug_symbols_explicit = true;
             } else if (arg == L"--no-runtime" || arg == L"-NR") {
                 out.no_runtime = true;
+            } else if (arg == L"--check-only" || arg == L"-CO") {
+                out.check_only = true;
             } else if (arg == L"--gallt-abi" || arg == L"-GA") {
                 out.gallt_abi = true;
             } else if (arg == L"--extended-semantics") {
@@ -182,6 +189,40 @@ namespace {
                     out.instantiation_depth = parsed;
                 } else {
                     std::cerr << "--instantiation-depth: invalid value, will revert to the default value\n";
+                }
+            } else if (arg == L"--constexpr-depth") {
+                std::string* v = require_value(L"--constexpr-depth");
+                if (!v) { return false; }
+
+                std::optional<std::uint64_t> parsed = parse_positive_size(*v);
+
+                if (parsed.has_value()) {
+                    out.constexpr_depth = parsed;
+                } else {
+                    std::cerr << "--constexpr-depth: invalid value, will revert to the default value\n";
+                }
+            } else if (arg == L"--constexpr-max-steps") {
+                std::string* v = require_value(L"--constexpr-max-steps");
+                if (!v) { return false; }
+
+                std::optional<std::uint64_t> parsed = parse_positive_size(*v);
+
+                if (parsed.has_value()) {
+                    out.constexpr_max_steps = parsed;
+                } else {
+                    std::cerr << "--constexpr-max-steps: invalid value, will revert to the default value\n";
+                }
+            } else if (arg == L"--constexpr-max-integer-exponent") {
+                std::string* v = require_value(
+                    L"--constexpr-max-integer-exponent");
+                if (!v) { return false; }
+
+                std::optional<std::uint64_t> parsed = parse_positive_size(*v);
+
+                if (parsed.has_value()) {
+                    out.constexpr_max_integer_exponent = parsed;
+                } else {
+                    std::cerr << "--constexpr-max-integer-exponent: invalid value, will revert to the default value\n";
                 }
             } else if (arg == L"--linker") {
                 std::string* v = require_value(L"--linker");
@@ -274,12 +315,20 @@ namespace {
             "  sgc --compile --input \"file.glt\" --output \"program.exe\" "
             "--instantiation-depth <n>\n"
             "  sgc --compile --input \"file.glt\" --output \"program.exe\" "
+            "--constexpr-depth <n>\n"
+            "  sgc --compile --input \"file.glt\" --output \"program.exe\" "
+            "--constexpr-max-steps <n>\n"
+            "  sgc --compile --input \"file.glt\" --output \"program.exe\" "
+            "--constexpr-max-integer-exponent <n>\n"
+            "  sgc --compile --input \"file.glt\" --output \"program.exe\" "
             "--extended-semantics true\n"
+            "  sgc --check-only --input \"file.glt\"\n"
             "  sgc --help\n"
             "  sgc --version\n"
             "Options:\n"
             "  --help, -H                    display help text\n"
-            "  --version, -V                 display version info\n"
+            "  --version, -V                 display version text\n"
+            "  --license, -L                 display license text\n"
             "  --compile, -C                 compile a Gallt source file\n"
             "  --input, -I <path>            input Gallt source file\n"
             "  --output, -O <path>           output file\n"
@@ -299,6 +348,9 @@ namespace {
             "  --no-runtime, -NR             emit without the Gallt runtime (importable\n"
             "                                library output; only exported functions\n"
             "                                stay externally visible)\n"
+            "  --check-only, -CO             run frontend, semantic checks and code\n"
+            "                                generation without writing files or\n"
+            "                                invoking Clang\n"
             "  --gallt-abi, -GA              call extern declarations with the native\n"
             "                                Gallt ABI (use when importing a library\n"
             "                                produced by sgc; C libraries need the\n"
@@ -316,6 +368,17 @@ namespace {
             "                                values above 2048 are allowed but\n"
             "                                compile time is not guaranteed and\n"
             "                                compilation may terminate)\n"
+            "  --constexpr-depth <n>         compile-time function recursion depth\n"
+            "                                limit (non-zero positive integer;\n"
+            "                                default 2048; values above 2048 are\n"
+            "                                allowed but compilation may terminate)\n"
+            "  --constexpr-max-steps <n>     maximum compile-time evaluator steps\n"
+            "                                (non-zero positive integer; default\n"
+            "                                200000)\n"
+            "  --constexpr-max-integer-exponent <n>\n"
+            "                                maximum exponent for compile-time\n"
+            "                                integer exponentiation (non-zero\n"
+            "                                positive integer; default 64)\n"
             "  --extended-semantics <bool>   enable extended semantics: some constructs\n"
             "                                forbidden by the Gallt standard behavior\n"
             "                                are relaxed (true or false; default false)\n"
@@ -335,8 +398,8 @@ namespace {
 
         std::string version_text() {
             return
-            "Standard Gallt Compiler 0.5.0-1023 Preview (LLVM backend, x86-64 Windows)\n"
-            "Build date: 2026-10-23\n"
+            "Standard Gallt Compiler 0.5.0-1030 Preview (LLVM backend, x86-64 Windows)\n"
+            "Build date: 2026-10-30\n"
             "This version is experimental";
         }
 
@@ -344,20 +407,41 @@ namespace {
 
         std::string version_text() {
             return
-            "Standard Gallt Compiler 0.5.0-1023 Preview (LLVM backend, x86-64 Linux)\n"
-            "Build date: 2026-10-23\n"
+            "Standard Gallt Compiler 0.5.0-1030 Preview (LLVM backend, x86-64 Linux)\n"
+            "Build date: 2026-10-30\n"
             "This version is experimental";
         }
 
     #else
-    
+
         std::string version_text() {
             return
-            "Standard Gallt Compiler 0.5.0-1023 Preview (LLVM backend, x86-64 Unknown)\n"
-            "Build date: 2026-10-23\n"
+            "Standard Gallt Compiler 0.5.0-1030 Preview (LLVM backend, x86-64 Unknown)\n"
+            "Build date: 2026-10-30\n"
             "This version is experimental";
         }
 
     #endif
+
+    std::string license_text() {
+        return
+        "MIT License\n\n"
+        "Copyright (c) 2026 yimingfeishou\n\n"
+        "Permission is hereby granted, free of charge, to any person obtaining a copy\n"
+        "of this software and associated documentation files (the \"Software\"), to deal\n"
+        "in the Software without restriction, including without limitation the rights\n"
+        "to use, copy, modify, merge, publish, distribute, sublicense, and/or sell\n"
+        "copies of the Software, and to permit persons to whom the Software is\n"
+        "furnished to do so, subject to the following conditions:\n\n"
+        "The above copyright notice and this permission notice shall be included in all\n"
+        "copies or substantial portions of the Software.\n\n"
+        "THE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\n"
+        "IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\n"
+        "FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\n"
+        "AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\n"
+        "LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\n"
+        "OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\n"
+        "SOFTWARE.";
+    }
 
 }

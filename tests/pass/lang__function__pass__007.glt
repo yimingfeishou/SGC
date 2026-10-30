@@ -9,11 +9,13 @@ struct Pair {
     int a
     int b
 }
+@endif
 
 @if (ON == 1)
 int helper() {
     return 4
 }
+@endif
 
 @if (ON == 2)
 int helper2() {
@@ -22,14 +24,17 @@ int helper2() {
 int helper2() {
     return 9
 }
+@endif
 
 @if (ON == 1)
 Pair marker = {2, 1}
+@endif
 
 @if (ON == 3)
 int other() {
     return 1
 }
+@endif
 
 int main() {
     output(helper(), " ", helper2(), " ", marker.a + marker.b)

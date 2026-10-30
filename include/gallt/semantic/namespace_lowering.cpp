@@ -354,16 +354,24 @@ namespace gallt {
         }
 
         if (has_pending) {
-            report(loc, pending_code, pending_values);
+            if (!defer_unresolved_) {
+                report(loc, pending_code, pending_values);
+            }
             return std::nullopt;
         }
 
         if (auto type_text = declared_type_of(path[0])) {
-            report(loc, ErrorCode::ScopeOperatorOperandInvalid, std::vector<std::string>{ *type_text });
+            if (!defer_unresolved_) {
+                report(loc, ErrorCode::ScopeOperatorOperandInvalid,
+                    std::vector<std::string>{ *type_text });
+            }
             return std::nullopt;
         }
 
-        report(loc, ErrorCode::NamespaceUndefined, std::vector<std::string>{ path[0] });
+        if (!defer_unresolved_) {
+            report(loc, ErrorCode::NamespaceUndefined,
+                std::vector<std::string>{ path[0] });
+        }
         return std::nullopt;
     }
 
@@ -530,6 +538,10 @@ namespace gallt {
                 primary->location, false);
 
             if (!resolved.has_value()) {
+                if (defer_unresolved_) {
+                    return std::nullopt;
+                }
+
                 if (diag_.error_count() == errors_before) {
                     report(primary->location, ErrorCode::NamespaceUndefined,
                         join_parts(primary->qualified_path));
@@ -1320,6 +1332,7 @@ namespace gallt {
         program_ = program;
         had_error_ = false;
         poisoned_.clear();
+        defer_unresolved_ = true;
         namespaces_.clear();
         scopes_.clear();
         namespace_prefix_.clear();
@@ -1340,6 +1353,23 @@ namespace gallt {
         out.reserve(program->top_levels.size());
         lower_top_levels(program->top_levels, out, false);
         program->top_levels = std::move(out);
+        return !had_error_;
+    }
+
+    bool NamespaceLowering::retry_unresolved(AST::Program* program) {
+        if (program == nullptr) { return false; }
+
+        program_ = program;
+        defer_unresolved_ = false;
+
+        for (auto& top : program->top_levels) {
+            rewrite_top_level(top.get());
+        }
+
+        for (auto& statement : program->global_initializers) {
+            rewrite_statement(statement.get());
+        }
+
         return !had_error_;
     }
 

@@ -1,0 +1,16 @@
+// lang__generics__pass__061.glt
+// expect output
+// 7
+
+generics Box<T> {
+    struct Box {
+        T value
+    }
+}
+
+int main() {
+    Box<Box<Box<int>>>.Box b
+    b.value.value.value = 7
+    output(b.value.value.value)
+    return 0
+}

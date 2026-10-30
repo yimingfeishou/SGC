@@ -250,9 +250,18 @@ namespace {
         std::vector<std::unique_ptr<TopLevel>> orphaned;
 
         for (AST::StructDefinition* ordered : struct_order_) {
-            auto found = structs_.find(ordered->name);
-            if (found == structs_.end()) { continue; }
-            StructInfo& info = found->second;
+            StructInfo* info_ptr = nullptr;
+            auto local = local_structs_.find(ordered);
+            if (local != local_structs_.end()) {
+                info_ptr = &local->second;
+            } else {
+                auto found = structs_.find(ordered->name);
+                if (found != structs_.end() && found->second.def == ordered) {
+                    info_ptr = &found->second;
+                }
+            }
+            if (info_ptr == nullptr) { continue; }
+            StructInfo& info = *info_ptr;
             StructDefinition* def = info.def;
             std::vector<std::unique_ptr<TopLevel>>* bucket = nullptr;
 
@@ -513,17 +522,31 @@ namespace {
         return viable[best].ctor;
     }
 
+    void LifecycleLowering::rewrite_initializer(Initializer* init) {
+        if (init == nullptr) { return; }
+
+        if (auto* expression =
+            dynamic_cast<ExpressionInitializer*>(init)) {
+            rewrite_expression(expression->expr.get());
+            return;
+        }
+
+        if (auto* array = dynamic_cast<ArrayInitializer*>(init)) {
+            for (std::unique_ptr<Initializer>& element : array->elements) {
+                rewrite_initializer(element.get());
+            }
+        }
+    }
+
     void LifecycleLowering::rewrite_declaration(VariableDeclaration* decl,
        std::vector<std::unique_ptr<Statement>>& insert_after) {
         if (decl == nullptr) { return; }
-        if (auto* expr_init = dynamic_cast<ExpressionInitializer*>(decl->initializer.get())) {
-            rewrite_expression(expr_init->expr.get());
-        }
+        rewrite_initializer(decl->initializer.get());
 
         if (decl->type.kind != TypeKind::Struct) { return; }
-        auto info_it = structs_.find(decl->type.struct_name);
-        if (info_it == structs_.end()) { return; }
-        StructInfo& info = info_it->second;
+        StructInfo* info_ptr = find_struct_info(decl->type.struct_name);
+        if (info_ptr == nullptr) { return; }
+        StructInfo& info = *info_ptr;
         const std::string& struct_name = decl->type.struct_name;
 
         auto make_self_address = [&]() {
@@ -721,7 +744,7 @@ namespace {
             }
 
             const std::string& struct_name = node->construct_type.struct_name;
-            auto found = owner_.structs_.find(struct_name);
+            StructInfo* info_ptr = owner_.find_struct_info(struct_name);
 
             if (node->construct_type.kind != TypeKind::Struct) {
                 owner_.report_template(node->location,
@@ -730,11 +753,11 @@ namespace {
                 return false;
             }
 
-            if (found == owner_.structs_.end()) {
+            if (info_ptr == nullptr) {
                 return false;
             }
 
-            StructInfo& info = found->second;
+            StructInfo& info = *info_ptr;
             bool ambiguous = false;
             std::vector<Expression*> args;
 
@@ -940,10 +963,15 @@ namespace {
 
         bool EnterBlock(Block* node) override {
             owner_.push_tracking_scope();
+            owner_.push_struct_lookup_scope();
             std::vector<std::unique_ptr<Statement>> rewritten;
 
             for (std::unique_ptr<Statement>& child : node->statements) {
                 std::vector<std::unique_ptr<Statement>> insert_after;
+
+                if (auto* local_struct = dynamic_cast<StructDefinition*>(child.get())) {
+                    owner_.register_visible_struct(local_struct);
+                }
 
                 if (auto* vd = dynamic_cast<VariableDeclaration*>(child.get())) {
                     owner_.local_types_[vd->name] = vd->type;
@@ -969,6 +997,7 @@ namespace {
             }
 
             node->statements = std::move(rewritten);
+            owner_.pop_struct_lookup_scope();
             owner_.pop_tracking_scope();
             return false;
         }
@@ -1006,10 +1035,15 @@ namespace {
             for (SwitchCaseStatement::Clause& clause : node->clauses) {
                 owner_.rewrite_expression(clause.condition.get());
                 owner_.push_tracking_scope();
+                owner_.push_struct_lookup_scope();
                 std::vector<std::unique_ptr<Statement>> rewritten;
 
                 for (std::unique_ptr<Statement>& child : clause.statements) {
                     std::vector<std::unique_ptr<Statement>> insert_after;
+
+                    if (auto* local_struct = dynamic_cast<StructDefinition*>(child.get())) {
+                        owner_.register_visible_struct(local_struct);
+                    }
 
                     if (auto* vd = dynamic_cast<VariableDeclaration*>(child.get())) {
                         owner_.local_types_[vd->name] = vd->type;
@@ -1035,6 +1069,7 @@ namespace {
                 }
 
                 clause.statements = std::move(rewritten);
+                owner_.pop_struct_lookup_scope();
                 owner_.pop_tracking_scope();
             }
 
@@ -1151,11 +1186,14 @@ namespace {
             owner_.clear_tracking_state();
             owner_.next_alias_group_ = 0;
             owner_.push_tracking_scope();
+            owner_.push_struct_lookup_scope();
+            owner_.register_visible_struct(node->owning_struct);
 
             if (node->body) {
                 owner_.rewrite_statement(node->body.get());
             }
 
+            owner_.pop_struct_lookup_scope();
             owner_.pop_tracking_scope();
             owner_.clear_tracking_state();
             owner_.current_function_name_.clear();

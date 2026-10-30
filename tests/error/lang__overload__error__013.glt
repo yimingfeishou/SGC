@@ -1,0 +1,20 @@
+// lang__overload__error__013.glt
+// expect error ER 0080
+
+int choose(char value) const {
+    return 1
+}
+
+int run(int value) const {
+    return choose(value)
+}
+
+int choose(bool value) const {
+    return 2
+}
+
+int main() {
+    const int value = run(1)
+    output(value, "\n")
+    return 0
+}

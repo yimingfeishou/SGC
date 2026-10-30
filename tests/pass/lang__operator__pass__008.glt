@@ -1,0 +1,24 @@
+// lang__operator__pass__008.glt
+// expect output
+// false true false false false false
+// false true false false false false
+
+int main() {
+    double zero = 0.0
+    double not_a_number = zero / zero
+    output(not_a_number == not_a_number, " ")
+    output(not_a_number != not_a_number, " ")
+    output(not_a_number < not_a_number, " ")
+    output(not_a_number > not_a_number, " ")
+    output(not_a_number <= not_a_number, " ")
+    output(not_a_number >= not_a_number, "\n")
+    float float_zero = 0.0f
+    float float_not_a_number = float_zero / float_zero
+    output(float_not_a_number == float_not_a_number, " ")
+    output(float_not_a_number != float_not_a_number, " ")
+    output(float_not_a_number < float_not_a_number, " ")
+    output(float_not_a_number > float_not_a_number, " ")
+    output(float_not_a_number <= float_not_a_number, " ")
+    output(float_not_a_number >= float_not_a_number, "\n")
+    return 0
+}

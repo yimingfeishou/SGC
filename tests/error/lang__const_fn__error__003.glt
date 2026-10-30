@@ -1,7 +1,7 @@
 // lang__const_fn__error__003.glt
 // expect error ER 0030
 
-const int square(int x) {
+int square(int x) const {
     return x * x
 }
 int main() {

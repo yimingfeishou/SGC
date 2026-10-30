@@ -8,14 +8,14 @@ struct Point {
     int y
 }
 
-const Point make_point(int x, int y) {
+Point make_point(int x, int y) const {
     Point p = {x, y}
     return p
 }
 
 const Point origin = make_point(3, 4)
 
-const int sum_three() {
+int sum_three() const {
     int arr[3] = {1, 2, 3}
     int total = 0
     for (int i = 0; i < 3; i++) {

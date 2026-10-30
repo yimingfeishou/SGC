@@ -110,7 +110,7 @@ if(MSVC OR (CMAKE_CXX_COMPILER_ID MATCHES "Clang"
     target_compile_options(sgc PRIVATE /utf-8 /EHsc /FS)
     if(WIN32)
         target_link_options(sgc PRIVATE
-            /STACK:33554432
+            /STACK:536870912
             /ENTRY:wmainCRTStartup
             /SUBSYSTEM:CONSOLE
         )

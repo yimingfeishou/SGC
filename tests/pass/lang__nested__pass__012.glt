@@ -1,0 +1,37 @@
+// lang__nested__pass__012.glt
+// expect output
+// C43D4
+
+struct X {
+    int g
+}
+
+int main() {
+    struct X {
+        int a = 3
+        double b
+
+        constructor () {
+            output("C", size(X))
+            X* p = null
+            if (p != null) {
+                output(p->a)
+            }
+        }
+
+        destructor () {
+            output("D", size(X))
+            X* q = null
+            if (q != null) {
+                output(q->a)
+            }
+        }
+    }
+
+    {
+        X obj
+        output(obj.a)
+    }
+
+    return 0
+}

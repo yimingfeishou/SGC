@@ -1,7 +1,7 @@
 // lang__const__error__034.glt
 // expect error ER 0148
 
-const int f(int x) {
+int f(int x) const {
     output(1)
     return x
 }

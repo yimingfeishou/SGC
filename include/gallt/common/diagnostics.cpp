@@ -46,7 +46,7 @@ namespace gallt {
             { ErrorCode::ArraySizeNotConstant, "array size in a declaration must be a constant integer expression, got '[expr]'" },
             { ErrorCode::VoidParameter, "parameter list may not use type void" },
             { ErrorCode::InvalidTypeCast, "invalid type conversion: cannot convert '[type1]' to '[type2]'" },
-            { ErrorCode::InvalidInputFile, "input file does not meet the requirements: encoding is '[coding]', line ending is '[linebreak]'" },
+            { ErrorCode::InvalidInputFile, "input file does not meet the requirements: encoding is '[coding]'" },
             { ErrorCode::PointerTypeMismatch, "incompatible pointer types: cannot assign '[type1]*' to '[type2]*'" },
             { ErrorCode::DerefNonPointer, "dereference requires a pointer operand, got '[type]'" },
             { ErrorCode::AddressOfNonLValue, "address-of requires an lvalue operand, got a non-lvalue expression" },

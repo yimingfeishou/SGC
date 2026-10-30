@@ -20,13 +20,14 @@ int32_t gallt_string_compare(const gallt_string* a, const gallt_string* b) {
 
 void gallt_string_copy(gallt_string* out, const gallt_string* src) {
     if (out == NULL || src == NULL) { return; }
-    *out = gallt_string_from_bytes_impl(gallt_string_safe_data(src),
-        gallt_string_safe_length(src));
+    gallt_string_store(out, gallt_string_from_bytes_impl(
+        gallt_string_safe_data(src), gallt_string_safe_length(src)));
 }
 
 void gallt_string_move(gallt_string* out, gallt_string* src) {
     if (out == NULL || src == NULL || out == src) { return; }
-    *out = *src;
+    gallt_string replacement = *src;
+    gallt_string_store(out, replacement);
     memset(src, 0, sizeof(*src));
 }
 
@@ -39,7 +40,8 @@ void gallt_string_substr(gallt_string* out, const gallt_string* s,
     if (count < 0) { count = 0; }
     int64_t available = len - (int64_t)start;
     if ((int64_t)count > available) { count = (int32_t)available; }
-    *out = gallt_string_from_bytes_impl(gallt_string_safe_data(s) + start, count);
+    gallt_string_store(out, gallt_string_from_bytes_impl(
+        gallt_string_safe_data(s) + start, count));
 }
 
 int32_t gallt_string_find(const gallt_string* s, const gallt_string* needle) {
@@ -81,7 +83,8 @@ void gallt_string_replace(gallt_string* out, const gallt_string* s,
     int64_t tlen = gallt_string_safe_length(to);
 
     if (flen <= 0) {
-        *out = gallt_string_from_bytes_impl(gallt_string_safe_data(s), len);
+        gallt_string_store(out, gallt_string_from_bytes_impl(
+            gallt_string_safe_data(s), len));
         return;
     }
 
@@ -105,7 +108,7 @@ void gallt_string_replace(gallt_string* out, const gallt_string* s,
     char* buffer = (char*)malloc(total > 0 ? (size_t)total : 1);
 
     if (buffer == NULL) {
-        *out = gallt_string_from_bytes_impl("", 0);
+        gallt_string_store(out, gallt_string_from_bytes_impl("", 0));
         return;
     }
 
@@ -126,14 +129,14 @@ void gallt_string_replace(gallt_string* out, const gallt_string* s,
         buffer[w++] = base[i++];
     }
 
-    *out = gallt_string_from_bytes_impl(buffer, total);
+    gallt_string_store(out, gallt_string_from_bytes_impl(buffer, total));
     free(buffer);
 }
 
 void gallt_string_upper(gallt_string* out, const gallt_string* s) {
     if (out == NULL) { return; }
-    *out = gallt_string_from_bytes_impl(gallt_string_safe_data(s),
-        gallt_string_safe_length(s));
+    gallt_string_store(out, gallt_string_from_bytes_impl(
+        gallt_string_safe_data(s), gallt_string_safe_length(s)));
     char* data = gallt_string_mutable_data(out);
 
     for (int64_t i = 0; i < out->length; ++i) {
@@ -144,8 +147,8 @@ void gallt_string_upper(gallt_string* out, const gallt_string* s) {
 
 void gallt_string_lower(gallt_string* out, const gallt_string* s) {
     if (out == NULL) { return; }
-    *out = gallt_string_from_bytes_impl(gallt_string_safe_data(s),
-        gallt_string_safe_length(s));
+    gallt_string_store(out, gallt_string_from_bytes_impl(
+        gallt_string_safe_data(s), gallt_string_safe_length(s)));
     char* data = gallt_string_mutable_data(out);
 
     for (int64_t i = 0; i < out->length; ++i) {
@@ -162,7 +165,8 @@ void gallt_string_trim(gallt_string* out, const gallt_string* s) {
     int64_t end = len;
     while (start < end && gallt_string_is_space(base[start])) { ++start; }
     while (end > start && gallt_string_is_space(base[end - 1])) { --end; }
-    *out = gallt_string_from_bytes_impl(base + start, end - start);
+    gallt_string_store(out, gallt_string_from_bytes_impl(
+        base + start, end - start));
 }
 
 int8_t gallt_string_char_at(const gallt_string* s, int32_t index) {
@@ -227,14 +231,14 @@ void gallt_string_split_at(gallt_string* out, const gallt_string* s,
     const char* base = gallt_string_safe_data(s);
 
     if (index < 0) {
-        *out = gallt_string_from_bytes_impl("", 0);
+        gallt_string_store(out, gallt_string_from_bytes_impl("", 0));
         return;
     }
 
     if (slen <= 0) {
-        *out = index == 0
+        gallt_string_store(out, index == 0
             ? gallt_string_from_bytes_impl(base, len)
-            : gallt_string_from_bytes_impl("", 0);
+            : gallt_string_from_bytes_impl("", 0));
         return;
     }
 
@@ -251,8 +255,8 @@ void gallt_string_split_at(gallt_string* out, const gallt_string* s,
         const int64_t found = (int64_t)(hit - base);
         if (memcmp(base + found, pat, (size_t)slen) == 0) {
             if (current == index) {
-                *out = gallt_string_from_bytes_impl(base + start,
-                    found - start);
+                gallt_string_store(out, gallt_string_from_bytes_impl(
+                    base + start, found - start));
                 return;
             }
             ++current;
@@ -264,11 +268,12 @@ void gallt_string_split_at(gallt_string* out, const gallt_string* s,
     }
 
     if (current == index) {
-        *out = gallt_string_from_bytes_impl(base + start, len - start);
+        gallt_string_store(out, gallt_string_from_bytes_impl(
+            base + start, len - start));
         return;
     }
 
-    *out = gallt_string_from_bytes_impl("", 0);
+    gallt_string_store(out, gallt_string_from_bytes_impl("", 0));
 }
 
 void gallt_string_read(gallt_string* out) {

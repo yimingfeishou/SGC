@@ -4,14 +4,14 @@
 // 55
 // 128
 
-const int factorial(int n) {
+int factorial(int n) const {
     if (n <= 1) {
         return 1
     }
     return n * factorial(n - 1)
 }
 
-const int sum_to(int n) {
+int sum_to(int n) const {
     int total = 0
     for (int i = 1; i <= n; i++) {
         total = total + i
@@ -19,7 +19,7 @@ const int sum_to(int n) {
     return total
 }
 
-const int pow2_until(int limit) {
+int pow2_until(int limit) const {
     int value = 1
     while (value < limit) {
         value = value * 2

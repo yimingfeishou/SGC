@@ -12,6 +12,7 @@ namespace gallt {
         Compile,
         Help,
         Version,
+        License,
         Invalid,
     };
 
@@ -37,11 +38,15 @@ namespace gallt {
         bool debug_mode = false;
         bool release_mode = false;
         bool no_runtime = false;
+        bool check_only = false;
         bool gallt_abi = false;
         bool extended_semantics = false;
         std::optional<std::uint64_t> stack_size;
         std::optional<std::uint64_t> commit_size;
         std::optional<std::uint64_t> instantiation_depth;
+        std::optional<std::uint64_t> constexpr_depth;
+        std::optional<std::uint64_t> constexpr_max_steps;
+        std::optional<std::uint64_t> constexpr_max_integer_exponent;
         LinkerMode linker_mode = LinkerMode::Dynamic;
         bool optimization_level_explicit = false;
         bool debug_symbols_explicit = false;
@@ -55,6 +60,7 @@ namespace gallt {
 
     std::string help_text();
     std::string version_text();
+    std::string license_text();
 
 }
 

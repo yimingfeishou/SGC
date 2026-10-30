@@ -2,7 +2,7 @@
 // expect error ER 0144
 
 string runtime_text = "abc"
-const int len_of(string s) {
+int len_of(string s) const {
     return strlen(s)
 }
 const int n = len_of(runtime_text)

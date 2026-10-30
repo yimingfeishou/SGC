@@ -3,10 +3,10 @@
 // 10000000000
 // 1
 
-const lint big(lint a, lint b) {
+lint big(lint a, lint b) const {
     return a * b
 }
-const luint mask(luint v) {
+luint mask(luint v) const {
     return v & 255lu
 }
 const lint p = big(100000, 100000)

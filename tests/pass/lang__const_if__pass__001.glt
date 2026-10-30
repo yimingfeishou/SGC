@@ -1,0 +1,33 @@
+// lang__const_if__pass__001.glt
+// expect output
+// 1text0 20 10
+
+generics Pick<T> {
+    const if (T.is_integer == true) emit "int kind() {\n    return 1\n}\n"
+    const else if (T.is_string == true) emit "string kind() {\n    return \"text\"\n}\n"
+    const else emit "int kind() {\n    return 0\n}\n"
+}
+
+generics Mixed<T> {
+    const if (T.is_integer == true) {
+        emit "int code() {\n    return 2\n}\n"
+    } const else if (T.is_string == true) {
+        emit "int code() {\n    return 1\n}\n"
+    } const else {
+        emit "int code() {\n    return 0\n}\n"
+    }
+}
+
+generics Runtime<T> {
+    int pick() {
+        const if (T.is_integer == true) return 1
+        const else return 0
+    }
+}
+
+int main() {
+    output(Pick<int>.kind(), Pick<string>.kind(), Pick<float>.kind(), " ")
+    output(Mixed<int>.code(), Mixed<float>.code(), " ")
+    output(Runtime<int>.pick(), Runtime<string>.pick(), "\n")
+    return 0
+}

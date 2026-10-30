@@ -1,0 +1,24 @@
+// lang__generics__pass__066.glt
+// expect output
+// 3 5 8
+
+generics Shadow<T> {
+    int value() {
+        return 8
+    }
+
+    int read_parameter(int value) {
+        return value
+    }
+
+    int read_local(int seed) {
+        int value = seed + 1
+        return value
+    }
+}
+
+int main() {
+    Shadow<int>
+    output(read_parameter(3), " ", read_local(4), " ", value(), "\n")
+    return 0
+}

@@ -1,7 +1,7 @@
 // lang__array__error__011.glt
 // expect error ER 0146
 
-const int first_of(int arr[3]) {
+int first_of(int arr[3]) const {
     return arr[0]
 }
 int main() { return 0 }

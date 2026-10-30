@@ -3,7 +3,7 @@
 // 42
 // value
 
-const string make_getter(string type, string name) {
+string make_getter(string type, string name) const {
     return type + " get_" + name + "() {\n    return " + name + "\n}"
 }
 
@@ -11,7 +11,7 @@ generics Emiter<T: int, T N> {
     emit make_getter(T.typename, N)
 }
 
-const string make_literal_getter(string type, string name) {
+string make_literal_getter(string type, string name) const {
     return type + " get_" + name + "() {\n    return \"" + name + "\"\n}"
 }
 

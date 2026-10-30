@@ -5,6 +5,7 @@
 #include <optional>
 #include <charconv>
 #include <system_error>
+#include <iostream>
 
 namespace gallt {
 
@@ -151,6 +152,60 @@ namespace gallt {
         return spliced;
     }
 
+    std::string normalize_line_endings(std::string_view source, bool warn) {
+        std::size_t crlf_count = 0;
+        std::size_t cr_count = 0;
+        std::size_t lf_count = 0;
+
+        for (std::size_t i = 0; i < source.size(); ++i) {
+            if (source[i] == '\r') {
+                if (i + 1 < source.size() && source[i + 1] == '\n') {
+                    ++crlf_count;
+                    ++i;
+                } else {
+                    ++cr_count;
+                }
+            } else if (source[i] == '\n') {
+                ++lf_count;
+            }
+        }
+
+        if (warn) {
+            if (cr_count != 0 && crlf_count == 0 && lf_count == 0) {
+                std::cerr << "sgc: detected a standalone CR line break, "
+                    "it is recommended to normalize line endings to LF or CRLF "
+                    "line breaks\n";
+            } else if ((lf_count != 0 ? 1 : 0) + (crlf_count != 0 ? 1 : 0) +
+                (cr_count != 0 ? 1 : 0) > 1) {
+                std::cerr << "sgc: detected mixed line breaks, "
+                    "it is recommended to normalize line endings to LF or CRLF "
+                    "line breaks\n";
+            }
+        }
+
+        if (cr_count == 0 && crlf_count == 0) {
+            return std::string(source);
+        }
+
+        std::string normalized;
+        normalized.reserve(source.size());
+
+        for (std::size_t i = 0; i < source.size(); ++i) {
+            if (source[i] != '\r') {
+                normalized.push_back(source[i]);
+                continue;
+            }
+
+            if (i + 1 < source.size() && source[i + 1] == '\n') {
+                ++i;
+            }
+
+            normalized.push_back('\n');
+        }
+
+        return normalized;
+    }
+
     Lexer::Lexer(std::string_view source, std::string_view filename,
         DiagnosticEngine& diag, const std::vector<LineSplice>* splices)
         : source_(source)
@@ -232,61 +287,16 @@ namespace gallt {
     }
 
     void Lexer::validate_file() {
-        const bool line_ending_ok = validate_line_endings();
-
         const bool encoding_ok = validate_utf8();
 
-        if (line_ending_ok && encoding_ok) {
+        if (encoding_ok) {
             return;
         }
 
-        std::string linebreak = "lf";
-
-        if (!line_ending_ok) {
-            bool has_crlf = false;
-            bool has_lone_cr = false;
-
-            for (std::size_t i = 0; i < source_.size(); ++i) {
-                if (source_[i] != '\r') { continue; }
-
-                if (i + 1 < source_.size() && source_[i + 1] == '\n') {
-                    has_crlf = true;
-                } else {
-                    has_lone_cr = true;
-                }
-            }
-
-            if (has_crlf && has_lone_cr) {
-                linebreak = "crlf and cr";
-            } else if (has_crlf) {
-                linebreak = "crlf";
-            } else if (has_lone_cr) {
-                linebreak = "cr";
-            }
-        }
-
         diag_.report_error_template(current_location(), ErrorCode::InvalidInputFile,
-            { encoding_ok ? std::string("utf-8") : std::string("invalid utf-8"),
-              linebreak });
+            { std::string("invalid utf-8") });
         has_error_ = true;
         fatal_error_ = true;
-    }
-
-    bool Lexer::validate_line_endings() {
-        std::size_t pos = 0;
-
-        while (pos < source_.size()) {
-            char c = source_[pos];
-            if (c == '\r') {
-                if (pos + 1 < source_.size() && source_[pos + 1] == '\n') {
-                    return false;
-                }
-                return false;
-            }
-            pos++;
-        }
-
-        return true;
     }
 
     bool Lexer::validate_utf8() {

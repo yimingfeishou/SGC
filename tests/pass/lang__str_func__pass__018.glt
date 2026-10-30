@@ -2,7 +2,7 @@
 // expect output
 // -1
 
-const int order(string a, string b) {
+int order(string a, string b) const {
     return strcompare(a, b)
 }
 const int cmp = order("abc", "abd")

@@ -1,7 +1,7 @@
 // lang__fileopen__error__001.glt
 // expect error ER 0003
 
-const int f(int x) {
+int f(int x) const {
     file h = fileopen("a.txt", "r")
     return x
 }

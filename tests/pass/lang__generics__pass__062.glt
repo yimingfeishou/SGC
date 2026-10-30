@@ -1,0 +1,34 @@
+// lang__generics__pass__062.glt
+// expect output
+// 6 5 2
+
+const int C = 4
+
+int prev(int value) const {
+    return value - 1
+}
+
+generics Inner<int N> {
+    int value() {
+        return N
+    }
+}
+
+generics G<int N> {
+    int dependent() {
+        return Inner<N + 1>.value()
+    }
+
+    int global_dependent() {
+        return Inner<C + 1>.value()
+    }
+
+    int function_dependent() {
+        return Inner<prev(3)>.value()
+    }
+}
+
+int main() {
+    output(G<5>.dependent(), " ", G<5>.global_dependent(), " ", G<5>.function_dependent())
+    return 0
+}

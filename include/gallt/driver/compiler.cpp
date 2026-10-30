@@ -69,6 +69,7 @@ namespace {
             return false;
         }
 
+        *bytes = normalize_line_endings(*bytes, true);
         auto source = std::make_shared<std::string>(std::move(*bytes));
         auto name = std::make_shared<std::string>(pal::to_utf8(path.wstring()));
 
@@ -203,7 +204,8 @@ namespace {
             pal::to_utf8(path.wstring())));
         DiagnosticEngine scratch;
         std::vector<LineSplice> splices;
-        std::string spliced = splice_line_continuations(*bytes, splices);
+        std::string normalized = normalize_line_endings(*bytes, false);
+        std::string spliced = splice_line_continuations(normalized, splices);
         Lexer lexer(spliced, *name_pool.back(), scratch,
             splices.empty() ? nullptr : &splices);
         int emit_block_depth = 0;
@@ -376,7 +378,7 @@ namespace {
             LoadedSource ls;
             ls.canonical_path = canonical;
 
-            std::cout << "compiling "
+            std::cout << (options.check_only ? "checking " : "compiling ")
                       << pal::to_utf8(canonical.wstring()) << "\n";
 
             if (!load_one_file(canonical, diag, ls, &merged_generic_names)) {
@@ -508,12 +510,15 @@ namespace {
 
         ConditionCompiler conditions(diag);
         NamespaceLowering namespaces(diag);
-        GenericExpander expander(diag, namespaces, options.instantiation_depth);
+        GenericExpander expander(diag, namespaces,
+            options.instantiation_depth, options.constexpr_max_steps,
+            options.constexpr_max_integer_exponent);
         LifecycleLowering lifecycle(diag);
 
         conditions.run(&combined);
         namespaces.run(&combined);
         expander.expand(&combined);
+        namespaces.retry_unresolved(&combined);
         conditions.run(&combined);
 
         if (expander.stack_probe_triggered()) {
@@ -523,7 +528,9 @@ namespace {
         lifecycle.run(&combined);
 
         TypeChecker checker(diag, emit_entry_point,
-            options.extended_semantics);
+            options.extended_semantics, options.constexpr_depth,
+            options.constexpr_max_steps,
+            options.constexpr_max_integer_exponent);
 
         checker.check_program(&combined);
 
@@ -565,6 +572,11 @@ namespace {
                 "no output artifact was produced");
             diag.print_all(std::cerr);
             return pal::exit_failure_code();
+        }
+
+        if (options.check_only) {
+            std::cout << "check successful\n";
+            return pal::exit_success_code();
         }
 
         const std::string temp_dir = pal::temporary_directory();

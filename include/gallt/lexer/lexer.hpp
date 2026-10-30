@@ -22,6 +22,8 @@ namespace gallt {
     std::string splice_line_continuations(std::string_view source,
         std::vector<LineSplice>& splices);
 
+    std::string normalize_line_endings(std::string_view source, bool warn);
+
     class Lexer {
     public:
         Lexer(std::string_view source, std::string_view filename,
@@ -85,7 +87,6 @@ namespace gallt {
 
         char parse_escape_sequence();
 
-        bool validate_line_endings();
         bool validate_utf8();
     };
 

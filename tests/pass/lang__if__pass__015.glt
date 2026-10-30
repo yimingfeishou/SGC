@@ -1,0 +1,16 @@
+// lang__if__pass__015.glt
+// expect output
+// AB
+
+@cond VALUE = 1
+
+int main() {
+    @if (VALUE == 1)
+    output("A")
+    output("B")
+    @else
+    output("C")
+    @endif
+    output("\n")
+    return 0
+}

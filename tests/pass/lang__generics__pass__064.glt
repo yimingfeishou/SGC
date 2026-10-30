@@ -1,0 +1,41 @@
+// lang__generics__pass__064.glt
+// expect output
+// 2 2 1 3 4
+
+int pick(double value) const {
+    return 2
+}
+
+int pick(int value) const {
+    return 1
+}
+
+int pick(char value) const {
+    return 3
+}
+
+int pick(bool value) const {
+    return 4
+}
+
+generics FixedArray<T, int N> {
+    struct FixedArray {
+        T data[N]
+    }
+
+    int length() {
+        return N
+    }
+}
+
+generics EmitPick<T> {
+    emit "int get() { return ", pick(3.14), "; }"
+}
+
+int main() {
+    FixedArray<int, pick(3.14)>.FixedArray value
+    output(FixedArray<int, pick(3.14)>.length(), " ")
+    output(EmitPick<int>.get(), " ")
+    output(pick(3), " ", pick('A'), " ", pick(true), "\n")
+    return 0
+}

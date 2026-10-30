@@ -1,0 +1,15 @@
+// compiler__encoding__pass__004.glt
+// expect output 2536
+
+int square(int x) const {
+    return x ** 2
+}
+
+const int result = square(5)
+int runtime_value = square(6)
+
+int main() {
+    output(result)
+    output(runtime_value)
+    return 0
+}

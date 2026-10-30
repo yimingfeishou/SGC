@@ -3,13 +3,13 @@
 // ct_split=[b] rt_split=[b]
 // ct_char=-28 rt_char=-28
 
-const string ct_pick(string s, string sep, int i) {
+string ct_pick(string s, string sep, int i) const {
     return strsplitget(s, sep, i)
 }
 
 const string ct_field1 = ct_pick("a,b,c", ",", 1)
 
-const int ct_char0(string s) {
+int ct_char0(string s) const {
     return cast<int>(strcharat(s, 0))
 }
 

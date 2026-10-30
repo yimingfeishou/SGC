@@ -3,11 +3,11 @@
 // 0
 // 1
 
-const int describe(int value) {
+int describe(int value) const {
     return 0
 }
 
-const int describe(double value) {
+int describe(double value) const {
     return 1
 }
 

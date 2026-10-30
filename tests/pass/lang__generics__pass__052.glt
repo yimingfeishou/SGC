@@ -3,10 +3,10 @@
 // 9
 // 9
 
-const int square(int x) {
+int square(int x) const {
     return x * x
 }
-const int plus(int a, int b) {
+int plus(int a, int b) const {
     return a + b
 }
 generics G<T: int, T N> {

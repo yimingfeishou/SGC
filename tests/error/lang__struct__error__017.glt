@@ -5,7 +5,7 @@ struct Point {
     int x
 }
 Point runtime_point = {1}
-const int read_x(Point p) {
+int read_x(Point p) const {
     return p.x
 }
 const int x = read_x(runtime_point)

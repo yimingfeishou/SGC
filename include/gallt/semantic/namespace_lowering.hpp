@@ -18,6 +18,7 @@ namespace gallt {
         explicit NamespaceLowering(DiagnosticEngine& diag);
 
         bool run(AST::Program* program);
+        bool retry_unresolved(AST::Program* program);
 
         bool lower_new_top_levels(std::vector<std::unique_ptr<AST::TopLevel>>& nodes);
         bool rewrite_new_generated_top_level(AST::TopLevel* node);
@@ -50,6 +51,7 @@ namespace gallt {
         std::unordered_map<const AST::AccessNamespaceStatement*, std::size_t>
             access_orders_;
         bool had_error_ = false;
+        bool defer_unresolved_ = false;
         SourceLocation type_location_hint_;
         std::unordered_set<const AST::Node*> poisoned_;
 

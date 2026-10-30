@@ -2,7 +2,7 @@
 // expect output
 // 4
 
-const int width_of(int n) {
+int width_of(int n) const {
     return n * 2
 }
 struct Row {

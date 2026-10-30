@@ -1,0 +1,13 @@
+// lang__generics__error__068.glt
+// expect error ER 0019
+
+generics Project<T...> {
+    bool out_of_range_property() {
+        return T[2].is_integer
+    }
+}
+
+int main() {
+    output(Project<int, double>.out_of_range_property())
+    return 0
+}

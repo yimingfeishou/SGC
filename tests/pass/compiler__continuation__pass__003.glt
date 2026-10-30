@@ -1,0 +1,11 @@
+// compiler__continuation__pass__003.glt
+// expect output
+// 1
+
+int main() {
+    int value = 0
+    if (true) \
+        value = 1
+    output(value, "\n")
+    return 0
+}

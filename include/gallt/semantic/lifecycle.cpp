@@ -75,6 +75,9 @@ namespace gallt {
         for (auto& top : program_->top_levels) {
             if (auto* def = dynamic_cast<StructDefinition*>(top.get())) {
                 register_struct_definition(def, top.get());
+                for (auto& member : def->special_members) {
+                    walk(member->body.get(), top.get());
+                }
             } else if (auto* func = dynamic_cast<FunctionDefinition*>(top.get())) {
                 if (func->body != nullptr) { walk(func->body.get(), top.get()); }
             }
@@ -85,104 +88,153 @@ namespace gallt {
         while (changed) {
             changed = false;
 
-            for (auto& pair : structs_) {
-                if (has_destructor(pair.first)) { continue; }
+            auto propagate = [&](StructInfo& info) {
+                if (info.def->needs_destruction) { return; }
 
-                for (const auto& member : pair.second.def->members) {
+                for (const auto& member : info.def->members) {
                     if (type_needs_destruction(member.type)) {
-                        mark_needs_destruction(pair.first);
+                        info.def->needs_destruction = true;
                         changed = true;
                         break;
                     }
                 }
-            }
+            };
+
+            for (auto& pair : structs_) { propagate(pair.second); }
+            for (auto& pair : local_structs_) { propagate(pair.second); }
         }
     }
 
     void LifecycleLowering::register_struct_definition(StructDefinition* def,
         AST::TopLevel* anchor) {
         if (def == nullptr) { return; }
-        if (structs_.count(def->name) != 0) {
-            if (structs_[def->name].anchor == nullptr) {
-                structs_[def->name].anchor = anchor;
-            }
+        auto existing = structs_.find(def->name);
+        if ((existing != structs_.end() && existing->second.def == def) ||
+            local_structs_.count(def) != 0) {
             return;
         }
-        struct_order_.push_back(def);
-        struct_defs_[def->name] = def;
-            StructInfo& info = structs_[def->name];
+
+        std::string lifecycle_name = def->name;
+        const bool duplicate = existing != structs_.end();
+        if (duplicate) {
+            lifecycle_name += "$" + std::to_string(++duplicate_struct_counts_[def->name]);
+        }
+
+        auto prepare = [&](StructInfo& info) {
             info.def = def;
             info.anchor = anchor;
             info.no_copy = def->no_copy;
             info.no_move = def->no_move;
 
-            if (!def->special_members.empty()) {
-                for (auto& member : def->special_members) {
-                    if (member->kind == SpecialMemberFunction::Kind::Destructor) {
-                        def->needs_destruction = true;
-                    }
+            for (const auto& member : def->special_members) {
+                if (member->kind == SpecialMemberFunction::Kind::Destructor) {
+                    def->needs_destruction = true;
                 }
             }
 
-                for (auto& member : def->special_members) {
-                    switch (member->kind) {
-                    case SpecialMemberFunction::Kind::Constructor:
-                        info.constructors.push_back(member.get());
-                        break;
-                    case SpecialMemberFunction::Kind::Destructor:
-                        if (info.destructor != nullptr) {
-                            report_template(member->location, ErrorCode::SpecialMemberRedefined,
-                                { "destructor" });
-                        } else {
-                            info.destructor = member.get();
-                        }
-                        break;
-                    case SpecialMemberFunction::Kind::CopyConstructor:
-                        if (info.copy_constructor != nullptr) {
-                            report_template(member->location, ErrorCode::SpecialMemberRedefined,
-                                { "copy_constructor" });
-                        } else {
-                            info.copy_constructor = member.get();
-                        }
-                        break;
-                    case SpecialMemberFunction::Kind::MoveConstructor:
-                        if (info.move_constructor != nullptr) {
-                            report_template(member->location, ErrorCode::SpecialMemberRedefined,
-                                { "move_constructor" });
-                        } else {
-                            info.move_constructor = member.get();
-                        }
-                        break;
-                    case SpecialMemberFunction::Kind::CopyAssignment:
-                        if (info.copy_assignment != nullptr) {
-                            report_template(member->location, ErrorCode::SpecialMemberRedefined,
-                                { "copy_assignment" });
-                        } else {
-                            info.copy_assignment = member.get();
-                        }
-                        break;
-                    case SpecialMemberFunction::Kind::MoveAssignment:
-                        if (info.move_assignment != nullptr) {
-                            report_template(member->location, ErrorCode::SpecialMemberRedefined,
-                                { "move_assignment" });
-                        } else {
-                            info.move_assignment = member.get();
-                        }
-                        break;
+            for (auto& member : def->special_members) {
+                switch (member->kind) {
+                case SpecialMemberFunction::Kind::Constructor:
+                    info.constructors.push_back(member.get());
+                    break;
+                case SpecialMemberFunction::Kind::Destructor:
+                    if (info.destructor != nullptr) {
+                        report_template(member->location, ErrorCode::SpecialMemberRedefined,
+                            { "destructor" });
+                    } else {
+                        info.destructor = member.get();
                     }
+                    break;
+                case SpecialMemberFunction::Kind::CopyConstructor:
+                    if (info.copy_constructor != nullptr) {
+                        report_template(member->location, ErrorCode::SpecialMemberRedefined,
+                            { "copy_constructor" });
+                    } else {
+                        info.copy_constructor = member.get();
+                    }
+                    break;
+                case SpecialMemberFunction::Kind::MoveConstructor:
+                    if (info.move_constructor != nullptr) {
+                        report_template(member->location, ErrorCode::SpecialMemberRedefined,
+                            { "move_constructor" });
+                    } else {
+                        info.move_constructor = member.get();
+                    }
+                    break;
+                case SpecialMemberFunction::Kind::CopyAssignment:
+                    if (info.copy_assignment != nullptr) {
+                        report_template(member->location, ErrorCode::SpecialMemberRedefined,
+                            { "copy_assignment" });
+                    } else {
+                        info.copy_assignment = member.get();
+                    }
+                    break;
+                case SpecialMemberFunction::Kind::MoveAssignment:
+                    if (info.move_assignment != nullptr) {
+                        report_template(member->location, ErrorCode::SpecialMemberRedefined,
+                            { "move_assignment" });
+                    } else {
+                        info.move_assignment = member.get();
+                    }
+                    break;
                 }
+            }
 
-                std::string ctor_overload = "__sgc_ctor$" + def->name;
+            std::string ctor_overload = "__sgc_ctor$" + lifecycle_name;
+            for (std::size_t i = 0; i < info.constructors.size(); ++i) {
+                info.ctor_names.push_back(ctor_overload);
+            }
 
-                for (std::size_t i = 0; i < info.constructors.size(); ++i) {
-                    info.ctor_names.push_back(ctor_overload);
-                }
+            info.dtor_name = "__sgc_dtor$" + lifecycle_name;
+            info.copy_ctor_name = "__sgc_copyctor$" + lifecycle_name;
+            info.move_ctor_name = "__sgc_movector$" + lifecycle_name;
+            info.copy_assign_name = "__sgc_copyassign$" + lifecycle_name;
+            info.move_assign_name = "__sgc_moveassign$" + lifecycle_name;
+        };
 
-                info.dtor_name = "__sgc_dtor$" + def->name;
-                info.copy_ctor_name = "__sgc_copyctor$" + def->name;
-                info.move_ctor_name = "__sgc_movector$" + def->name;
-                info.copy_assign_name = "__sgc_copyassign$" + def->name;
-                info.move_assign_name = "__sgc_moveassign$" + def->name;
+        StructInfo info;
+        prepare(info);
+        if (duplicate) {
+            local_structs_.emplace(def, std::move(info));
+        } else {
+            struct_defs_[def->name] = def;
+            structs_.emplace(def->name, std::move(info));
+        }
+        struct_order_.push_back(def);
+    }
+
+    LifecycleLowering::StructInfo* LifecycleLowering::find_struct_info(
+        const std::string& name) {
+        for (auto scope = struct_lookup_scopes_.rbegin();
+            scope != struct_lookup_scopes_.rend(); ++scope) {
+            auto found = scope->find(name);
+            if (found != scope->end()) { return found->second; }
+        }
+        auto found = structs_.find(name);
+        return found == structs_.end() ? nullptr : &found->second;
+    }
+
+    void LifecycleLowering::register_visible_struct(AST::StructDefinition* def) {
+        if (def == nullptr || struct_lookup_scopes_.empty()) { return; }
+        auto local = local_structs_.find(def);
+        if (local != local_structs_.end()) {
+            struct_lookup_scopes_.back()[def->name] = &local->second;
+            return;
+        }
+        auto global = structs_.find(def->name);
+        if (global != structs_.end() && global->second.def == def) {
+            struct_lookup_scopes_.back()[def->name] = &global->second;
+        }
+    }
+
+    void LifecycleLowering::push_struct_lookup_scope() {
+        struct_lookup_scopes_.emplace_back();
+    }
+
+    void LifecycleLowering::pop_struct_lookup_scope() {
+        if (!struct_lookup_scopes_.empty()) {
+            struct_lookup_scopes_.pop_back();
+        }
     }
 
     void LifecycleLowering::mark_needs_destruction(const std::string& name) {
@@ -253,9 +305,13 @@ namespace gallt {
     }
 
     void LifecycleLowering::validate_special_members() {
-        for (auto& pair : structs_) {
-            StructInfo& info = pair.second;
-            const std::string& name = pair.first;
+        std::vector<StructInfo*> infos;
+        for (auto& pair : structs_) { infos.push_back(&pair.second); }
+        for (auto& pair : local_structs_) { infos.push_back(&pair.second); }
+
+        for (StructInfo* info_ptr : infos) {
+            StructInfo& info = *info_ptr;
+            const std::string& name = info.def->name;
 
             auto check_pointer_param = [&](SpecialMemberFunction* member, const char* what) {
                 if (member == nullptr) { return; }
@@ -644,6 +700,7 @@ namespace gallt {
         validate_special_members();
         lower_special_members();
 
+        push_struct_lookup_scope();
         for (auto& top : program_->top_levels) {
             if (dynamic_cast<FunctionDefinition*>(top.get()) != nullptr) {
                 auto* func = static_cast<FunctionDefinition*>(top.get());
@@ -651,6 +708,7 @@ namespace gallt {
             }
             rewrite_top_level(top.get());
         }
+        pop_struct_lookup_scope();
 
         return !had_error_;
     }

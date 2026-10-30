@@ -14,6 +14,18 @@ static gallt_file* gallt_file_registry = NULL;
 static int gallt_file_exit_registered = 0;
 static int gallt_file_last_error = 0;
 
+static void gallt_file_unregister(gallt_file* handle) {
+    gallt_file** slot = &gallt_file_registry;
+
+    while (*slot != NULL) {
+        if (*slot == handle) {
+            *slot = handle->next;
+            return;
+        }
+        slot = &(*slot)->next;
+    }
+}
+
 static void gallt_file_release_all(void) {
     gallt_file* h = gallt_file_registry;
 
@@ -166,7 +178,9 @@ int8_t gallt_file_close(void* slot) {
     h->fp = NULL;
     int rc = fclose(fp);
     h->error = (rc == 0) ? 0 : gallt_errno_code();
-    *(gallt_file**)slot = NULL;
+    gallt_file_unregister(h);
+    free(h->slot);
+    free(h);
     int ok = (rc == 0) ? 1 : 0;
     return (int8_t)ok;
 }
@@ -290,7 +304,7 @@ void gallt_file_readline(gallt_string* out, void* handle) {
     if (out == NULL) { return; }
     gallt_file* h = gallt_file_valid(handle);
     if (h == NULL) {
-        *out = gallt_string_from_bytes_impl("", 0);
+        gallt_string_store(out, gallt_string_from_bytes_impl("", 0));
         return;
     }
 
@@ -316,9 +330,10 @@ void gallt_file_readline(gallt_string* out, void* handle) {
     if (length > 0 && buffer != NULL && buffer[length - 1] == '\r') { length--; }
 
     if (buffer == NULL) {
-        *out = gallt_string_from_bytes_impl("", 0);
+        gallt_string_store(out, gallt_string_from_bytes_impl("", 0));
     } else {
-        *out = gallt_string_from_bytes_impl(buffer, (int64_t)length);
+        gallt_string_store(out,
+            gallt_string_from_bytes_impl(buffer, (int64_t)length));
         free(buffer);
     }
     h->error = 0;

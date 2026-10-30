@@ -1,7 +1,7 @@
 // lang__const_fn__pass__004.glt
 // expect output
 
-const int f(int x) {
+int f(int x) const {
     int n = strlen("ab")
     return n
 }

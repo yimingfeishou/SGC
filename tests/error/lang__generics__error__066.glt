@@ -1,0 +1,11 @@
+// lang__generics__error__066.glt
+// expect error ER 0019
+
+int consume(int[1] value) {
+    return value[0]
+}
+
+int main() {
+    int values[1] = {0}
+    return consume(values)
+}

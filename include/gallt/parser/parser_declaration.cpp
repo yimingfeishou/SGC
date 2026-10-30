@@ -17,7 +17,6 @@ namespace gallt {
     std::unique_ptr<TopLevel> Parser::parse_function_definition(
         bool exported, SourceLocation export_location) {
         SourceLocation loc = current_location();
-        const bool const_qualified = current_.type == TokenType::Keyword_Const;
         Type ret_type = parse_type(true);
 
         std::string func_name;
@@ -70,6 +69,8 @@ namespace gallt {
             return nullptr;
         }
 
+        const bool const_qualified = match(TokenType::Keyword_Const);
+
         if (current_.type == TokenType::Star || current_.type == TokenType::Power) {
             if (exported) {
                 report_error_template_at(export_location,
@@ -119,6 +120,8 @@ namespace gallt {
             report_error(ErrorCode::ExpressionSyntaxError, "expected function body");
             return nullptr;
         }
+
+        ret_type.is_const = false;
 
         auto func = std::make_unique<FunctionDefinition>(
             loc, std::move(ret_type), func_name,
@@ -839,6 +842,17 @@ namespace gallt {
             std::move(params), variadic, std::move(element));
     }
 
+    bool Parser::is_active_type_pack(const std::string& name) const {
+        for (auto it = generic_type_pack_scopes_.rbegin();
+            it != generic_type_pack_scopes_.rend(); ++it) {
+            if (it->count(name) != 0) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     Type Parser::parse_type_specifier(bool allow_void) {
         if (current_.type == TokenType::Keyword_Const) {
             advance();
@@ -847,53 +861,66 @@ namespace gallt {
             return qualified;
         }
 
+        Type base_type = Type::make_void();
         switch (current_.type) {
         case TokenType::Keyword_Int:
             advance();
-            return Type::make_int();
+            base_type = Type::make_int();
+            break;
         case TokenType::Keyword_Lint:
             advance();
-            return Type::make_lint();
+            base_type = Type::make_lint();
+            break;
         case TokenType::Keyword_Uint:
             advance();
-            return Type::make_uint();
+            base_type = Type::make_uint();
+            break;
         case TokenType::Keyword_Luint:
             advance();
-            return Type::make_luint();
+            base_type = Type::make_luint();
+            break;
         case TokenType::Keyword_Float:
             advance();
-            return Type::make_float();
+            base_type = Type::make_float();
+            break;
         case TokenType::Keyword_Double:
             advance();
-            return Type::make_double();
+            base_type = Type::make_double();
+            break;
         case TokenType::Keyword_Char:
             advance();
-            return Type::make_char();
+            base_type = Type::make_char();
+            break;
         case TokenType::Keyword_Uchar:
             advance();
-            return Type::make_uchar();
+            base_type = Type::make_uchar();
+            break;
         case TokenType::Keyword_Bool:
             advance();
-            return Type::make_bool();
+            base_type = Type::make_bool();
+            break;
         case TokenType::Keyword_String:
             advance();
-            return Type::make_string();
+            base_type = Type::make_string();
+            break;
         case TokenType::Keyword_File:
             advance();
-            return Type::make_file();
+            base_type = Type::make_file();
+            break;
         case TokenType::Keyword_Void:
             if (!allow_void) {
                 report_error(ErrorCode::ExpressionSyntaxError, "void type not allowed here");
             }
             advance();
-            return Type::make_void();
+            base_type = Type::make_void();
+            break;
         case TokenType::Identifier: {
             std::string name(current_.lexeme);
             if (looks_like_generic_instantiation()) {
                 GenericRef ref = parse_generic_reference(name);
-                Type t = Type::make_struct(ref.to_string());
-                t.generic_ref = std::make_shared<GenericRef>(std::move(ref));
-                return t;
+                base_type = Type::make_struct(ref.to_string());
+                base_type.generic_ref = std::make_shared<GenericRef>(std::move(ref));
+                break;
             }
 
             if (lookahead_type(1) == TokenType::ColonColon) {
@@ -911,16 +938,106 @@ namespace gallt {
                     path += std::string(current_.lexeme);
                     advance();
                 }
-                return Type::make_struct(path);
+                base_type = Type::make_struct(path);
+                break;
             }
 
             advance();
-            return Type::make_struct(name);
+            base_type = Type::make_struct(name);
+            break;
         }
         default:
             report_error(ErrorCode::ExpressionSyntaxError, "expected type specifier");
             return Type::make_void();
         }
+
+        for (;;) {
+            if (current_.type == TokenType::LeftBracket) {
+                SourceLocation bracket_loc = current_.location;
+                advance();
+                std::optional<size_t> size = std::nullopt;
+                std::shared_ptr<Expression> index_expr;
+                std::string index_text;
+
+                if (current_.type != TokenType::RightBracket) {
+                    if (current_.type == TokenType::IntegerLiteral &&
+                        lookahead_type(1) == TokenType::RightBracket) {
+                        index_text = std::string(current_.lexeme);
+                        size = try_parse_integer_literal();
+                        if (!size.has_value()) {
+                            report_error_at(bracket_loc, ErrorCode::ArraySizeNotConstant,
+                                "array size must be a constant integer expression");
+                        } else {
+                            advance();
+                        }
+                    } else {
+                        auto expr = parse_compile_time_expression();
+                        if (expr == nullptr) {
+                            report_error_at(bracket_loc, ErrorCode::ArraySizeNotConstant,
+                                "array size must be a constant integer expression");
+                        } else {
+                            index_text = compile_time_expr_text(expr.get());
+                            long long int_value = 0;
+                            double float_value = 0.0;
+                            bool is_float = false;
+                            if (fold_constant_expression(expr.get(), int_value, float_value, is_float)
+                                && !is_float && int_value >= 0) {
+                                size = static_cast<size_t>(int_value);
+                            } else {
+                                index_expr = std::shared_ptr<Expression>(expr.release());
+                            }
+                        }
+                    }
+                }
+
+                if (!expect(TokenType::RightBracket, "expected ']' after array type")) {
+                    break;
+                }
+
+                const bool projection = base_type.kind == TypeKind::Struct &&
+                    base_type.generic_ref == nullptr &&
+                    is_active_type_pack(base_type.struct_name) &&
+                    (size.has_value() || index_expr != nullptr);
+                if (projection) {
+                    base_type = Type::make_pack_projection(
+                        std::make_shared<Type>(std::move(base_type)),
+                        PackProjectionKind::Index, size, std::move(index_expr),
+                        std::move(index_text), bracket_loc);
+                } else {
+                    Type array = Type::make_array(
+                        std::make_shared<Type>(std::move(base_type)), size);
+                    array.array_suffix_from_type_specifier = true;
+                    base_type = std::move(array);
+                }
+                continue;
+            }
+
+            if (current_.type == TokenType::Dot &&
+                base_type.kind == TypeKind::Struct &&
+                base_type.generic_ref == nullptr &&
+                is_active_type_pack(base_type.struct_name) &&
+                lookahead_type(1) == TokenType::Identifier) {
+                const std::string_view property = lookahead(1).lexeme;
+                if (property != "first" && property != "last") {
+                    break;
+                }
+
+                SourceLocation projection_loc = current_.location;
+                advance();
+                advance();
+                const PackProjectionKind kind = property == "first"
+                    ? PackProjectionKind::First
+                    : PackProjectionKind::Last;
+                base_type = Type::make_pack_projection(
+                    std::make_shared<Type>(std::move(base_type)), kind,
+                    std::nullopt, nullptr, std::string(), projection_loc);
+                continue;
+            }
+
+            break;
+        }
+
+        return base_type;
     }
 
     std::pair<std::vector<Type>, std::vector<std::string>> Parser::parse_parameter_list(
@@ -950,6 +1067,7 @@ namespace gallt {
                 break;
             }
 
+            SourceLocation parameter_loc = current_location();
             Type param_type = parse_type(true);
 
             bool parameter_is_variadic = false;
@@ -978,7 +1096,22 @@ namespace gallt {
                 }
             }
 
+            const bool type_specifier_array =
+                param_type.kind == TypeKind::Array &&
+                param_type.array_suffix_from_type_specifier;
+            const bool type_pack_projection =
+                param_type.pack_projection != PackProjectionKind::None;
+            if (type_specifier_array && !type_pack_projection && !param_name.empty()) {
+                report_error_at(parameter_loc, ErrorCode::ExpressionSyntaxError,
+                    "array parameter size must follow the parameter name");
+            }
+
             if (current_.type == TokenType::LeftBracket) {
+                if (param_name.empty()) {
+                    report_error_at(current_.location, ErrorCode::ExpressionSyntaxError,
+                        "array parameter size requires a parameter name");
+                }
+
                 std::vector<std::optional<size_t>> dimensions;
 
                 while (current_.type == TokenType::LeftBracket) {

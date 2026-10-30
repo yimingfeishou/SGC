@@ -1,0 +1,20 @@
+// lang__switch__pass__020.glt
+// expect output
+// 22other
+
+int main() {
+    switch (1) {
+        case (1) fallthrough
+        case (2) output("2")
+    }
+    switch (2) {
+        case (1) output("1")
+        case (2) output("2")
+    }
+    switch (9) {
+        case (1) output("1")
+        output("other")
+    }
+    output("\n")
+    return 0
+}

@@ -149,6 +149,13 @@ namespace gallt {
             return nullptr;
         }
         std::string directive(current_.lexeme);
+        if (directive == "else" || directive == "endif") {
+            report_error(ErrorCode::MissingBraces,
+                "conditional compilation directive without matching @if");
+            advance();
+            expect_stmt_end("conditional compilation directive");
+            return nullptr;
+        }
         if (directive == "cond") {
             advance();
             if (current_.type != TokenType::Identifier) {
@@ -198,7 +205,8 @@ namespace gallt {
         return nullptr;
     }
 
-    std::unique_ptr<ConditionalBlock> Parser::parse_conditional_block(bool top_level) {
+    std::unique_ptr<ConditionalBlock> Parser::parse_conditional_block(
+        bool top_level, bool consume_endif) {
         SourceLocation loc = current_location();
         auto condition = parse_condition_expression();
         if (condition == nullptr) {
@@ -206,50 +214,114 @@ namespace gallt {
             return nullptr;
         }
         skip_newlines();
-        std::unique_ptr<Statement> then_block;
-        if (current_.type == TokenType::LeftBrace) {
-            if (top_level) {
-                then_block = parse_top_level_block();
-            } else {
-                std::unique_ptr<AST::Block> block = parse_block();
-                then_block.reset(block.release());
-            }
-        } else {
-            if (top_level) {
-                then_block = parse_conditional_branch_top_level();
-            } else {
-                std::unique_ptr<AST::Statement> nested = parse_statement();
-                then_block = std::move(nested);
-            }
+
+        const bool braced_form = current_.type == TokenType::LeftBrace;
+        std::unique_ptr<Statement> then_block = braced_form
+            ? (top_level
+                ? std::unique_ptr<Statement>(parse_top_level_block())
+                : std::unique_ptr<Statement>(parse_block()))
+            : parse_conditional_block_form_branch(top_level);
+
+        if (then_block == nullptr) {
+            return nullptr;
         }
+
         skip_newlines();
         std::unique_ptr<Statement> else_block = nullptr;
         if (current_.type == TokenType::At && lookahead(1).lexeme == "else") {
             advance();
             advance();
-            skip_newlines();
-            if (current_.type == TokenType::At && lookahead(1).lexeme == "if") {
+            if (current_.type == TokenType::Keyword_If) {
                 advance();
                 std::unique_ptr<AST::ConditionalBlock> nested =
-                    parse_conditional_block(top_level);
-                else_block.reset(nested.release());
-            } else if (current_.type == TokenType::LeftBrace) {
-                if (top_level) {
-                    else_block = parse_top_level_block();
-                } else {
-                    std::unique_ptr<AST::Block> block = parse_block();
-                    else_block.reset(block.release());
+                    parse_conditional_block(top_level, false);
+                if (nested == nullptr) {
+                    return nullptr;
                 }
-            } else if (top_level) {
-                else_block = parse_conditional_branch_top_level();
+                else_block.reset(nested.release());
             } else {
-                std::unique_ptr<AST::Statement> nested = parse_statement();
-                else_block = std::move(nested);
+                skip_newlines();
+                else_block = braced_form
+                    ? (top_level
+                        ? std::unique_ptr<Statement>(parse_top_level_block())
+                        : std::unique_ptr<Statement>(parse_block()))
+                    : parse_conditional_block_form_branch(top_level);
+                if (else_block == nullptr) {
+                    return nullptr;
+                }
             }
             skip_newlines();
         }
+
+        if (!braced_form && consume_endif) {
+            if (current_.type != TokenType::At ||
+                lookahead(1).lexeme != "endif") {
+                report_error(ErrorCode::MissingBraces,
+                    "@if block form must be closed by @endif");
+                synchronize();
+                return nullptr;
+            }
+            advance();
+            advance();
+            expect_stmt_end("conditional compilation end");
+            skip_newlines();
+        }
+
         return std::make_unique<ConditionalBlock>(loc, std::move(condition),
             std::move(then_block), std::move(else_block));
+    }
+
+    std::unique_ptr<Statement> Parser::parse_conditional_block_form_branch(
+        bool top_level) {
+        SourceLocation loc = current_location();
+        std::unique_ptr<Statement> branch;
+
+        if (top_level) {
+            auto block = std::make_unique<TopLevelBlock>(loc);
+            while (current_.type != TokenType::EndOfFile &&
+                !(current_.type == TokenType::At &&
+                    (lookahead(1).lexeme == "else" ||
+                        lookahead(1).lexeme == "endif"))) {
+                skip_newlines();
+                if (current_.type == TokenType::EndOfFile ||
+                    (current_.type == TokenType::At &&
+                        (lookahead(1).lexeme == "else" ||
+                            lookahead(1).lexeme == "endif"))) {
+                    break;
+                }
+                std::unique_ptr<TopLevel> item = parse_top_level();
+                if (item == nullptr) {
+                    synchronize();
+                    continue;
+                }
+                block->items.push_back(std::move(item));
+            }
+            branch = std::move(block);
+        } else {
+            auto block = std::make_unique<Block>(loc,
+                std::vector<std::unique_ptr<Statement>>{});
+            while (current_.type != TokenType::EndOfFile &&
+                !(current_.type == TokenType::At &&
+                    (lookahead(1).lexeme == "else" ||
+                        lookahead(1).lexeme == "endif"))) {
+                skip_newlines();
+                if (current_.type == TokenType::EndOfFile ||
+                    (current_.type == TokenType::At &&
+                        (lookahead(1).lexeme == "else" ||
+                            lookahead(1).lexeme == "endif"))) {
+                    break;
+                }
+                std::unique_ptr<Statement> item = parse_statement();
+                if (item == nullptr) {
+                    synchronize();
+                    continue;
+                }
+                block->statements.push_back(std::move(item));
+            }
+            branch = std::move(block);
+        }
+
+        return branch;
     }
 
     std::unique_ptr<Statement> Parser::parse_conditional_branch_top_level() {

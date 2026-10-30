@@ -1,0 +1,57 @@
+// sl__generics__pass__009.glt
+// expect output
+// false | true false | true false | 6 3 | 6 | true 10 | false | false
+
+guide "generics.glt"
+access namespace sl
+
+int dynamic_total = 0
+
+void dynamic_visit(int value) {
+    dynamic_total = dynamic_total + value
+}
+
+int main() {
+    dynamic_array_generic<int>
+    dynamic_array values = dynamic_array(2)
+    push(&values, 1)
+    push(&values, 2)
+
+    iterator boundary = end(&values)
+    output(iterator_valid(&boundary), " | ")
+    iterator old = begin(&values)
+    output(iterator_valid(&old), " ")
+    push(&values, 3)
+    output(iterator_valid(&old), " | ")
+
+    iterator manual = begin(&values)
+    bool manual_before = iterator_valid(&manual)
+    iterator_invalidate(&manual)
+    output(manual_before, " ", iterator_valid(&manual), " | ")
+
+    iterator it = begin(&values)
+    int total = 0
+    int count = 0
+    while (iterator_valid(&it)) {
+        total = total + iterator_value(&it)
+        count = count + 1
+        iterator_next(&it)
+    }
+    output(total, " ", count, " | ")
+
+    dynamic_total = 0
+    for_each(&values, &dynamic_visit)
+    output(dynamic_total, " | ")
+
+    iterator stable = begin(&values)
+    set(&values, 0, 10)
+    output(iterator_valid(&stable), " ", iterator_value(&stable), " | ")
+
+    erase(&values, 1)
+    output(iterator_valid(&stable), " | ")
+
+    iterator cleared = begin(&values)
+    clear(&values)
+    output(iterator_valid(&cleared))
+    return 0
+}

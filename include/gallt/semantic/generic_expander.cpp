@@ -103,12 +103,25 @@ namespace gallt {
     };
 
     GenericExpander::GenericExpander(DiagnosticEngine& diag, NamespaceLowering& namespaces,
-        std::optional<std::uint64_t> instantiation_depth)
+        std::optional<std::uint64_t> instantiation_depth,
+        std::optional<std::uint64_t> constexpr_max_steps,
+        std::optional<std::uint64_t> constexpr_max_integer_exponent)
         : diag_(diag)
         , namespaces_(namespaces) {
         if (instantiation_depth.has_value() && *instantiation_depth > 0) {
             instantiation_depth_limit_ =
                 static_cast<std::size_t>(*instantiation_depth);
+        }
+
+        if (constexpr_max_steps.has_value() && *constexpr_max_steps > 0) {
+            constexpr_max_steps_ =
+                static_cast<std::size_t>(*constexpr_max_steps);
+        }
+
+        if (constexpr_max_integer_exponent.has_value() &&
+            *constexpr_max_integer_exponent > 0) {
+            constexpr_max_integer_exponent_ =
+                *constexpr_max_integer_exponent;
         }
     }
 
@@ -552,7 +565,7 @@ namespace gallt {
                 struct_defs_[sd->name] = sd;
                 declare_name(sd->name);
             } else if (auto* fd = dynamic_cast<FunctionDefinition*>(top.get())) {
-                func_defs_[fd->name] = fd;
+                register_function_definition(fd);
                 declare_name(fd->name);
             } else if (auto* ed = dynamic_cast<ExternDeclaration*>(top.get())) {
                 extern_defs_[ed->name] = ed;
@@ -564,6 +577,18 @@ namespace gallt {
             }
         }
         (void)scan_top;
+    }
+
+    void GenericExpander::register_function_definition(
+        FunctionDefinition* function) {
+        if (function == nullptr) { return; }
+
+        std::vector<FunctionDefinition*>& candidates =
+            func_defs_[function->name];
+        if (std::find(candidates.begin(), candidates.end(), function) ==
+            candidates.end()) {
+            candidates.push_back(function);
+        }
     }
 
     std::optional<std::string> GenericExpander::ensure_instantiation(const GenericRef& ref,
@@ -1010,18 +1035,22 @@ namespace gallt {
 
         std::unordered_map<std::string, std::string> member_types;
         std::unordered_map<std::string, std::string> member_functions;
+        auto instantiated_name = [&](const std::string& name) {
+            if (name.find('$') != std::string::npos) { return name; }
+            return instance_key + "$" + name;
+        };
 
         for (TopLevel* member : block_member_ptrs) {
             if (auto* sd = dynamic_cast<StructDefinition*>(member)) {
-                std::string mangled = instance_key + "$" + sd->name;
+                std::string mangled = instantiated_name(sd->name);
                 member_types[sd->name] = mangled;
                 sub.types[sd->name] = Type::make_struct(mangled);
                 sub.members[sd->name] = mangled;
             } else if (auto* fd = dynamic_cast<FunctionDefinition*>(member)) {
-                member_functions[fd->name] = instance_key + "$" + fd->name;
-                sub.members[fd->name] = instance_key + "$" + fd->name;
+                member_functions[fd->name] = instantiated_name(fd->name);
+                sub.members[fd->name] = instantiated_name(fd->name);
             } else if (auto* vd = dynamic_cast<VariableDeclaration*>(member)) {
-                sub.members[vd->name] = instance_key + "$" + vd->name;
+                sub.members[vd->name] = instantiated_name(vd->name);
             }
         }
 
@@ -1032,13 +1061,15 @@ namespace gallt {
                 if (auto* sd = dynamic_cast<StructDefinition*>(member)) {
                     if (!member_name.empty() && sd->name != member_name) { continue; }
 
-                    std::string mangled = instance_key + "$" + sd->name;
+                    std::string mangled = instantiated_name(sd->name);
 
                     if (instantiated_members_.insert(mangled).second) {
                         auto clone = std::make_unique<StructDefinition>(sd->location, mangled,
                             std::vector<StructDefinition::Member>{});
                         clone->no_copy = sd->no_copy;
                         clone->no_move = sd->no_move;
+
+                        instantiation_parent_targets_.push_back(mangled);
 
                         for (const auto& m : sd->members) {
                             clone->members.push_back(clone_member(m, sub));
@@ -1048,6 +1079,9 @@ namespace gallt {
                             clone->special_members.push_back(clone_special_member(special.get(),
                                 sub));
                         }
+
+                        instantiation_parent_targets_.pop_back();
+                        drain_deferred_instantiations();
 
                         StructDefinition* raw = clone.get();
                         struct_defs_[mangled] = raw;
@@ -1068,7 +1102,7 @@ namespace gallt {
                     }
                 } else if (auto* fd = dynamic_cast<FunctionDefinition*>(member)) {
                     if (!member_name.empty() && fd->name != member_name) { continue; }
-                    std::string mangled = instance_key + "$" + fd->name;
+                    std::string mangled = instantiated_name(fd->name);
                     std::string member_key = mangled + "(";
 
                     for (const Type& p : fd->parameters) {
@@ -1078,8 +1112,11 @@ namespace gallt {
                     member_key += ")";
 
                     if (instantiated_members_.insert(member_key).second) {
+                        instantiation_parent_targets_.push_back(mangled);
                         auto clone = clone_function(fd, sub, mangled);
-                        func_defs_[mangled] = clone.get();
+                        instantiation_parent_targets_.pop_back();
+                        drain_deferred_instantiations();
+                        register_function_definition(clone.get());
                         add_top_level(std::move(clone));
                     }
 
@@ -1100,11 +1137,14 @@ namespace gallt {
                     }
                 } else if (auto* vd = dynamic_cast<VariableDeclaration*>(member)) {
                     if (!member_name.empty() && vd->name != member_name) { continue; }
-                    std::string mangled = instance_key + "$" + vd->name;
+                    std::string mangled = instantiated_name(vd->name);
 
                     if (instantiated_members_.insert(mangled).second) {
+                        instantiation_parent_targets_.push_back(mangled);
                         std::unique_ptr<Statement> cloned_statement =
                             clone_statement(vd, sub);
+                        instantiation_parent_targets_.pop_back();
+                        drain_deferred_instantiations(true);
                         auto* cloned_variable = dynamic_cast<VariableDeclaration*>(
                             cloned_statement.get());
                         auto* cloned_top_level = dynamic_cast<TopLevel*>(
@@ -1200,6 +1240,123 @@ namespace gallt {
         }
 
         return target;
+    }
+
+    bool GenericExpander::defer_instantiation_dependency(
+        const GenericRef& ref) {
+        if (instantiation_depth_ == 0 || ref.member.empty()) {
+            return false;
+        }
+
+        const std::size_t depth = instantiation_depth_ + 1;
+
+        if (depth > instantiation_depth_limit_) {
+            if (!instantiation_depth_reported_) {
+                instantiation_depth_reported_ = true;
+                report(ref.location, ErrorCode::InstantiationDepthTooDeep,
+                    std::vector<std::string>{
+                        std::to_string(instantiation_depth_limit_),
+                        std::to_string(depth) });
+            }
+
+            return true;
+        }
+
+        const std::string key = ref.mangle();
+
+        if (queued_deferred_instantiations_.insert(key).second) {
+            deferred_instantiations_.push_back(
+                DeferredInstantiation{
+                    ref,
+                    instantiation_parent_targets_.empty()
+                        ? std::string()
+                        : instantiation_parent_targets_.back(),
+                    depth });
+        }
+
+        return true;
+    }
+
+    void GenericExpander::drain_deferred_instantiations(bool force) {
+        if (draining_deferred_instantiations_ && !force) { return; }
+
+        const bool was_draining = draining_deferred_instantiations_;
+        draining_deferred_instantiations_ = true;
+        const std::size_t base_frame_count =
+            deferred_instantiation_frames_.size();
+
+        if (!deferred_instantiations_.empty()) {
+            deferred_instantiation_frames_.push_back(
+                DeferredInstantiationFrame{
+                    std::move(deferred_instantiations_), 0 });
+            deferred_instantiations_.clear();
+        }
+
+        while (deferred_instantiation_frames_.size() >
+            base_frame_count) {
+            DeferredInstantiationFrame& frame =
+                deferred_instantiation_frames_.back();
+
+            if (frame.next >= frame.tasks.size()) {
+                deferred_instantiation_frames_.pop_back();
+                continue;
+            }
+
+            DeferredInstantiation pending =
+                std::move(frame.tasks[frame.next++]);
+            queued_deferred_instantiations_.erase(
+                pending.reference.mangle());
+
+            const std::size_t previous_depth = instantiation_depth_;
+            instantiation_depth_ = pending.depth - 1;
+            const std::size_t output_begin =
+                output_ != nullptr ? output_->size() : 0;
+            ensure_instantiation(pending.reference, false);
+            instantiation_depth_ = previous_depth;
+
+            if (output_ != nullptr && output_begin < output_->size() &&
+                !pending.parent_target.empty()) {
+                std::size_t parent_index = output_->size();
+
+                for (std::size_t i = output_begin; i > 0; --i) {
+                    TopLevel* node = (*output_)[i - 1].get();
+                    std::string name;
+
+                    if (auto* sd = dynamic_cast<StructDefinition*>(node)) {
+                        name = sd->name;
+                    } else if (auto* fd = dynamic_cast<FunctionDefinition*>(node)) {
+                        name = fd->name;
+                    } else if (auto* vd = dynamic_cast<VariableDeclaration*>(node)) {
+                        name = vd->name;
+                    }
+
+                    if (name == pending.parent_target) {
+                        parent_index = i - 1;
+                        break;
+                    }
+                }
+
+                if (parent_index < output_begin) {
+                    std::rotate(output_->begin() + parent_index,
+                        output_->begin() + output_begin, output_->end());
+                }
+            }
+
+            if (!deferred_instantiations_.empty()) {
+                deferred_instantiation_frames_.push_back(
+                    DeferredInstantiationFrame{
+                        std::move(deferred_instantiations_), 0 });
+                deferred_instantiations_.clear();
+            }
+
+            if (stack_probe_triggered_) {
+                deferred_instantiation_frames_.resize(base_frame_count);
+                deferred_instantiations_.clear();
+                break;
+            }
+        }
+
+        draining_deferred_instantiations_ = was_draining;
     }
 
     bool GenericExpander::process_compile_time_items(
@@ -1751,7 +1908,7 @@ namespace gallt {
                 return false;
             }
 
-            owner_.func_defs_[node->name] = node;
+            owner_.register_function_definition(node);
             owner_.resolve_type(node->return_type, node->location);
 
             for (Type& parameter : node->parameters) {
@@ -1937,6 +2094,11 @@ namespace gallt {
         program_ = program;
         had_error_ = false;
         poisoned_.clear();
+        deferred_instantiations_.clear();
+        deferred_instantiation_frames_.clear();
+        queued_deferred_instantiations_.clear();
+        instantiation_parent_targets_.clear();
+        draining_deferred_instantiations_ = false;
         push_scope();
         collect_declarations();
         collect_generics();
@@ -1970,9 +2132,11 @@ namespace gallt {
             }
             if (auto* inst = dynamic_cast<InstantiationStatement*>(top.get())) {
                 ensure_instantiation(inst->reference, inst->reference.member.empty());
+                drain_deferred_instantiations();
                 continue;
             }
             expand_top_level(top.get());
+            drain_deferred_instantiations();
             output.push_back(std::move(top));
         }
         output_ = nullptr;

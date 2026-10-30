@@ -3,7 +3,7 @@
 // yes
 // 4
 
-const int square(int x) {
+int square(int x) const {
     return x * x
 }
 int main() {

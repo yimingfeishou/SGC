@@ -13,11 +13,11 @@ namespace gallt {
         case TypeKind::Array:
             return type.element_type ? type_is_copyable(*type.element_type) : true;
         case TypeKind::Struct: {
-            auto it = struct_by_name_.find(type.struct_name);
-            if (it == struct_by_name_.end() || it->second == nullptr) { return true; }
-            if (it->second->no_copy) { return false; }
+            const AST::StructDefinition* def = lookup_struct_definition(type);
+            if (def == nullptr) { return true; }
+            if (def->no_copy) { return false; }
 
-            for (const auto& member : it->second->members) {
+            for (const auto& member : def->members) {
                 if (!type_is_copyable(member.type)) { return false; }
             }
 
@@ -33,11 +33,11 @@ namespace gallt {
         case TypeKind::Array:
             return type.element_type ? type_is_movable(*type.element_type) : true;
         case TypeKind::Struct: {
-            auto it = struct_by_name_.find(type.struct_name);
-            if (it == struct_by_name_.end() || it->second == nullptr) { return true; }
-            if (it->second->no_move) { return false; }
+            const AST::StructDefinition* def = lookup_struct_definition(type);
+            if (def == nullptr) { return true; }
+            if (def->no_move) { return false; }
 
-            for (const auto& member : it->second->members) {
+            for (const auto& member : def->members) {
                 if (!type_is_movable(member.type)) { return false; }
             }
 
@@ -91,9 +91,8 @@ namespace gallt {
         }
 
         if (type.kind == TypeKind::Struct) {
-            auto it = struct_by_name_.find(type.struct_name);
-            if (it != struct_by_name_.end() && it->second != nullptr) {
-                const AST::StructDefinition* def = it->second;
+            const AST::StructDefinition* def = lookup_struct_definition(type);
+            if (def != nullptr) {
                 const std::string& user_fn = is_assignment ? def->copy_assignment_name
                                                            : def->copy_constructor_name;
 
@@ -162,9 +161,9 @@ namespace gallt {
         }
 
         if (type.kind == TypeKind::Struct) {
-            auto it = struct_by_name_.find(type.struct_name);
-            if (it != struct_by_name_.end() && it->second != nullptr) {
-                const AST::StructDefinition* def = it->second;
+            const AST::StructDefinition* def =
+                lookup_struct_definition(type.struct_name);
+            if (def != nullptr) {
                 const std::string& user_fn = is_assignment ? def->move_assignment_name
                                                            : def->move_constructor_name;
 
@@ -282,18 +281,19 @@ namespace gallt {
         }
 
         if (type.kind == TypeKind::Struct) {
-            auto it = struct_by_name_.find(type.struct_name);
-            if (it != struct_by_name_.end() && it->second != nullptr) {
+            const AST::StructDefinition* def =
+                lookup_struct_definition(type.struct_name);
+            if (def != nullptr) {
                 std::string ir = llvm_type(type);
 
-                for (std::size_t i = 0; i < it->second->members.size(); ++i) {
+                for (std::size_t i = 0; i < def->members.size(); ++i) {
                     std::string field_dst = new_temp("dc_field_dst");
                     std::string field_src = new_temp("dc_field_src");
                     emit_line(field_dst + " = getelementptr " + ir + ", ptr " + dst +
                         ", i32 0, i32 " + std::to_string(i));
                     emit_line(field_src + " = getelementptr " + ir + ", ptr " + src +
                         ", i32 0, i32 " + std::to_string(i));
-                    emit_deep_copy(it->second->members[i].type, field_dst, field_src);
+                    emit_deep_copy(def->members[i].type, field_dst, field_src);
                 }
 
                 return;
@@ -323,10 +323,14 @@ namespace gallt {
     bool CodeGenerator::type_needs_cleanup(const AST::Type& type) {
         if (type_contains_string(type)) { return true; }
 
+        if (type.kind == TypeKind::Array && type.element_type) {
+            return type_needs_cleanup(*type.element_type);
+        }
+
         if (type.kind == TypeKind::Struct) {
-            auto it = struct_by_name_.find(type.struct_name);
-            return it != struct_by_name_.end() && it->second != nullptr &&
-                it->second->needs_destruction;
+            const AST::StructDefinition* def =
+                lookup_struct_definition(type.struct_name);
+            return def != nullptr && def->needs_destruction;
         }
 
         return false;
@@ -451,9 +455,8 @@ namespace gallt {
         std::string source_address = operand_address(source_expr, &source_type);
         if (source_address.empty()) { return; }
 
-        AST::StructDefinition* def = nullptr;
-        auto struct_it = struct_by_name_.find(type.struct_name);
-        if (struct_it != struct_by_name_.end()) { def = struct_it->second; }
+        AST::StructDefinition* def = const_cast<AST::StructDefinition*>(
+            lookup_struct_definition(type));
 
         if (is_move && def != nullptr && !def->move_constructor_name.empty()) {
             std::string callee = function_reference(def->move_constructor_name);
@@ -485,33 +488,36 @@ namespace gallt {
     std::string CodeGenerator::lifecycle_symbol(const AST::StructDefinition* def,
         LifecycleKind kind) const {
         if (def == nullptr) { return std::string(); }
+        std::string suffix = def->name;
+        auto ir_name = struct_ir_names_.find(def);
+        if (ir_name != struct_ir_names_.end()) { suffix = ir_name->second; }
         switch (kind) {
         case LifecycleKind::Constructor:
             return def->constructor_names.empty()
-                ? ("__sgc_ctor$" + def->name) : std::string();
+                ? ("__sgc_ctor$" + suffix) : std::string();
         case LifecycleKind::Destructor:
             return def->destructor_name.empty()
-                ? ("__sgc_dtor$" + def->name) : std::string();
+                ? ("__sgc_dtor$" + suffix) : std::string();
         case LifecycleKind::CopyConstructor:
             if (def->no_copy || ast_function_exists(def->copy_constructor_name)) {
                 return std::string();
             }
-            return "__sgc_copyctor$" + def->name;
+            return "__sgc_copyctor$" + suffix;
         case LifecycleKind::MoveConstructor:
             if (def->no_move || ast_function_exists(def->move_constructor_name)) {
                 return std::string();
             }
-            return "__sgc_movector$" + def->name;
+            return "__sgc_movector$" + suffix;
         case LifecycleKind::CopyAssignment:
             if (def->no_copy || ast_function_exists(def->copy_assignment_name)) {
                 return std::string();
             }
-            return "__sgc_copyassign$" + def->name;
+            return "__sgc_copyassign$" + suffix;
         case LifecycleKind::MoveAssignment:
             if (def->no_move || ast_function_exists(def->move_assignment_name)) {
                 return std::string();
             }
-            return "__sgc_moveassign$" + def->name;
+            return "__sgc_moveassign$" + suffix;
         }
         return std::string();
     }
@@ -575,9 +581,9 @@ namespace gallt {
 
     void CodeGenerator::require_lifecycle_functions(const AST::Type& type) {
         if (type.kind == TypeKind::Struct) {
-            auto it = struct_by_name_.find(type.struct_name);
-            if (it != struct_by_name_.end()) {
-                require_lifecycle_functions(it->second);
+            const AST::StructDefinition* def = lookup_struct_definition(type);
+            if (def != nullptr) {
+                require_lifecycle_functions(def);
             }
             return;
         }
@@ -607,6 +613,7 @@ namespace gallt {
         struct_scopes_.clear();
         struct_name_scopes_.clear();
         push_scope();
+        struct_scopes_.back()[def->name] = def;
         emitted_labels_.clear();
         current_label_.clear();
         break_labels_.clear();
@@ -641,7 +648,7 @@ namespace gallt {
         case LifecycleKind::Destructor: {
             const std::string ir = llvm_type(struct_type);
 
-            for (std::size_t i = 0; i < def->members.size(); ++i) {
+            for (std::size_t i = def->members.size(); i-- > 0;) {
                 std::string field = new_temp("dtor_field");
                 emit_line(field + " = getelementptr " + ir + ", ptr %this, i32 0, i32 " +
                     std::to_string(i));

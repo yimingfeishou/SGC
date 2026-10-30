@@ -15,10 +15,6 @@ namespace gallt {
 
     namespace {
 
-        constexpr std::size_t kMaxCallDepth = 48;
-        constexpr std::size_t kMaxSteps = 200000;
-        constexpr long long kMaxIntegerExponent = 64;
-
         bool decode_escaped_text(std::string_view lexeme, char quote,
             std::string& out) {
             if (is_literal_string_lexeme(lexeme)) {
@@ -162,6 +158,16 @@ namespace gallt {
             return std::string();
         }
 
+        bool is_string_builtin_name(std::string_view name) {
+            return name == "strlen" || name == "strconcat" ||
+                name == "strcopy" || name == "strcompare" ||
+                name == "strcontains" || name == "strsubstr" ||
+                name == "strfind" || name == "strreplace" ||
+                name == "strupper" || name == "strlower" ||
+                name == "strtrim" || name == "strcharat" ||
+                name == "strsplitcount" || name == "strsplitget";
+        }
+
     }
 
     ConstexprValue ConstexprValue::invalid() {
@@ -250,7 +256,7 @@ namespace gallt {
     }
 
     bool ConstexprInterpreter::step() {
-        if (steps_ >= kMaxSteps) {
+        if (steps_ >= max_steps_) {
             return fail(ConstexprFailure::LimitExceeded);
         }
         ++steps_;
@@ -584,7 +590,8 @@ namespace gallt {
             result = a % b;
             break;
         case ArithmeticOp::Power: {
-            if (b < 0 || b > kMaxIntegerExponent) {
+            if (b < 0 || static_cast<std::uint64_t>(b) >
+                max_integer_exponent_) {
                 return fail(ConstexprFailure::Unsupported);
             }
             result = 1;
@@ -779,59 +786,76 @@ namespace gallt {
 
     bool ConstexprInterpreter::call(const AST::FunctionDefinition* function,
         const std::vector<ConstexprValue>& arguments, ConstexprValue& out) {
-        if (function == nullptr || function->body == nullptr) {
-            return fail(ConstexprFailure::Unsupported);
-        }
+        const AST::FunctionDefinition* current_function = function;
+        std::vector<ConstexprValue> current_arguments = arguments;
 
-        if (call_depth_ >= kMaxCallDepth) {
-            return fail(ConstexprFailure::LimitExceeded);
-        }
-
-        if (call_depth_ == 0) {
-            scopes_.clear();
-            steps_ = 0;
-        }
-
-        ++call_depth_;
-        scopes_.emplace_back();
-
-        for (std::size_t i = 0; i < function->parameters.size(); ++i) {
-            const std::string name = i < function->param_names.size()
-                ? function->param_names[i] : std::string();
-            if (name.empty()) { continue; }
-
-            ConstexprValue converted;
-            if (i >= arguments.size() ||
-                !coerce(arguments[i], function->parameters[i], converted)) {
-                scopes_.pop_back();
-                --call_depth_;
+        while (true) {
+            if (current_function == nullptr || current_function->body == nullptr) {
                 return fail(ConstexprFailure::Unsupported);
             }
 
-            scopes_.back()[name] = std::move(converted);
-        }
+            if (call_depth_ >= call_depth_limit_) {
+                return fail(ConstexprFailure::LimitExceeded);
+            }
 
-        Control control = exec_statement(function->body.get());
-        scopes_.pop_back();
-        --call_depth_;
+            if (call_depth_ == 0) {
+                scopes_.clear();
+                steps_ = 0;
+            }
 
-        if (failure_ != ConstexprFailure::None) { return false; }
+            ++call_depth_;
+            scopes_.emplace_back();
 
-        if (control.kind == Control::Kind::Return) {
-            ConstexprValue converted;
-            if (coerce(control.value, function->return_type, converted)) {
-                out = std::move(converted);
+            for (std::size_t i = 0; i < current_function->parameters.size(); ++i) {
+                const std::string name = i < current_function->param_names.size()
+                    ? current_function->param_names[i] : std::string();
+                if (name.empty()) { continue; }
+
+                ConstexprValue converted;
+                if (i >= current_arguments.size() ||
+                    !coerce(current_arguments[i],
+                        current_function->parameters[i], converted)) {
+                    scopes_.pop_back();
+                    --call_depth_;
+                    return fail(ConstexprFailure::Unsupported);
+                }
+
+                scopes_.back()[name] = std::move(converted);
+            }
+
+            Control control = exec_statement(current_function->body.get());
+            scopes_.pop_back();
+
+            if (failure_ != ConstexprFailure::None) {
+                --call_depth_;
+                return false;
+            }
+
+            if (control.kind == Control::Kind::TailCall) {
+                current_function = control.tail_function;
+                current_arguments = std::move(control.tail_arguments);
+                continue;
+            }
+
+            --call_depth_;
+
+            if (control.kind == Control::Kind::Return) {
+                ConstexprValue converted;
+                if (coerce(control.value, current_function->return_type,
+                    converted)) {
+                    out = std::move(converted);
+                    return true;
+                }
+                return fail(ConstexprFailure::Unsupported);
+            }
+
+            if (current_function->return_type.kind == TypeKind::Void) {
+                out = ConstexprValue::make_void();
                 return true;
             }
+
             return fail(ConstexprFailure::Unsupported);
         }
-
-        if (function->return_type.kind == TypeKind::Void) {
-            out = ConstexprValue::make_void();
-            return true;
-        }
-
-        return fail(ConstexprFailure::Unsupported);
     }
 
     bool ConstexprInterpreter::eval(const AST::Expression* expr,
@@ -1250,12 +1274,7 @@ namespace gallt {
             arguments.push_back(std::move(value));
         }
 
-        if (name == "strlen" || name == "strconcat" || name == "strcopy" ||
-            name == "strcompare" || name == "strcontains" ||
-            name == "strsubstr" || name == "strfind" || name == "strreplace" ||
-            name == "strupper" || name == "strlower" || name == "strtrim" ||
-            name == "strcharat" || name == "strsplitcount" ||
-            name == "strsplitget") {
+        if (is_string_builtin_name(name)) {
             return eval_string_builtin(name, arguments, out);
         }
 
@@ -1263,6 +1282,40 @@ namespace gallt {
             ? host_.resolve_function(name, arguments) : nullptr;
         if (function == nullptr) { return fail(ConstexprFailure::Unsupported); }
         return this->call(function, arguments, out);
+    }
+
+    bool ConstexprInterpreter::prepare_tail_call(
+        const AST::PostfixExpression* call,
+        const AST::FunctionDefinition*& function,
+        std::vector<ConstexprValue>& arguments) {
+        if (call == nullptr ||
+            call->op != PostfixExpression::Operator::FunctionCall) {
+            return false;
+        }
+
+        const std::string name = display_text_of(call->base.get());
+        if (name.empty() || name == "size" || name == "align" ||
+            is_string_builtin_name(name)) {
+            return false;
+        }
+
+        arguments.clear();
+        arguments.reserve(call->arguments.size());
+
+        for (const auto& argument : call->arguments) {
+            ConstexprValue value;
+            if (!eval(argument.get(), value)) { return false; }
+            arguments.push_back(std::move(value));
+        }
+
+        function = host_.resolve_function
+            ? host_.resolve_function(name, arguments) : nullptr;
+
+        if (function == nullptr) {
+            return fail(ConstexprFailure::Unsupported);
+        }
+
+        return true;
     }
 
     bool ConstexprInterpreter::eval_string_builtin(const std::string& name,
@@ -1609,6 +1662,11 @@ namespace gallt {
             return exec_while(statement);
         }
 
+        if (auto* statement =
+            dynamic_cast<const SwitchCaseStatement*>(stmt)) {
+            return exec_switch(statement);
+        }
+
         if (dynamic_cast<const EmptyStatement*>(stmt) != nullptr) {
             return control;
         }
@@ -1618,10 +1676,38 @@ namespace gallt {
             return control;
         }
 
+        if (dynamic_cast<const ContinueStatement*>(stmt) != nullptr) {
+            control.kind = Control::Kind::Continue;
+            return control;
+        }
+
+        if (dynamic_cast<const FallthroughStatement*>(stmt) != nullptr) {
+            control.kind = Control::Kind::Fallthrough;
+            return control;
+        }
+
         if (auto* statement = dynamic_cast<const ReturnStatement*>(stmt)) {
             control.kind = Control::Kind::Return;
 
             if (statement->value != nullptr) {
+                if (auto* call = dynamic_cast<const PostfixExpression*>(
+                    statement->value.get())) {
+                    const AST::FunctionDefinition* function = nullptr;
+                    std::vector<ConstexprValue> arguments;
+
+                    if (prepare_tail_call(call, function, arguments)) {
+                        control.kind = Control::Kind::TailCall;
+                        control.tail_function = function;
+                        control.tail_arguments = std::move(arguments);
+                        return control;
+                    }
+
+                    if (failure_ != ConstexprFailure::None) {
+                        control.kind = Control::Kind::Break;
+                        return control;
+                    }
+                }
+
                 if (!eval(statement->value.get(), control.value)) {
                     control.kind = Control::Kind::Break;
                 }
@@ -1745,6 +1831,9 @@ namespace gallt {
                 control.kind = Control::Kind::Normal;
                 break;
             }
+            if (control.kind == Control::Kind::Continue) {
+                control.kind = Control::Kind::Normal;
+            }
             if (control.kind == Control::Kind::Return) { break; }
 
             if (stmt->step != nullptr) {
@@ -1793,9 +1882,93 @@ namespace gallt {
                 control.kind = Control::Kind::Normal;
                 break;
             }
+            if (control.kind == Control::Kind::Continue) {
+                control.kind = Control::Kind::Normal;
+                continue;
+            }
             if (control.kind == Control::Kind::Return) { break; }
         }
 
+        return control;
+    }
+
+    ConstexprInterpreter::Control ConstexprInterpreter::exec_switch(
+        const SwitchCaseStatement* stmt) {
+        Control control;
+        if (stmt == nullptr || stmt->condition == nullptr) {
+            return control;
+        }
+
+        ConstexprValue switch_value;
+        if (!eval(stmt->condition.get(), switch_value)) {
+            control.kind = Control::Kind::Break;
+            return control;
+        }
+
+        std::size_t entry = stmt->clauses.size();
+
+        for (std::size_t i = 0; i < stmt->clauses.size(); ++i) {
+            const SwitchCaseStatement::Clause& clause = stmt->clauses[i];
+            if (clause.is_default) { continue; }
+
+            ConstexprValue case_value;
+            if (!eval(clause.condition.get(), case_value)) {
+                control.kind = Control::Kind::Break;
+                return control;
+            }
+
+            ConstexprValue equal;
+            if (!apply_comparison(
+                CompareOp::Equal, switch_value, case_value, equal)) {
+                control.kind = Control::Kind::Break;
+                return control;
+            }
+
+            if (equal.as_bool()) {
+                entry = i;
+                break;
+            }
+        }
+
+        if (entry == stmt->clauses.size()) {
+            for (std::size_t i = 0; i < stmt->clauses.size(); ++i) {
+                if (stmt->clauses[i].is_default) {
+                    entry = i;
+                    break;
+                }
+            }
+        }
+
+        if (entry == stmt->clauses.size()) { return control; }
+
+        for (std::size_t i = entry; i < stmt->clauses.size(); ++i) {
+            scopes_.emplace_back();
+            bool fallthrough = false;
+
+            for (const auto& statement : stmt->clauses[i].statements) {
+                control = exec_statement(statement.get());
+                if (control.kind == Control::Kind::Fallthrough) {
+                    fallthrough = true;
+                    control.kind = Control::Kind::Normal;
+                    break;
+                }
+                if (control.kind != Control::Kind::Normal ||
+                    failure_ != ConstexprFailure::None) {
+                    break;
+                }
+            }
+
+            scopes_.pop_back();
+            if (control.kind != Control::Kind::Normal ||
+                failure_ != ConstexprFailure::None ||
+                !fallthrough) {
+                break;
+            }
+        }
+
+        if (control.kind == Control::Kind::Break) {
+            control.kind = Control::Kind::Normal;
+        }
         return control;
     }
 

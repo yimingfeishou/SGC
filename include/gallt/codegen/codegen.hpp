@@ -158,6 +158,8 @@ namespace gallt {
         std::string struct_type_name(const AST::StructDefinition* def) const;
         const AST::StructDefinition* lookup_struct_definition(
             const std::string& name) const;
+        const AST::StructDefinition* lookup_struct_definition(
+            const AST::Type& type) const;
 
         void collect_structs();
         void collect_structs_in_statement(AST::Statement* stmt);

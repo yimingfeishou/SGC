@@ -459,6 +459,8 @@ namespace gallt {
         if (name == "filereadline") {
             if (argc != 1) { return bail_out(); }
             std::string storage = emit_alloca("%struct.gallt.string", "fileline");
+            emit_line("call void @llvm.memset.p0.i64(ptr " + storage +
+                ", i8 0, i64 32, i1 false)");
             emit_line("call void @gallt_file_readline(ptr " + storage + ", ptr " +
                 pointer_operand(args[0]) + ")");
             out.value = storage;
@@ -845,9 +847,10 @@ namespace gallt {
                     } else if (id == "void") {
                         target = Type::make_void();
                     } else {
-                        auto sit = struct_by_name_.find(id);
-                        if (sit != struct_by_name_.end()) {
+                        auto found = struct_by_name_.find(id);
+                        if (found != struct_by_name_.end() && found->second != nullptr) {
                             target = Type::make_struct(id);
+                            target.resolved_struct = found->second;
                         }
                     }
 
@@ -861,6 +864,7 @@ namespace gallt {
         if (!resolved) {
             ExprValue v = gen_expr(arg);
             target = v.type;
+            destroy_owned_string(v);
         }
 
         if (target.kind == TypeKind::Void) {

@@ -1,0 +1,31 @@
+// lang__const_fn__pass__009.glt
+// expect output
+// 38
+
+int calculate(int selector) const {
+    int total = 0
+    for (int i = 0; i < 5; i++) {
+        if (i == 2) {
+            continue
+        }
+        total += i
+    }
+    switch (selector) {
+        case (1) {
+            total += 10
+            fallthrough
+        }
+        case (2) {
+            total += 20
+        }
+    }
+    return total
+}
+
+const int result = calculate(1)
+
+int main() {
+    int table[result]
+    output(size(table) / size(int), "\n")
+    return 0
+}

@@ -1,0 +1,24 @@
+// sl__generics__pass__010.glt
+// expect output
+// true 42 42 true | false -1 true | false | true alpha alpha true | false fallback true | false
+
+guide "generics.glt"
+access namespace sl
+
+int main() {
+    optional_generic<int>
+    optional number = some(42)
+    output(has_value(&number), " ", *value_ptr(&number), " ", value_or(&number, 0), " ", value_ptr(&number) != null, " | ")
+    optional missing = none()
+    output(has_value(&missing), " ", value_or(&missing, -1), " ", value_ptr(&missing) == null, " | ")
+    reset(&number)
+    output(has_value(&number), " | ")
+
+    optional_generic<string>.optional name = optional_generic<string>.some("alpha")
+    output(optional_generic<string>.has_value(&name), " ", *optional_generic<string>.value_ptr(&name), " ", optional_generic<string>.value_or(&name, "none"), " ", optional_generic<string>.value_ptr(&name) != null, " | ")
+    optional_generic<string>.optional absent = optional_generic<string>.none()
+    output(optional_generic<string>.has_value(&absent), " ", optional_generic<string>.value_or(&absent, "fallback"), " ", optional_generic<string>.value_ptr(&absent) == null, " | ")
+    optional_generic<string>.reset(&name)
+    output(optional_generic<string>.has_value(&name))
+    return 0
+}

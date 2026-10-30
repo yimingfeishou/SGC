@@ -2,7 +2,7 @@
 // expect output
 // 81
 
-const int first_power_over(int limit) {
+int first_power_over(int limit) const {
     int v = 1
     while (true) {
         if (v > limit) {

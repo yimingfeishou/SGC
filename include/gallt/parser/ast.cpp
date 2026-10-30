@@ -82,6 +82,14 @@ namespace gallt {
             case TypeKind::Error:
                 return true;
             case TypeKind::Array:
+                if (pack_projection != other.pack_projection) {
+                    return false;
+                }
+
+                if (pack_projection_index_text != other.pack_projection_index_text) {
+                    return false;
+                }
+
                 if (array_size.has_value() != other.array_size.has_value()) {
                     return false;
                 }
@@ -135,9 +143,8 @@ namespace gallt {
         }
 
         namespace {
-            std::string type_text(const Type& type, bool source_form) {
-                std::ostringstream out;
-
+            void append_type_text(const Type& type, bool source_form,
+                std::ostringstream& out) {
                 if (type.is_const) {
                     out << "const ";
                 }
@@ -158,22 +165,30 @@ namespace gallt {
                 case TypeKind::Error:  out << "error"; break;
                 case TypeKind::Array:
                     if (type.element_type) {
-                        out << type_text(*type.element_type, source_form);
+                        append_type_text(*type.element_type, source_form, out);
                     } else {
                         out << "?";
                     }
 
-                    out << '[';
+                    if (type.pack_projection == PackProjectionKind::First) {
+                        out << ".first";
+                    } else if (type.pack_projection == PackProjectionKind::Last) {
+                        out << ".last";
+                    } else {
+                        out << '[';
 
-                    if (type.array_size.has_value()) {
-                        out << *type.array_size;
+                        if (!type.pack_projection_index_text.empty()) {
+                            out << type.pack_projection_index_text;
+                        } else if (type.array_size.has_value()) {
+                            out << *type.array_size;
+                        }
+
+                        out << ']';
                     }
-
-                    out << ']';
                     break;
                 case TypeKind::Pointer:
                     if (type.pointee_type) {
-                        out << type_text(*type.pointee_type, source_form);
+                        append_type_text(*type.pointee_type, source_form, out);
                     } else {
                         out << "void";
                     }
@@ -191,7 +206,7 @@ namespace gallt {
                     break;
                 case TypeKind::Function:
                     if (type.return_type) {
-                        out << type_text(*type.return_type, source_form);
+                        append_type_text(*type.return_type, source_form, out);
                     } else {
                         out << "void";
                     }
@@ -203,7 +218,7 @@ namespace gallt {
                             out << ", ";
                         }
 
-                        out << type_text(type.parameter_types[i], source_form);
+                        append_type_text(type.parameter_types[i], source_form, out);
                     }
 
                     if (type.is_variadic) {
@@ -212,7 +227,8 @@ namespace gallt {
                         }
 
                         if (type.variadic_element_type) {
-                            out << type_text(*type.variadic_element_type, source_form);
+                            append_type_text(*type.variadic_element_type,
+                                source_form, out);
                         }
 
                         out << "...";
@@ -221,7 +237,11 @@ namespace gallt {
                     out << ")*";
                     break;
                 }
+            }
 
+            std::string type_text(const Type& type, bool source_form) {
+                std::ostringstream out;
+                append_type_text(type, source_form, out);
                 return out.str();
             }
         }

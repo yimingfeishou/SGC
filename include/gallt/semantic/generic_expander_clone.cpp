@@ -175,52 +175,87 @@ namespace gallt {
                     report(target->location, ErrorCode::GenericConstantParameterRuntimeUse, std::vector<std::string>{ target->identifier });
                 }
             }
+            std::unique_ptr<Expression> left =
+                clone_expression(e->left.get(), sub);
+            std::unique_ptr<Expression> right =
+                clone_expression(e->right.get(), sub);
             return std::make_unique<AssignmentExpression>(e->location,
-                clone_expression(e->left.get(), sub), e->op,
-                clone_expression(e->right.get(), sub));
+                std::move(left), e->op, std::move(right));
         }
         if (auto* e = dynamic_cast<const LogicalOrExpression*>(expr)) {
+            std::unique_ptr<Expression> left =
+                clone_expression(e->left.get(), sub);
+            std::unique_ptr<Expression> right =
+                clone_expression(e->right.get(), sub);
             return std::make_unique<LogicalOrExpression>(e->location,
-                clone_expression(e->left.get(), sub), clone_expression(e->right.get(), sub));
+                std::move(left), std::move(right));
         }
         if (auto* e = dynamic_cast<const LogicalAndExpression*>(expr)) {
+            std::unique_ptr<Expression> left =
+                clone_expression(e->left.get(), sub);
+            std::unique_ptr<Expression> right =
+                clone_expression(e->right.get(), sub);
             return std::make_unique<LogicalAndExpression>(e->location,
-                clone_expression(e->left.get(), sub), clone_expression(e->right.get(), sub));
+                std::move(left), std::move(right));
         }
         if (auto* e = dynamic_cast<const ComparisonExpression*>(expr)) {
+            std::unique_ptr<Expression> left =
+                clone_expression(e->left.get(), sub);
+            std::unique_ptr<Expression> right =
+                clone_expression(e->right.get(), sub);
             return std::make_unique<ComparisonExpression>(e->location,
-                clone_expression(e->left.get(), sub), e->op,
-                clone_expression(e->right.get(), sub));
+                std::move(left), e->op, std::move(right));
         }
         if (auto* e = dynamic_cast<const AdditiveExpression*>(expr)) {
+            std::unique_ptr<Expression> left =
+                clone_expression(e->left.get(), sub);
+            std::unique_ptr<Expression> right =
+                clone_expression(e->right.get(), sub);
             return std::make_unique<AdditiveExpression>(e->location,
-                clone_expression(e->left.get(), sub), e->op,
-                clone_expression(e->right.get(), sub));
+                std::move(left), e->op, std::move(right));
         }
         if (auto* e = dynamic_cast<const MultiplicativeExpression*>(expr)) {
+            std::unique_ptr<Expression> left =
+                clone_expression(e->left.get(), sub);
+            std::unique_ptr<Expression> right =
+                clone_expression(e->right.get(), sub);
             return std::make_unique<MultiplicativeExpression>(e->location,
-                clone_expression(e->left.get(), sub), e->op,
-                clone_expression(e->right.get(), sub));
+                std::move(left), e->op, std::move(right));
         }
         if (auto* e = dynamic_cast<const PowerExpression*>(expr)) {
+            std::unique_ptr<Expression> left =
+                clone_expression(e->left.get(), sub);
+            std::unique_ptr<Expression> right =
+                clone_expression(e->right.get(), sub);
             return std::make_unique<PowerExpression>(e->location,
-                clone_expression(e->left.get(), sub), clone_expression(e->right.get(), sub));
+                std::move(left), std::move(right));
         }
         if (auto* e = dynamic_cast<const BitwiseExpression*>(expr)) {
+            std::unique_ptr<Expression> left =
+                clone_expression(e->left.get(), sub);
+            std::unique_ptr<Expression> right =
+                clone_expression(e->right.get(), sub);
             return std::make_unique<BitwiseExpression>(e->location,
-                clone_expression(e->left.get(), sub), e->op,
-                clone_expression(e->right.get(), sub));
+                std::move(left), e->op, std::move(right));
         }
         if (auto* e = dynamic_cast<const ShiftExpression*>(expr)) {
+            std::unique_ptr<Expression> left =
+                clone_expression(e->left.get(), sub);
+            std::unique_ptr<Expression> right =
+                clone_expression(e->right.get(), sub);
             return std::make_unique<ShiftExpression>(e->location,
-                clone_expression(e->left.get(), sub), e->op,
-                clone_expression(e->right.get(), sub));
+                std::move(left), e->op, std::move(right));
         }
         if (auto* e = dynamic_cast<const ConditionalExpression*>(expr)) {
+            std::unique_ptr<Expression> condition =
+                clone_expression(e->condition.get(), sub);
+            std::unique_ptr<Expression> then_expr =
+                clone_expression(e->then_expr.get(), sub);
+            std::unique_ptr<Expression> else_expr =
+                clone_expression(e->else_expr.get(), sub);
             return std::make_unique<ConditionalExpression>(e->location,
-                clone_expression(e->condition.get(), sub),
-                clone_expression(e->then_expr.get(), sub),
-                clone_expression(e->else_expr.get(), sub));
+                std::move(condition), std::move(then_expr),
+                std::move(else_expr));
         }
         if (auto* e = dynamic_cast<const UnaryExpression*>(expr)) {
             if (e->op == UnaryExpression::Operator::AddressOf ||
@@ -277,6 +312,10 @@ namespace gallt {
                     return make_constant_literal(e->location,
                         ConstantValue{ 0LL, 0.0, false, false, std::string() });
                 }
+                if (sub.locals.count(e->identifier) != 0) {
+                    return std::make_unique<PrimaryExpression>(
+                        e->location, e->identifier);
+                }
                 auto found = sub.types.find(e->identifier);
                 if (found != sub.types.end()) {
                     return std::make_unique<PrimaryExpression>(e->location,
@@ -296,7 +335,9 @@ namespace gallt {
                     GenericRef dependency = sub.instance;
                     dependency.member = e->identifier;
                     dependency.location = e->location;
-                    ensure_instantiation(dependency, false);
+                    if (!defer_instantiation_dependency(dependency)) {
+                        ensure_instantiation(dependency, false);
+                    }
                     return std::make_unique<PrimaryExpression>(e->location, member->second);
                 }
                 for (auto it = short_scopes_.rbegin(); it != short_scopes_.rend(); ++it) {
@@ -306,11 +347,8 @@ namespace gallt {
                             report(e->location, ErrorCode::GenericShortNameAmbiguous,
                                 std::vector<std::string>{ e->identifier });
                         }
-                        if (binding->second.is_type) {
-                            return std::make_unique<PrimaryExpression>(e->location,
-                                binding->second.target);
-                        }
-                        break;
+                        return std::make_unique<PrimaryExpression>(e->location,
+                            binding->second.target);
                     }
                 }
                 {
@@ -336,6 +374,11 @@ namespace gallt {
                     substitute_generic_argument(arg, sub);
                 }
                 expand_pack_arguments(ref.arguments, sub, e->location);
+                if (defer_instantiation_dependency(ref)) {
+                    return std::make_unique<PrimaryExpression>(e->location,
+                        ref.mangle());
+                }
+
                 auto mangled = ensure_instantiation(ref, false);
                 if (mangled.has_value()) {
                     return std::make_unique<PrimaryExpression>(e->location, *mangled);
@@ -406,6 +449,7 @@ namespace gallt {
 
         if (auto* s = dynamic_cast<const Block*>(stmt)) {
             std::vector<std::unique_ptr<Statement>> statements;
+            Substitution block_sub = sub;
 
             for (std::size_t index = 0; index < s->statements.size();) {
                 std::vector<const EmitStatement*> emits;
@@ -425,7 +469,33 @@ namespace gallt {
                     continue;
                 }
 
-                statements.push_back(clone_substatement(s->statements[index].get(), sub));
+                if (auto* instantiation =
+                    dynamic_cast<const InstantiationStatement*>(
+                        s->statements[index].get())) {
+                    GenericRef reference = instantiation->reference;
+                    for (GenericArgument& argument : reference.arguments) {
+                        substitute_generic_argument(argument, sub);
+                    }
+                    expand_pack_arguments(reference.arguments, sub,
+                        instantiation->location);
+                    ensure_instantiation(reference,
+                        reference.member.empty());
+                    ++index;
+                    continue;
+                }
+
+                if (auto* declaration =
+                    dynamic_cast<const VariableDeclaration*>(
+                        s->statements[index].get())) {
+                    block_sub.locals.insert(declaration->name);
+                } else if (auto* definition =
+                    dynamic_cast<const StructDefinition*>(
+                        s->statements[index].get())) {
+                    block_sub.locals.insert(definition->name);
+                }
+
+                statements.push_back(
+                    clone_substatement(s->statements[index].get(), block_sub));
                 ++index;
             }
 
@@ -490,24 +560,43 @@ namespace gallt {
                 return std::make_unique<Block>(s->location, std::move(wrapped));
             }
 
+            std::unique_ptr<Expression> condition =
+                clone_expression(s->condition.get(), sub);
+            std::unique_ptr<Statement> then_block =
+                clone_substatement(s->then_block.get(), sub);
+            std::unique_ptr<Statement> else_block =
+                clone_substatement(s->else_block.get(), sub);
             return std::make_unique<IfStatement>(s->location,
-                clone_expression(s->condition.get(), sub),
-                clone_substatement(s->then_block.get(), sub),
-                clone_substatement(s->else_block.get(), sub));
+                std::move(condition), std::move(then_block),
+                std::move(else_block));
         }
 
         if (auto* s = dynamic_cast<const ForStatement*>(stmt)) {
+            Substitution loop_sub = sub;
+            if (auto* declaration =
+                dynamic_cast<const VariableDeclaration*>(s->init.get())) {
+                loop_sub.locals.insert(declaration->name);
+            }
+            std::unique_ptr<Statement> init =
+                clone_substatement(s->init.get(), loop_sub);
+            std::unique_ptr<Expression> condition =
+                clone_expression(s->condition.get(), loop_sub);
+            std::unique_ptr<Expression> step =
+                clone_expression(s->step.get(), loop_sub);
+            std::unique_ptr<Statement> body =
+                clone_substatement(s->body.get(), loop_sub);
             return std::make_unique<ForStatement>(s->location,
-                clone_substatement(s->init.get(), sub),
-                clone_expression(s->condition.get(), sub),
-                clone_expression(s->step.get(), sub),
-                clone_substatement(s->body.get(), sub));
+                std::move(init), std::move(condition), std::move(step),
+                std::move(body));
         }
 
         if (auto* s = dynamic_cast<const WhileStatement*>(stmt)) {
+            std::unique_ptr<Expression> condition =
+                clone_expression(s->condition.get(), sub);
+            std::unique_ptr<Statement> body =
+                clone_substatement(s->body.get(), sub);
             return std::make_unique<WhileStatement>(s->location,
-                clone_expression(s->condition.get(), sub),
-                clone_substatement(s->body.get(), sub));
+                std::move(condition), std::move(body));
         }
 
         if (auto* s = dynamic_cast<const SwitchCaseStatement*>(stmt)) {
@@ -516,12 +605,22 @@ namespace gallt {
 
             for (const SwitchCaseStatement::Clause& clause : s->clauses) {
                 SwitchCaseStatement::Clause copied;
+                Substitution clause_sub = sub;
                 copied.is_default = clause.is_default;
                 copied.condition = clone_expression(clause.condition.get(), sub);
                 copied.location = clause.location;
 
                 for (const std::unique_ptr<Statement>& child : clause.statements) {
-                    copied.statements.push_back(clone_substatement(child.get(), sub));
+                    if (auto* declaration =
+                        dynamic_cast<const VariableDeclaration*>(child.get())) {
+                        clause_sub.locals.insert(declaration->name);
+                    } else if (auto* definition =
+                        dynamic_cast<const StructDefinition*>(child.get())) {
+                        clause_sub.locals.insert(definition->name);
+                    }
+
+                    copied.statements.push_back(
+                        clone_substatement(child.get(), clause_sub));
                 }
 
                 clone->clauses.push_back(std::move(copied));
@@ -582,10 +681,15 @@ namespace gallt {
         }
 
         if (auto* s = dynamic_cast<const ConditionalBlock*>(stmt)) {
+            std::unique_ptr<Expression> condition =
+                clone_expression(s->condition.get(), sub);
+            std::unique_ptr<Statement> then_block =
+                clone_substatement(s->then_block.get(), sub);
+            std::unique_ptr<Statement> else_block =
+                clone_substatement(s->else_block.get(), sub);
             return std::make_unique<ConditionalBlock>(s->location,
-                clone_expression(s->condition.get(), sub),
-                clone_substatement(s->then_block.get(), sub),
-                clone_substatement(s->else_block.get(), sub));
+                std::move(condition), std::move(then_block),
+                std::move(else_block));
         }
 
         return nullptr;
@@ -593,12 +697,15 @@ namespace gallt {
 
     std::unique_ptr<FunctionDefinition> GenericExpander::clone_function(
         const FunctionDefinition* func, const Substitution& sub, const std::string& name) {
+        std::vector<std::string> param_names = func->param_names;
         Substitution body_sub = sub;
         register_local_struct_names(func->body.get(), body_sub);
+        for (const std::string& name : param_names) {
+            if (!name.empty()) { body_sub.locals.insert(name); }
+        }
         Type ret = Type::make_void();
         substitute_type(func->return_type, sub, ret);
         std::vector<Type> params;
-        std::vector<std::string> param_names = func->param_names;
         bool variadic = func->is_variadic;
         bool expanded_pack = false;
 
@@ -685,6 +792,9 @@ namespace gallt {
         const SpecialMemberFunction* member, const Substitution& sub) {
         Substitution body_sub = sub;
         register_local_struct_names(member->body.get(), body_sub);
+        if (!member->parameter_name.empty()) {
+            body_sub.locals.insert(member->parameter_name);
+        }
         auto clone = std::make_unique<SpecialMemberFunction>(member->location, member->kind);
         for (const Type& param : member->parameters) {
             Type substituted = Type::make_void();

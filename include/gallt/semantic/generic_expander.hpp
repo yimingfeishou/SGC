@@ -20,7 +20,10 @@ namespace gallt {
         static constexpr std::size_t kDefaultInstantiationDepth = 2048;
 
         GenericExpander(DiagnosticEngine& diag, NamespaceLowering& namespaces,
-            std::optional<std::uint64_t> instantiation_depth = std::nullopt);
+            std::optional<std::uint64_t> instantiation_depth = std::nullopt,
+            std::optional<std::uint64_t> constexpr_max_steps = std::nullopt,
+            std::optional<std::uint64_t> constexpr_max_integer_exponent =
+                std::nullopt);
 
         bool expand(AST::Program* program);
 
@@ -54,6 +57,7 @@ namespace gallt {
             std::unordered_map<std::string, AST::Type> const_pack_element;
             std::unordered_map<std::string, std::vector<std::string>>
                 fixed_pack_members;
+            std::unordered_set<std::string> locals;
             AST::GenericRef instance;
         };
 
@@ -64,17 +68,33 @@ namespace gallt {
             bool ambiguous = false;
         };
 
+        struct DeferredInstantiation {
+            AST::GenericRef reference;
+            std::string parent_target;
+            std::size_t depth = 0;
+        };
+
+        struct DeferredInstantiationFrame {
+            std::vector<DeferredInstantiation> tasks;
+            std::size_t next = 0;
+        };
+
         DiagnosticEngine& diag_;
         NamespaceLowering& namespaces_;
         AST::Program* program_ = nullptr;
 
         std::unordered_map<std::string, GenericEntry> generics_;
         std::unordered_map<std::string, AST::StructDefinition*> struct_defs_;
-        std::unordered_map<std::string, AST::FunctionDefinition*> func_defs_;
+        std::unordered_map<std::string, std::vector<AST::FunctionDefinition*>>
+            func_defs_;
         std::unordered_map<std::string, AST::ExternDeclaration*> extern_defs_;
         std::unordered_map<std::string, AST::StructDefinition*> instantiated_structs_;
         std::size_t instantiation_depth_limit_ = kDefaultInstantiationDepth;
         std::size_t instantiation_depth_ = 0;
+        std::size_t constexpr_max_steps_ =
+            ConstexprInterpreter::kDefaultMaxSteps;
+        std::uint64_t constexpr_max_integer_exponent_ =
+            ConstexprInterpreter::kDefaultMaxIntegerExponent;
         bool instantiation_depth_reported_ = false;
         bool stack_probe_triggered_ = false;
         const AST::FunctionDefinition* current_function_ = nullptr;
@@ -104,6 +124,11 @@ namespace gallt {
         std::deque<std::string> emit_source_pool_;
         std::unordered_map<std::string, std::string> instantiated_kind_signatures_;
         std::unordered_map<std::string, ConstexprValue> constant_member_values_;
+        std::vector<DeferredInstantiation> deferred_instantiations_;
+        std::vector<DeferredInstantiationFrame> deferred_instantiation_frames_;
+        std::unordered_set<std::string> queued_deferred_instantiations_;
+        std::vector<std::string> instantiation_parent_targets_;
+        bool draining_deferred_instantiations_ = false;
 
         bool had_error_ = false;
 
@@ -170,6 +195,8 @@ namespace gallt {
 
         std::optional<std::string> ensure_instantiation(const AST::GenericRef& ref,
             bool whole_block);
+        bool defer_instantiation_dependency(const AST::GenericRef& ref);
+        void drain_deferred_instantiations(bool force = false);
         void resolve_type(AST::Type& type, SourceLocation loc = SourceLocation{});
         bool substitute_type(const AST::Type& in, const Substitution& sub, AST::Type& out);
 
@@ -296,7 +323,9 @@ namespace gallt {
         bool constexpr_numeric_value(const AST::Expression* expr,
             const Substitution& sub, ConstantValue& out);
         const AST::FunctionDefinition* find_constexpr_function(
-            const std::string& name, std::size_t arity) const;
+            const std::string& name,
+            const std::vector<ConstexprValue>& arguments) const;
+        void register_function_definition(AST::FunctionDefinition* function);
         ConstexprInterpreter make_constexpr_interpreter(
             const Substitution& sub) const;
         bool eval_compile_time_condition(const AST::Expression* expr, const Substitution& sub,
@@ -306,6 +335,8 @@ namespace gallt {
         bool eval_bool_property(const AST::Expression* receiver, const std::string& property,
             const std::vector<const AST::Expression*>& args, const Substitution& sub,
             bool& out);
+        bool property_receiver_type(const AST::Expression* receiver,
+            const Substitution& sub, AST::Type& out, std::string& name);
         bool eval_size_align_property(const std::string& parameter, const std::string& property,
             const Substitution& sub, long long& out);
         bool param_type_of(const std::string& name, const Substitution& sub, AST::Type& out) const;
