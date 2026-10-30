@@ -1,3 +1,4 @@
 *.glt text eol=lf
 *.stdin text eol=lf
 tests/pass/compiler__encoding__pass__*.glt -text
+tests/error/compiler__encoding__error__*.glt -text

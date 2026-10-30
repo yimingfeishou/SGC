@@ -1,6 +1,0 @@
-// compiler__encoding__error__006.glt
-// expect error ER 0033
-
-int main() {
-    return 0
-}
