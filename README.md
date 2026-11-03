@@ -54,6 +54,8 @@ SGC_MSVC # Set the location of the SGC compiled with MSVC.
 - This is an early preview release. Some syntax and edge cases may still be incomplete or incorrect.
 - Temporary backend files are written to `%TEMP%` by default. Set `SGC_KEEP_TEMP=1` to keep the generated `.ll` and `.c` files.
 - If no extension is specified for the output file, `.exe` is appended automatically.
+- Gallt is still experimental. Feedback, issues and contributions are welcome.
+- Have fun exploring it :)
 
 ---
 
@@ -111,3 +113,5 @@ SGC_MSVC # 设置使用了 MSVC 编译的 SGC 的位置。
 - 当前为早期预览版本，部分语法和边缘情况可能仍有问题。
 - 临时后端文件默认写入 `%TEMP%`。设置 `SGC_KEEP_TEMP=1` 可保留生成的 `.ll` 与 `.c` 文件。
 - 输出文件未指定扩展名时，会自动追加 `.exe`。
+- Gallt 仍在实验阶段。欢迎提供反馈、问题和贡献。
+- 玩得开心 :)
