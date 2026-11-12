@@ -20,6 +20,8 @@ Current version: `0.5.0-1112 Preview`.
 
 The built `sgc` locates `clang.exe` through `SGC_LLVM_BIN` or `LLVM_BIN`. Running `sgc` also requires LLVM's `clang.exe` and `lld`.
 
+Compiling this project requires a compiler that supports the C++20 standard or a higher C++ standard.
+
 ### Usage examples
 
 ```text
@@ -78,6 +80,8 @@ SGC 是一个全新语言 Gallt 编译器前端。后端复用 LLVM 的 clang/ll
 ### 构建
 
 编译生成的 `sgc` 需要通过 `SGC_LLVM_BIN` 或 `LLVM_BIN` 找到 `clang.exe`。运行 `sgc` 时还需要 LLVM 的 `clang.exe` 与 `lld`。
+
+编译该项目需要一个支持 C++20 标准或支持更高 C++ 标准的编译器。
 
 ### 用法示例
 
