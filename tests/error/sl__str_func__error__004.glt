@@ -1,5 +1,5 @@
 // sl__str_func__error__004.glt
-// expect error ER 0101
+// expect error ER 0042
 
 guide "generics.glt"
 

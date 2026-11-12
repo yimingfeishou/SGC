@@ -2,7 +2,6 @@
 // Gallt Standard Library
 // Naming Conventions: snake_case
 // All standard library statements are stored in the sl namespace
-// All standard libraries except for sl.glt itself, should import sl.glt and addition namespace sl
 // Copyright (c) Yimingfeishou
 
 guide "sl.glt"
@@ -11,13 +10,25 @@ addition namespace sl {
 
     @if (is_defined("WINDOWS_PLATFORM")) {
         extern int system from libucrt (string command)
+        extern void exit from libucrt (int status)
+        extern void abort from libucrt ()
     } @else {
         @if (is_defined("LINUX_PLATFORM")) {
             extern int system from libc (string command)
+            extern void exit from libc (int status)
+            extern void abort from libc ()
         } @else {
             int system(string command) {
                 output("your environment is currently not supported")
                 return -1
+            }
+
+            void exit(int status) {
+                output("your environment is currently not supported")
+            }
+
+            void abort() {
+                output("your environment is currently not supported")
             }
         }
     }
@@ -205,7 +216,7 @@ addition namespace sl {
 
     string char_to_string(char c) {
         string result = " "
-        strsetchar(result, 0, c)
+        strsetchar(&result, 0, c)
         return result
     }
 
@@ -274,6 +285,170 @@ addition namespace sl {
         return result
     }
 
+    struct __string_storage {
+        lint __length
+        lint __capacity
+        uchar __data[16]
+    }
+
+    const char* __string_view_source_data(const string* source) {
+        if (source == null) {
+            return null
+        }
+        const __string_storage* storage = bitcopy<const __string_storage*>(source)
+        if (storage->__length <= 15) {
+            return bitcopy<const char*>(&storage->__data[0])
+        }
+        const char** slot = bitcopy<const char**>(&storage->__data[0])
+        return *slot
+    }
+
+    struct string_view {
+        const char* data
+        int length
+
+        constructor () {
+            data = null
+            length = 0
+        }
+
+        constructor (const string* source) {
+            if (source == null) {
+                data = null
+                length = 0
+                return
+            }
+            const __string_storage* storage = bitcopy<const __string_storage*>(source)
+            data = __string_view_source_data(source)
+            length = cast<int>(storage->__length)
+        }
+
+        constructor (const char* source, int count) {
+            if (source == null || count <= 0) {
+                data = null
+                length = 0
+                return
+            }
+            data = source
+            length = count
+        }
+    }
+
+    int string_view_length(string_view view) {
+        return view.length
+    }
+
+    bool string_view_empty(string_view view) {
+        if (view.length <= 0) {
+            return true
+        }
+        return false
+    }
+
+    const char* string_view_data(string_view view) {
+        return view.data
+    }
+
+    char string_view_at(string_view view, int index) {
+        if (index < 0) {
+            return '\0'
+        }
+        if (index >= view.length) {
+            return '\0'
+        }
+        return view.data[index]
+    }
+
+    string_view string_view_substr(string_view view, int start, int count) {
+        if (start < 0) {
+            start = 0
+        }
+        if (start > view.length) {
+            start = view.length
+        }
+        if (count < 0) {
+            count = 0
+        }
+        int available = view.length - start
+        if (count > available) {
+            count = available
+        }
+        return string_view(view.data + start, count)
+    }
+
+    int string_view_compare(string_view left, string_view right) {
+        int limit = left.length
+        if (right.length < limit) {
+            limit = right.length
+        }
+        int i = 0
+        while (i < limit) {
+            uchar a = cast<uchar>(left.data[i])
+            uchar b = cast<uchar>(right.data[i])
+            if (a < b) {
+                return -1
+            }
+            if (a > b) {
+                return 1
+            }
+            i = i + 1
+        }
+        if (left.length < right.length) {
+            return -1
+        }
+        if (left.length > right.length) {
+            return 1
+        }
+        return 0
+    }
+
+    bool string_view_starts_with(string_view view, string_view prefix) {
+        if (prefix.length > view.length) {
+            return false
+        }
+        int result = string_view_compare(string_view_substr(view, 0, prefix.length), prefix)
+        if (result == 0) {
+            return true
+        }
+        return false
+    }
+
+    bool string_view_ends_with(string_view view, string_view suffix) {
+        if (suffix.length > view.length) {
+            return false
+        }
+        int start = view.length - suffix.length
+        int result = string_view_compare(string_view_substr(view, start, suffix.length), suffix)
+        if (result == 0) {
+            return true
+        }
+        return false
+    }
+
+    int string_view_find_char(string_view view, char value) {
+        int i = 0
+        while (i < view.length) {
+            if (view.data[i] == value) {
+                return i
+            }
+            i = i + 1
+        }
+        return -1
+    }
+
+    string string_view_to_string(string_view view) {
+        if (view.length <= 0) {
+            return ""
+        }
+        string result = string_repeat(" ", view.length)
+        int i = 0
+        while (i < view.length) {
+            strsetchar(&result, i, view.data[i])
+            i = i + 1
+        }
+        return result
+    }
+
     string string_reverse(string s) {
         int n = strlen(s)
         string result = strcopy(s)
@@ -283,8 +458,8 @@ addition namespace sl {
             int j = n - 1 - i
             char left = strcharat(result, i)
             char right = strcharat(result, j)
-            strsetchar(result, i, right)
-            strsetchar(result, j, left)
+            strsetchar(&result, i, right)
+            strsetchar(&result, j, left)
             i = i + 1
         }
         return result
@@ -913,7 +1088,7 @@ addition namespace sl {
         string result = string_repeat(" ", n)
         int i = 0
         while (i < n) {
-            strsetchar(result, i, p[i])
+            strsetchar(&result, i, p[i])
             i = i + 1
         }
         return result
@@ -1190,6 +1365,28 @@ addition namespace sl {
             i = i + 1
         }
         return 0
+    }
+
+    void assert(bool condition, string message = "", string source_file = "", int line = 0, int status = 1, bool is_abort = false) {
+        if (condition) {
+            return
+        }
+
+        string location = ""
+        if (!string_is_empty(source_file)) {
+            location = source_file
+            if (line > 0) {
+                location = location + ":" + int_to_string(line)
+            }
+            location = location + ": "
+        }
+
+        erroutput(location + message)
+        if (is_abort) {
+            abort()
+        } else {
+            exit(status)
+        }
     }
 
 } // namespace sl

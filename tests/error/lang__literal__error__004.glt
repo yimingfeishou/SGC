@@ -1,5 +1,5 @@
 // lang__literal__error__004.glt
-// expect error ER 0019
+// expect error ER 0012
 
 int main() {
     bool r = strsetchar("abc", 0, 'x')

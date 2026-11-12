@@ -205,10 +205,11 @@ def compile_program(
             provider_project = work / provider.name
             shutil.copy2(provider, provider_project)
             provider_command = [
-                str(compiler),
-                "--compile",
-                "--input",
-                str(provider_project),
+            str(compiler),
+            "-Q",
+            "--compile",
+            "--input",
+            str(provider_project),
                 "--output",
                 str(work / library),
                 "--no-runtime",
@@ -240,6 +241,7 @@ def compile_program(
 
     command = [
         str(compiler),
+        "-Q",
         "--compile",
         "--input",
         str(compile_input),

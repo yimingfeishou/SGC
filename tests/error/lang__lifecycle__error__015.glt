@@ -1,0 +1,12 @@
+// lang__lifecycle__error__015.glt
+// expect error ER 0156
+
+[nomovector] struct Blocked {
+    int value
+}
+
+int main() {
+    Blocked source = {1}
+    Blocked target = move(source)
+    return 0
+}

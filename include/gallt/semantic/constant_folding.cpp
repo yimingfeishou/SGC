@@ -82,6 +82,9 @@ namespace gallt {
             if (name == "int" || name == "uint" || name == "float") {
                 size = 4; align = 4; return true;
             }
+            if (name == "sint" || name == "suint") {
+                size = 2; align = 2; return true;
+            }
             if (name == "lint" || name == "luint" || name == "double") {
                 size = 8; align = 8; return true;
             }
@@ -129,14 +132,20 @@ namespace gallt {
                 return make_int(v.is_float ? static_cast<long long>(v.float_value) : v.int_value);
             case TypeKind::Lint:
                 return make_int(v.is_float ? static_cast<long long>(v.float_value) : v.int_value);
+            case TypeKind::Sint:
+                return make_int(static_cast<short>(v.is_float
+                    ? static_cast<long long>(v.float_value) : v.int_value));
             case TypeKind::Uint:
                 return make_int(static_cast<unsigned int>(v.is_float
                     ? static_cast<long long>(v.float_value) : v.int_value));
             case TypeKind::Luint:
                 return make_int(static_cast<long long>(static_cast<unsigned long long>(
                     v.is_float ? static_cast<long long>(v.float_value) : v.int_value)));
+            case TypeKind::Suint:
+                return make_int(static_cast<unsigned short>(v.is_float
+                    ? static_cast<long long>(v.float_value) : v.int_value));
             case TypeKind::Char:
-                return make_int(static_cast<unsigned char>(v.is_float
+                return make_int(static_cast<signed char>(v.is_float
                     ? static_cast<long long>(v.float_value) : v.int_value));
             case TypeKind::Uchar:
                 return make_int(static_cast<unsigned char>(v.is_float
@@ -242,6 +251,9 @@ namespace gallt {
 
             if (auto* cast = dynamic_cast<const PostfixExpression*>(expr)) {
                 if (cast->op == PostfixExpression::Operator::Cast) {
+                    if (cast->is_bitcopy) {
+                        return Value{};
+                    }
                     return convert_to(evaluate(cast->base.get(), ctx), cast->cast_type);
                 }
 

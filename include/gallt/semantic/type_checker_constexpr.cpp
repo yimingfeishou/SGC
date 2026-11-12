@@ -123,8 +123,10 @@ namespace gallt {
         switch (type.kind) {
         case TypeKind::Int:
         case TypeKind::Lint:
+        case TypeKind::Sint:
         case TypeKind::Uint:
         case TypeKind::Luint:
+        case TypeKind::Suint:
         case TypeKind::Float:
         case TypeKind::Double:
         case TypeKind::Char:
@@ -464,6 +466,10 @@ namespace gallt {
                 validate_constexpr_expression(postfix->base.get());
                 return;
             case PostfixExpression::Operator::Cast:
+                if (postfix->is_bitcopy) {
+                    report_constexpr_operation(postfix, "bitcopy", false);
+                    return;
+                }
                 if (!postfix->cast_type.is_arithmetic() &&
                     postfix->cast_type.kind != TypeKind::String) {
                     report_constexpr_operation(postfix, "cast", false);
@@ -524,8 +530,8 @@ namespace gallt {
             return;
         }
 
-        if (is_file_builtin_name(name) || name == "output" || name == "input" ||
-            name == "free" || name == "heap") {
+        if (is_file_builtin_name(name) || name == "output" || name == "erroutput" ||
+            name == "input" || name == "free" || name == "heap") {
             report_constexpr_operation(call, name, true);
             return;
         }
@@ -846,8 +852,10 @@ namespace gallt {
             break;
         case TypeKind::Int:
         case TypeKind::Lint:
+        case TypeKind::Sint:
         case TypeKind::Uint:
-        case TypeKind::Luint: {
+        case TypeKind::Luint:
+        case TypeKind::Suint: {
             std::string text = std::to_string(value.int_value);
             literal = std::make_unique<PrimaryExpression>(loc, Token(
                 TokenType::IntegerLiteral, loc, pool(std::move(text))));

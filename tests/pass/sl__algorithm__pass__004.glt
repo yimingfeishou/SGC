@@ -1,0 +1,108 @@
+// sl__algorithm__pass__004.glt
+// expect output
+// 2 4 6 | 3 11 12 13 0
+// 5 4 3 2 1
+// true 3 4 5 1 2 false false true
+// 3 9 2 9 3 9
+// 2 2 3 5
+
+guide "algorithm.glt"
+guide "generics.glt"
+access namespace sl
+
+int double_value(int value) {
+    return value * 2
+}
+
+int add_ten(int value) {
+    return value + 10
+}
+
+int compare_int(int left, int right) {
+    if (left < right) {
+        return -1
+    }
+    if (left > right) {
+        return 1
+    }
+    return 0
+}
+
+int main() {
+    dynamic_array_generic<int>
+    dynamic_array_range_generic<int>
+    transform_generic<int>
+
+    dynamic_array values = dynamic_array(3)
+    push(&values, 1)
+    push(&values, 2)
+    push(&values, 3)
+    iterator it = begin(&values)
+    iterator_interface values_range = make_dynamic_range(&it)
+    transform_generic<int>.transform(&values_range, length(&values), &double_value)
+    output(get(&values, 0), " ", get(&values, 1), " ", get(&values, 2), " | ")
+
+    dynamic_array source = dynamic_array(3)
+    push(&source, 1)
+    push(&source, 2)
+    push(&source, 3)
+    dynamic_array target = dynamic_array(4)
+    push(&target, 0)
+    push(&target, 0)
+    push(&target, 0)
+    push(&target, 0)
+    iterator src_it = begin(&source)
+    iterator dst_it = begin(&target)
+    iterator_interface source_range = make_dynamic_range(&src_it)
+    iterator_interface target_range = make_dynamic_range(&dst_it)
+    output(transform_generic<int>.transform_to(&target_range, length(&target), &source_range, length(&source), &add_ten), " ", get(&target, 0), " ", get(&target, 1), " ", get(&target, 2), " ", get(&target, 3), "\n")
+
+    dynamic_array reversed = dynamic_array(5)
+    push(&reversed, 1)
+    push(&reversed, 2)
+    push(&reversed, 3)
+    push(&reversed, 4)
+    push(&reversed, 5)
+    iterator reverse_it = begin(&reversed)
+    iterator_interface reverse_range = make_dynamic_range(&reverse_it)
+    transform_generic<int>.reverse(&reverse_range, length(&reversed))
+    output(get(&reversed, 0), " ", get(&reversed, 1), " ", get(&reversed, 2), " ", get(&reversed, 3), " ", get(&reversed, 4), "\n")
+
+    dynamic_array rotated = dynamic_array(5)
+    push(&rotated, 1)
+    push(&rotated, 2)
+    push(&rotated, 3)
+    push(&rotated, 4)
+    push(&rotated, 5)
+    iterator rotate_it = begin(&rotated)
+    iterator_interface rotate_range = make_dynamic_range(&rotate_it)
+    output(transform_generic<int>.rotate(&rotate_range, length(&rotated), 2), " ", get(&rotated, 0), " ", get(&rotated, 1), " ", get(&rotated, 2), " ", get(&rotated, 3), " ", get(&rotated, 4), " ")
+    output(transform_generic<int>.rotate(&rotate_range, length(&rotated), -1), " ", transform_generic<int>.rotate(&rotate_range, length(&rotated), 6), " ", transform_generic<int>.rotate(&rotate_range, length(&rotated), 0), "\n")
+
+    dynamic_array replaced = dynamic_array(5)
+    push(&replaced, 1)
+    push(&replaced, 2)
+    push(&replaced, 1)
+    push(&replaced, 3)
+    push(&replaced, 1)
+    iterator replace_it = begin(&replaced)
+    iterator_interface replace_range = make_dynamic_range(&replace_it)
+    output(transform_generic<int>.replace(&replace_range, length(&replaced), 1, 9, &compare_int), " ", get(&replaced, 0), " ", get(&replaced, 1), " ", get(&replaced, 2), " ", get(&replaced, 3), " ", get(&replaced, 4), "\n")
+
+    dynamic_array removed = dynamic_array(5)
+    push(&removed, 1)
+    push(&removed, 2)
+    push(&removed, 1)
+    push(&removed, 3)
+    push(&removed, 1)
+    dynamic_array stable = dynamic_array(1)
+    push(&stable, 5)
+    iterator remove_it = begin(&removed)
+    iterator_interface remove_range = make_dynamic_range(&remove_it)
+    int length_after_remove = transform_generic<int>.remove_value(&remove_range, length(&removed), 1, &compare_int)
+    iterator stable_it = begin(&stable)
+    iterator_interface stable_range = make_dynamic_range(&stable_it)
+    transform_generic<int>.transform(&stable_range, length(&stable), null)
+    output(length_after_remove, " ", get(&removed, 0), " ", get(&removed, 1), " ", get(&stable, 0))
+    return 0
+}

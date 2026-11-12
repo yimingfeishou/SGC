@@ -1,0 +1,730 @@
+// algorithm.glt
+// Gallt Standard Library
+// Naming Conventions: snake_case
+// All standard library statements are stored in the sl namespace
+// Copyright (c) Yimingfeishou
+
+guide "generics.glt"
+
+addition namespace sl {
+
+    struct iterator_interface {
+        void* context
+        int start
+        void seek(void*, int)*
+        bool valid(void*)*
+        void read(void*, void*)*
+        bool next(void*)*
+        bool write(void*, void*)*
+        bool swap(void*, int, int)*
+        bool random_access
+        bool reversible
+
+        constructor () {
+            context = null
+            start = 0
+            seek = null
+            valid = null
+            read = null
+            next = null
+            write = null
+            swap = null
+            random_access = false
+            reversible = false
+        }
+    }
+
+    generics dynamic_array_range_generic<T> {
+        void __seek(void* context, int offset) {
+            dynamic_array_generic<T>.iterator* it = cast<dynamic_array_generic<T>.iterator*>(context)
+            if (it == null || it->owner == null) {
+                return
+            }
+            if (offset < 0) {
+                offset = 0
+            }
+            if (offset > it->owner->size) {
+                offset = it->owner->size
+            }
+            it->state = __iterator_state_make(offset, it->owner->size, it->owner->version)
+        }
+
+        bool __valid(void* context) {
+            return dynamic_array_generic<T>.iterator_valid(cast<dynamic_array_generic<T>.iterator*>(context))
+        }
+
+        void __read(void* context, void* value) {
+            *cast<T*>(value) = dynamic_array_generic<T>.iterator_value(cast<dynamic_array_generic<T>.iterator*>(context))
+        }
+
+        bool __next(void* context) {
+            return dynamic_array_generic<T>.iterator_next(cast<dynamic_array_generic<T>.iterator*>(context))
+        }
+
+        bool __write(void* context, void* value) {
+            return dynamic_array_generic<T>.__iterator_set(cast<dynamic_array_generic<T>.iterator*>(context), *cast<T*>(value))
+        }
+
+        bool __swap(void* context, int left, int right) {
+            dynamic_array_generic<T>.iterator* it = cast<dynamic_array_generic<T>.iterator*>(context)
+            if (it == null || it->owner == null || left < 0 || right < 0 || left >= it->owner->size || right >= it->owner->size) {
+                return false
+            }
+            T value = it->owner->data[left]
+            it->owner->data[left] = it->owner->data[right]
+            it->owner->data[right] = value
+            return true
+        }
+
+        iterator_interface make_dynamic_range(dynamic_array_generic<T>.iterator* it) {
+            iterator_interface range
+            range.context = cast<void*>(it)
+            range.start = 0
+            range.seek = &__seek
+            range.valid = &__valid
+            range.read = &__read
+            range.next = &__next
+            range.write = &__write
+            range.swap = &__swap
+            range.random_access = true
+            range.reversible = true
+            return range
+        }
+    }
+
+    generics hash_table_range_generic<K, V> {
+        void __seek(void* context, int offset) {
+            hash_table_generic<K, V>.iterator* it = cast<hash_table_generic<K, V>.iterator*>(context)
+            if (it == null || it->owner == null) {
+                return
+            }
+            if (offset < 0) {
+                offset = 0
+            }
+            if (offset > it->owner->capacity) {
+                offset = it->owner->capacity
+            }
+            it->state = __iterator_state_make(offset, it->owner->capacity, it->owner->version)
+            hash_table_generic<K, V>.__iterator_seek(it)
+        }
+
+        bool __valid(void* context) {
+            return hash_table_generic<K, V>.iterator_valid(cast<hash_table_generic<K, V>.iterator*>(context))
+        }
+
+        void __read(void* context, void* value) {
+            hash_table_generic<K, V>.hash_table_entry* entry = cast<hash_table_generic<K, V>.hash_table_entry*>(value)
+            *entry = hash_table_generic<K, V>.iterator_value(cast<hash_table_generic<K, V>.iterator*>(context))
+        }
+
+        bool __next(void* context) {
+            return hash_table_generic<K, V>.iterator_next(cast<hash_table_generic<K, V>.iterator*>(context))
+        }
+
+        bool __write(void* context, void* value) {
+            hash_table_generic<K, V>.hash_table_entry entry = *cast<hash_table_generic<K, V>.hash_table_entry*>(value)
+            return hash_table_generic<K, V>.__iterator_set(cast<hash_table_generic<K, V>.iterator*>(context), entry)
+        }
+
+        iterator_interface make_hash_range(hash_table_generic<K, V>.iterator* it) {
+            iterator_interface range
+            range.context = cast<void*>(it)
+            range.start = 0
+            range.seek = &__seek
+            range.valid = &__valid
+            range.read = &__read
+            range.next = &__next
+            range.write = &__write
+            range.swap = null
+            range.random_access = false
+            range.reversible = false
+            return range
+        }
+    }
+
+    generics find_generic<T> {
+        T __read_value(iterator_interface* range) {
+            T value
+            range->read(range->context, cast<void*>(&value))
+            return value
+        }
+
+        int find(iterator_interface* range, int size, T value, int compare(T, T)*) {
+            if (range == null || compare == null || size <= 0) {
+                return -1
+            }
+            range->seek(range->context, range->start)
+            for (int i = 0; i < size; i++) {
+                if (!range->valid(range->context)) {
+                    return -1
+                }
+                if (compare(__read_value(range), value) == 0) {
+                    return i
+                }
+                range->next(range->context)
+            }
+            return -1
+        }
+
+        int find_if(iterator_interface* range, int size, bool pred(T)*) {
+            if (range == null || pred == null || size <= 0) {
+                return -1
+            }
+            range->seek(range->context, range->start)
+            for (int i = 0; i < size; i++) {
+                if (!range->valid(range->context)) {
+                    return -1
+                }
+                if (pred(__read_value(range))) {
+                    return i
+                }
+                range->next(range->context)
+            }
+            return -1
+        }
+
+        int find_last(iterator_interface* range, int size, T value, int compare(T, T)*) {
+            if (range == null || compare == null || size <= 0) {
+                return -1
+            }
+            range->seek(range->context, range->start)
+            int result = -1
+            for (int i = 0; i < size; i++) {
+                if (!range->valid(range->context)) {
+                    break
+                }
+                if (compare(__read_value(range), value) == 0) {
+                    result = i
+                }
+                range->next(range->context)
+            }
+            return result
+        }
+    }
+
+    generics binary_search_generic<T> {
+        T __value_at(iterator_interface* range, int offset) {
+            range->seek(range->context, range->start + offset)
+            T value
+            range->read(range->context, cast<void*>(&value))
+            return value
+        }
+
+        int lower_bound(iterator_interface* range, int size, T value, int compare(T, T)*) {
+            if (range == null || compare == null || !range->random_access) {
+                return -1
+            }
+            if (size <= 0) {
+                return 0
+            }
+            int low = 0
+            int high = size
+            while (low < high) {
+                int mid = low + (high - low) / 2
+                if (compare(__value_at(range, mid), value) < 0) {
+                    low = mid + 1
+                } else {
+                    high = mid
+                }
+            }
+            return low
+        }
+
+        int upper_bound(iterator_interface* range, int size, T value, int compare(T, T)*) {
+            if (range == null || compare == null || !range->random_access) {
+                return -1
+            }
+            if (size <= 0) {
+                return 0
+            }
+            int low = 0
+            int high = size
+            while (low < high) {
+                int mid = low + (high - low) / 2
+                if (compare(__value_at(range, mid), value) <= 0) {
+                    low = mid + 1
+                } else {
+                    high = mid
+                }
+            }
+            return low
+        }
+
+        int binary_search(iterator_interface* range, int size, T value, int compare(T, T)*) {
+            if (size <= 0 || range == null || compare == null || !range->random_access) {
+                return -1
+            }
+            int low = 0
+            int high = size
+            int found = -1
+            while (low < high) {
+                int mid = low + (high - low) / 2
+                int order = compare(__value_at(range, mid), value)
+                if (order < 0) {
+                    low = mid + 1
+                } else {
+                    if (order == 0) {
+                        found = mid
+                    }
+                    high = mid
+                }
+            }
+            return found
+        }
+
+        bool equal_range(iterator_interface* range, int size, T value, int compare(T, T)*, int* first, int* last) {
+            if (first == null || last == null) {
+                return false
+            }
+            if (range == null || compare == null || !range->random_access) {
+                return false
+            }
+            if (size <= 0) {
+                *first = 0
+                *last = 0
+                return true
+            }
+            int low = lower_bound(range, size, value, compare)
+            int high = upper_bound(range, size, value, compare)
+            if (low < 0 || high < 0) {
+                return false
+            }
+            *first = low
+            *last = high
+            return true
+        }
+    }
+
+    generics count_generic<T> {
+        T __read_value(iterator_interface* range) {
+            T value
+            range->read(range->context, cast<void*>(&value))
+            return value
+        }
+
+        int count_value(iterator_interface* range, int size, T value, int compare(T, T)*) {
+            if (range == null || compare == null || size <= 0) {
+                return 0
+            }
+            range->seek(range->context, range->start)
+            int count = 0
+            for (int i = 0; i < size; i++) {
+                if (!range->valid(range->context)) {
+                    break
+                }
+                if (compare(__read_value(range), value) == 0) {
+                    count = count + 1
+                }
+                range->next(range->context)
+            }
+            return count
+        }
+
+        int count_if(iterator_interface* range, int size, bool pred(T)*) {
+            if (range == null || pred == null || size <= 0) {
+                return 0
+            }
+            range->seek(range->context, range->start)
+            int count = 0
+            for (int i = 0; i < size; i++) {
+                if (!range->valid(range->context)) {
+                    break
+                }
+                if (pred(__read_value(range))) {
+                    count = count + 1
+                }
+                range->next(range->context)
+            }
+            return count
+        }
+
+        bool all_of(iterator_interface* range, int size, bool pred(T)*) {
+            if (pred == null) {
+                return false
+            }
+            if (size <= 0) {
+                return true
+            }
+            if (range == null) {
+                return false
+            }
+            range->seek(range->context, range->start)
+            for (int i = 0; i < size; i++) {
+                if (!range->valid(range->context)) {
+                    return false
+                }
+                if (!pred(__read_value(range))) {
+                    return false
+                }
+                range->next(range->context)
+            }
+            return true
+        }
+
+        bool any_of(iterator_interface* range, int size, bool pred(T)*) {
+            if (pred == null || size <= 0 || range == null) {
+                return false
+            }
+            range->seek(range->context, range->start)
+            for (int i = 0; i < size; i++) {
+                if (!range->valid(range->context)) {
+                    return false
+                }
+                if (pred(__read_value(range))) {
+                    return true
+                }
+                range->next(range->context)
+            }
+            return false
+        }
+
+        bool none_of(iterator_interface* range, int size, bool pred(T)*) {
+            if (pred == null) {
+                return false
+            }
+            if (size <= 0) {
+                return true
+            }
+            if (range == null) {
+                return false
+            }
+            range->seek(range->context, range->start)
+            for (int i = 0; i < size; i++) {
+                if (!range->valid(range->context)) {
+                    return false
+                }
+                if (pred(__read_value(range))) {
+                    return false
+                }
+                range->next(range->context)
+            }
+            return true
+        }
+    }
+
+    generics copy_range_generic<T> {
+        int copy_range(iterator_interface* dst, int dst_size, iterator_interface* src, int src_size) {
+            if (dst == null || src == null || dst_size <= 0 || src_size <= 0) {
+                return 0
+            }
+            int count = dst_size
+            if (src_size < count) {
+                count = src_size
+            }
+            dst->seek(dst->context, dst->start)
+            src->seek(src->context, src->start)
+            int copied = 0
+            for (int i = 0; i < count; i++) {
+                if (!dst->valid(dst->context) || !src->valid(src->context)) {
+                    break
+                }
+                T value
+                src->read(src->context, cast<void*>(&value))
+                if (!dst->write(dst->context, cast<void*>(&value))) {
+                    break
+                }
+                copied = copied + 1
+                dst->next(dst->context)
+                src->next(src->context)
+            }
+            return copied
+        }
+
+        int copy_range_backward(iterator_interface* dst, int dst_size, iterator_interface* src, int src_size) {
+            if (dst == null || src == null || dst_size <= 0 || src_size <= 0) {
+                return 0
+            }
+            int count = dst_size
+            if (src_size < count) {
+                count = src_size
+            }
+            int copied = 0
+            for (int i = count - 1; i >= 0; i--) {
+                dst->seek(dst->context, dst->start + i)
+                src->seek(src->context, src->start + i)
+                if (!dst->valid(dst->context) || !src->valid(src->context)) {
+                    return -1
+                }
+                T value
+                src->read(src->context, cast<void*>(&value))
+                if (!dst->write(dst->context, cast<void*>(&value))) {
+                    return -1
+                }
+                copied = copied + 1
+            }
+            return copied
+        }
+
+        void fill(iterator_interface* range, int size, T value) {
+            if (range == null || size <= 0) {
+                return
+            }
+            range->seek(range->context, range->start)
+            for (int i = 0; i < size; i++) {
+                if (!range->valid(range->context)) {
+                    return
+                }
+                if (!range->write(range->context, cast<void*>(&value))) {
+                    return
+                }
+                range->next(range->context)
+            }
+        }
+
+        void fill_n(iterator_interface* range, int size, int count, T value) {
+            if (range == null || size <= 0 || count <= 0) {
+                return
+            }
+            int limit = size
+            if (count < limit) {
+                limit = count
+            }
+            range->seek(range->context, range->start)
+            for (int i = 0; i < limit; i++) {
+                if (!range->valid(range->context)) {
+                    return
+                }
+                if (!range->write(range->context, cast<void*>(&value))) {
+                    return
+                }
+                range->next(range->context)
+            }
+        }
+    }
+
+    generics transform_generic<T> {
+        void transform(iterator_interface* range, int size, T fn(T)*) {
+            if (range == null || fn == null || size <= 0) {
+                return
+            }
+            range->seek(range->context, range->start)
+            for (int i = 0; i < size; i++) {
+                if (!range->valid(range->context)) {
+                    return
+                }
+                T value
+                range->read(range->context, cast<void*>(&value))
+                value = fn(value)
+                if (!range->write(range->context, cast<void*>(&value))) {
+                    return
+                }
+                if (!range->next(range->context)) {
+                    return
+                }
+            }
+        }
+
+        int transform_to(iterator_interface* dst, int dst_size, iterator_interface* src, int src_size, T fn(T)*) {
+            if (dst == null || src == null || fn == null || dst_size <= 0 || src_size <= 0) {
+                return 0
+            }
+            int count = dst_size
+            if (src_size < count) {
+                count = src_size
+            }
+            dst->seek(dst->context, dst->start)
+            src->seek(src->context, src->start)
+            int written = 0
+            for (int i = 0; i < count; i++) {
+                if (!dst->valid(dst->context) || !src->valid(src->context)) {
+                    break
+                }
+                T source_value
+                src->read(src->context, cast<void*>(&source_value))
+                T value = fn(source_value)
+                if (!dst->write(dst->context, cast<void*>(&value))) {
+                    break
+                }
+                written = written + 1
+                dst->next(dst->context)
+                src->next(src->context)
+            }
+            return written
+        }
+
+        void __reverse_section(iterator_interface* range, int start, int size) {
+            if (size <= 1) {
+                return
+            }
+            int left = 0
+            int right = size - 1
+            while (left < right) {
+                if (range->swap != null && range->swap(range->context, range->start + start + left, range->start + start + right)) {
+                    left = left + 1
+                    right = right - 1
+                    continue
+                }
+                range->seek(range->context, range->start + start + left)
+                if (!range->valid(range->context)) {
+                    return
+                }
+                T left_value
+                range->read(range->context, cast<void*>(&left_value))
+                range->seek(range->context, range->start + start + right)
+                if (!range->valid(range->context)) {
+                    return
+                }
+                T right_value
+                range->read(range->context, cast<void*>(&right_value))
+                if (!range->write(range->context, cast<void*>(&left_value))) {
+                    return
+                }
+                range->seek(range->context, range->start + start + left)
+                if (!range->valid(range->context)) {
+                    return
+                }
+                if (!range->write(range->context, cast<void*>(&right_value))) {
+                    return
+                }
+                left = left + 1
+                right = right - 1
+            }
+        }
+
+        void reverse(iterator_interface* range, int size) {
+            if (range == null || !range->reversible || size <= 1) {
+                return
+            }
+            __reverse_section(range, 0, size)
+        }
+
+        bool rotate(iterator_interface* range, int size, int middle) {
+            if (range == null || !range->reversible) {
+                return false
+            }
+            if (size < 0 || middle < 0 || middle > size) {
+                return false
+            }
+            if (middle == 0 || middle == size) {
+                return true
+            }
+            __reverse_section(range, 0, middle)
+            __reverse_section(range, middle, size - middle)
+            __reverse_section(range, 0, size)
+            return true
+        }
+
+        int replace(iterator_interface* range, int size, T old_value, T new_value, int compare(T, T)*) {
+            if (range == null || compare == null || size <= 0) {
+                return 0
+            }
+            range->seek(range->context, range->start)
+            int count = 0
+            for (int i = 0; i < size; i++) {
+                if (!range->valid(range->context)) {
+                    break
+                }
+                T current
+                range->read(range->context, cast<void*>(&current))
+                if (compare(current, old_value) == 0) {
+                    if (range->write(range->context, cast<void*>(&new_value))) {
+                        count = count + 1
+                    }
+                }
+                range->next(range->context)
+            }
+            return count
+        }
+
+        int remove_value(iterator_interface* range, int size, T value, int compare(T, T)*) {
+            if (range == null || size <= 0) {
+                return 0
+            }
+            if (compare == null) {
+                return size
+            }
+            int result = 0
+            for (int i = 0; i < size; i++) {
+                range->seek(range->context, range->start + i)
+                if (!range->valid(range->context)) {
+                    return result
+                }
+                T current
+                range->read(range->context, cast<void*>(&current))
+                if (compare(current, value) != 0) {
+                    if (result != i) {
+                        range->seek(range->context, range->start + result)
+                        if (!range->valid(range->context) || !range->write(range->context, cast<void*>(&current))) {
+                            return result
+                        }
+                    }
+                    result = result + 1
+                }
+            }
+            return result
+        }
+    }
+
+    generics min_value_generic<T> {
+        T __read_value(iterator_interface* range) {
+            T value
+            range->read(range->context, cast<void*>(&value))
+            return value
+        }
+
+        bool min_value(iterator_interface* range, int size, int compare(T, T)*, T* out) {
+            if (range == null || compare == null || out == null || size <= 0) {
+                return false
+            }
+            range->seek(range->context, range->start)
+            if (!range->valid(range->context)) {
+                return false
+            }
+            T result = __read_value(range)
+            range->next(range->context)
+            for (int i = 1; i < size; i++) {
+                if (!range->valid(range->context)) {
+                    break
+                }
+                T current = __read_value(range)
+                if (compare(current, result) < 0) {
+                    result = current
+                }
+                range->next(range->context)
+            }
+            *out = result
+            return true
+        }
+
+        bool max_value(iterator_interface* range, int size, int compare(T, T)*, T* out) {
+            if (range == null || compare == null || out == null || size <= 0) {
+                return false
+            }
+            range->seek(range->context, range->start)
+            if (!range->valid(range->context)) {
+                return false
+            }
+            T result = __read_value(range)
+            range->next(range->context)
+            for (int i = 1; i < size; i++) {
+                if (!range->valid(range->context)) {
+                    break
+                }
+                T current = __read_value(range)
+                if (compare(current, result) > 0) {
+                    result = current
+                }
+                range->next(range->context)
+            }
+            *out = result
+            return true
+        }
+
+        T accumulate(iterator_interface* range, int size, T init, T fn(T, T)*) {
+            if (range == null || fn == null || size <= 0) {
+                return init
+            }
+            range->seek(range->context, range->start)
+            T result = init
+            for (int i = 0; i < size; i++) {
+                if (!range->valid(range->context)) {
+                    break
+                }
+                result = fn(result, __read_value(range))
+                range->next(range->context)
+            }
+            return result
+        }
+    }
+
+}

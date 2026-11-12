@@ -1,0 +1,25 @@
+// lang__cast__pass__026.glt
+// expect output
+// hello 7 9 7 9
+
+struct StringRep {
+    lint length
+    lint capacity
+    char data[16]
+}
+
+struct Pair {
+    int first
+    int second
+}
+
+int main() {
+    string original = "hello"
+    StringRep rep = bitcopy<StringRep>(original)
+    string copy = bitcopy<string>(rep)
+    lint raw = 0x0000000900000007l
+    Pair pair = bitcopy<Pair>(raw)
+    int values[2] = bitcopy<int[2]>(raw)
+    output(copy, " ", pair.first, " ", pair.second, " ", values[0], " ", values[1])
+    return 0
+}

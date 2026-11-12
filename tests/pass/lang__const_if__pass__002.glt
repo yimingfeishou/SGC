@@ -1,0 +1,43 @@
+// lang__const_if__pass__002.glt
+// expect output
+// 1234
+
+bool enabled() const {
+    return 1 < 2
+}
+
+bool disabled() const {
+    return false
+}
+
+generics Choice<T, int N> {
+    int constant_expression() {
+        const if (N > 0 && true) return 1
+        const else return 0
+    }
+
+    int constexpr_true() {
+        const if (enabled()) return 2
+        const else return 0
+    }
+
+    int constexpr_false() {
+        const if (disabled()) return 0
+        const else return 3
+    }
+}
+
+generics BooleanChoice<bool B> {
+    int value() {
+        const if (B) return 4
+        const else return 0
+    }
+}
+
+int main() {
+    output(Choice<int, 1>.constant_expression())
+    output(Choice<int, 1>.constexpr_true())
+    output(Choice<int, 1>.constexpr_false())
+    output(BooleanChoice<true>.value())
+    return 0
+}

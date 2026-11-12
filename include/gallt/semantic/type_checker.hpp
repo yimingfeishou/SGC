@@ -19,7 +19,6 @@ namespace gallt {
     class TypeChecker {
     public:
         TypeChecker(DiagnosticEngine& diag, bool require_main = true,
-            bool extended_semantics = false,
             std::optional<std::uint64_t> constexpr_depth = std::nullopt,
             std::optional<std::uint64_t> constexpr_max_steps = std::nullopt,
             std::optional<std::uint64_t> constexpr_max_integer_exponent =
@@ -63,7 +62,6 @@ namespace gallt {
         int loop_depth_ = 0;
         int switch_depth_ = 0;
         bool require_main_ = true;
-        bool extended_semantics_ = false;
 
         bool builtins_declared_ = false;
 
@@ -87,8 +85,11 @@ namespace gallt {
         std::unordered_set<std::string> referenced_builtins_;
         std::unordered_map<std::string, std::vector<AST::FunctionDefinition*>> operator_overloads_;
         std::unordered_set<const AST::FunctionDefinition*> redefined_operators_;
+        std::vector<std::unordered_set<const AST::FunctionDefinition*>>
+            imported_operator_scopes_;
 
         void collect_operator_overloads();
+        void import_namespace_operators(const AST::AccessNamespaceStatement* node);
         struct VariadicPack {
             std::string name;
             AST::Type element;
@@ -248,6 +249,12 @@ namespace gallt {
         bool type_layout(const AST::Type& type, std::size_t& size, std::size_t& align) const;
         bool type_is_copyable(const AST::Type& type) const;
         bool type_is_movable(const AST::Type& type) const;
+        bool type_is_copy_constructible(const AST::Type& type) const;
+        bool type_is_move_constructible(const AST::Type& type) const;
+        bool type_is_copy_assignable(const AST::Type& type) const;
+        bool type_is_move_assignable(const AST::Type& type) const;
+        ErrorCode copy_violation_code(const AST::Type& type, bool assignment) const;
+        ErrorCode move_violation_code(const AST::Type& type, bool assignment) const;
         static bool is_move_source(const AST::Expression* expr);
         bool is_address_of_const_identifier(const AST::Expression* expr);
 

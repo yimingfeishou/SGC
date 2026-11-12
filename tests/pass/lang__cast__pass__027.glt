@@ -1,0 +1,17 @@
+// lang__cast__pass__027.glt
+// expect output
+// -56 -56 255 56
+
+char narrow_char(int value) const {
+    return value
+}
+
+const char folded_char = cast<char>(200)
+const char constexpr_char = narrow_char(200)
+const uchar wrapped_uchar = cast<uchar>(-1)
+const int low_char = cast<int>(cast<char>(-200))
+
+int main() {
+    output(cast<int>(folded_char), " ", cast<int>(constexpr_char), " ", cast<int>(wrapped_uchar), " ", low_char, "\n")
+    return 0
+}

@@ -19,6 +19,7 @@ namespace gallt {
         const std::string& name) {
         static const std::unordered_map<std::string, std::string> references = {
             { "output", "@gallt_output_string" },
+            { "erroutput", "@gallt_erroutput_string" },
             { "free", "@gallt_free_ptr" },
             { "fileopen", "@gallt_file_open" },
             { "fileclose", "@gallt_file_close" },
@@ -219,54 +220,75 @@ namespace gallt {
         return extern_by_name_.find(name) != extern_by_name_.end();
     }
 
-    void CodeGenerator::emit_output_call(AST::PostfixExpression* call) {
+    void CodeGenerator::emit_output_call(AST::PostfixExpression* call, bool use_stderr) {
+        const std::string prefix = use_stderr ? "@gallt_erroutput_" : "@gallt_output_";
         for (std::size_t arg_index = 0; arg_index < call->arguments.size();
             ++arg_index) {
             auto& arg_expr = call->arguments[arg_index];
-            if (emit_output_pack_expansion(arg_expr.get())) {
+            if (emit_output_pack_expansion(arg_expr.get(), use_stderr)) {
                 continue;
             }
 
             ExprValue arg = gen_expr(arg_expr.get());
+            if (arg.value.empty()) {
+                if (diagnostics_ != nullptr) {
+                    diagnostics_->report_error(arg_expr->location,
+                        ErrorCode::ExpressionSyntaxError,
+                        "output argument cannot be materialized");
+                }
+                continue;
+            }
             std::string owned = arg.owned_string;
 
             switch (arg.type.kind) {
             case TypeKind::Int:
-                emit_line("call void @gallt_output_i32(i32 " + arg.value + ")");
+                emit_line("call void " + prefix + "i32(i32 " + arg.value + ")");
                 break;
             case TypeKind::Uint:
-                emit_line("call void @gallt_output_u32(i32 " + arg.value + ")");
+                emit_line("call void " + prefix + "u32(i32 " + arg.value + ")");
                 break;
+            case TypeKind::Sint: {
+                std::string extended = new_temp("output_sint");
+                emit_line(extended + " = sext i16 " + arg.value + " to i32");
+                emit_line("call void " + prefix + "i32(i32 " + extended + ")");
+                break;
+            }
+            case TypeKind::Suint: {
+                std::string extended = new_temp("output_suint");
+                emit_line(extended + " = zext i16 " + arg.value + " to i32");
+                emit_line("call void " + prefix + "u32(i32 " + extended + ")");
+                break;
+            }
             case TypeKind::Lint:
-                emit_line("call void @gallt_output_i64(i64 " + arg.value + ")");
+                emit_line("call void " + prefix + "i64(i64 " + arg.value + ")");
                 break;
             case TypeKind::Luint:
-                emit_line("call void @gallt_output_u64(i64 " + arg.value + ")");
+                emit_line("call void " + prefix + "u64(i64 " + arg.value + ")");
                 break;
             case TypeKind::Uchar:
-                emit_line("call void @gallt_output_char(i8 " + arg.value + ")");
+                emit_line("call void " + prefix + "char(i8 " + arg.value + ")");
                 break;
             case TypeKind::Float:
-                emit_line("call void @gallt_output_f32(float " + arg.value + ")");
+                emit_line("call void " + prefix + "f32(float " + arg.value + ")");
                 break;
             case TypeKind::Double:
-                emit_line("call void @gallt_output_f64(double " + arg.value + ")");
+                emit_line("call void " + prefix + "f64(double " + arg.value + ")");
                 break;
             case TypeKind::Char:
-                emit_line("call void @gallt_output_char(i8 " + arg.value + ")");
+                emit_line("call void " + prefix + "char(i8 " + arg.value + ")");
                 break;
             case TypeKind::Bool:
-                emit_line("call void @gallt_output_bool(i8 " + arg.value + ")");
+                emit_line("call void " + prefix + "bool(i8 " + arg.value + ")");
                 break;
             case TypeKind::String: {
                 std::string addr = !arg.address.empty() ? arg.address : arg.value;
-                emit_line("call void @gallt_output_string(ptr " + addr + ")");
+                emit_line("call void " + prefix + "string(ptr " + addr + ")");
                 break;
             }
             case TypeKind::Pointer:
             case TypeKind::Array:
             case TypeKind::Function:
-                emit_line("call void @gallt_output_ptr(ptr " + arg.value + ")");
+                emit_line("call void " + prefix + "ptr(ptr " + arg.value + ")");
                 break;
             case TypeKind::Void:
             case TypeKind::Struct:
@@ -298,43 +320,72 @@ namespace gallt {
             return;
         }
 
-        ExprValue arg = gen_expr(call->arguments[0].get());
-        std::string address = gen_address(call->arguments[0].get());
-        if (address.empty()) { return; }
+        result.type = Type::make_void();
+        for (auto& argument : call->arguments) {
+            ExprValue destination = gen_expr(argument.get());
+            if (destination.type.kind != TypeKind::Pointer ||
+                !destination.type.pointee_type ||
+                destination.value.empty()) {
+                continue;
+            }
 
-        switch (arg.type.kind) {
-        case TypeKind::Int:
-            emit_line("call void @gallt_input_i32(ptr " + address + ")");
-            break;
-        case TypeKind::Uint:
-            emit_line("call void @gallt_input_u32(ptr " + address + ")");
-            break;
-        case TypeKind::Lint:
-            emit_line("call void @gallt_input_i64(ptr " + address + ")");
-            break;
-        case TypeKind::Luint:
-            emit_line("call void @gallt_input_u64(ptr " + address + ")");
-            break;
-        case TypeKind::Uchar:
-            emit_line("call void @gallt_input_uchar(ptr " + address + ")");
-            break;
-        case TypeKind::Float:
-            emit_line("call void @gallt_input_f32(ptr " + address + ")");
-            break;
-        case TypeKind::Double:
-            emit_line("call void @gallt_input_f64(ptr " + address + ")");
-            break;
-        case TypeKind::Char:
-            emit_line("call void @gallt_input_char(ptr " + address + ")");
-            break;
-        case TypeKind::Bool:
-            emit_line("call void @gallt_input_bool(ptr " + address + ")");
-            break;
-        case TypeKind::String:
-            emit_line("call void @gallt_input_string(ptr " + address + ")");
-            break;
-        default:
-            break;
+            const Type& target = *destination.type.pointee_type;
+            const std::string& address = destination.value;
+
+            switch (target.kind) {
+            case TypeKind::Int:
+                emit_line("call void @gallt_input_i32(ptr " + address + ")");
+                break;
+            case TypeKind::Uint:
+                emit_line("call void @gallt_input_u32(ptr " + address + ")");
+                break;
+            case TypeKind::Sint: {
+                std::string storage = emit_alloca("i32", "input_sint");
+                emit_line("call void @gallt_input_i32(ptr " + storage + ")");
+                std::string loaded = new_temp("input_sint_value");
+                emit_line(loaded + " = load i32, ptr " + storage);
+                std::string narrowed = new_temp("input_sint_narrow");
+                emit_line(narrowed + " = trunc i32 " + loaded + " to i16");
+                emit_line("store i16 " + narrowed + ", ptr " + address);
+                break;
+            }
+            case TypeKind::Suint: {
+                std::string storage = emit_alloca("i32", "input_suint");
+                emit_line("call void @gallt_input_u32(ptr " + storage + ")");
+                std::string loaded = new_temp("input_suint_value");
+                emit_line(loaded + " = load i32, ptr " + storage);
+                std::string narrowed = new_temp("input_suint_narrow");
+                emit_line(narrowed + " = trunc i32 " + loaded + " to i16");
+                emit_line("store i16 " + narrowed + ", ptr " + address);
+                break;
+            }
+            case TypeKind::Lint:
+                emit_line("call void @gallt_input_i64(ptr " + address + ")");
+                break;
+            case TypeKind::Luint:
+                emit_line("call void @gallt_input_u64(ptr " + address + ")");
+                break;
+            case TypeKind::Uchar:
+                emit_line("call void @gallt_input_uchar(ptr " + address + ")");
+                break;
+            case TypeKind::Float:
+                emit_line("call void @gallt_input_f32(ptr " + address + ")");
+                break;
+            case TypeKind::Double:
+                emit_line("call void @gallt_input_f64(ptr " + address + ")");
+                break;
+            case TypeKind::Char:
+                emit_line("call void @gallt_input_char(ptr " + address + ")");
+                break;
+            case TypeKind::Bool:
+                emit_line("call void @gallt_input_bool(ptr " + address + ")");
+                break;
+            case TypeKind::String:
+                emit_line("call void @gallt_input_string(ptr " + address + ")");
+                break;
+            default:
+                break;
+            }
         }
     }
 
@@ -826,10 +877,14 @@ namespace gallt {
                         target = Type::make_int();
                     } else if (id == "lint") {
                         target = Type::make_lint();
+                    } else if (id == "sint") {
+                        target = Type::make_sint();
                     } else if (id == "uint") {
                         target = Type::make_uint();
                     } else if (id == "luint") {
                         target = Type::make_luint();
+                    } else if (id == "suint") {
+                        target = Type::make_suint();
                     } else if (id == "float") {
                         target = Type::make_float();
                     } else if (id == "double") {

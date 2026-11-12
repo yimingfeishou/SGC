@@ -153,8 +153,10 @@ namespace gallt {
         switch (type.kind) {
         case TypeKind::Int: return "i32";
         case TypeKind::Lint: return "i64";
+        case TypeKind::Sint: return "i16";
         case TypeKind::Uint: return "i32";
         case TypeKind::Luint: return "i64";
+        case TypeKind::Suint: return "i16";
         case TypeKind::Float: return "float";
         case TypeKind::Double: return "double";
         case TypeKind::Char: return "i8";
@@ -396,11 +398,17 @@ namespace gallt {
         case TypeKind::Lint:
             text = "!DIBasicType(name: \"lint\", size: 64, encoding: DW_ATE_signed)";
             break;
+        case TypeKind::Sint:
+            text = "!DIBasicType(name: \"sint\", size: 16, encoding: DW_ATE_signed)";
+            break;
         case TypeKind::Uint:
             text = "!DIBasicType(name: \"uint\", size: 32, encoding: DW_ATE_unsigned)";
             break;
         case TypeKind::Luint:
             text = "!DIBasicType(name: \"luint\", size: 64, encoding: DW_ATE_unsigned)";
+            break;
+        case TypeKind::Suint:
+            text = "!DIBasicType(name: \"suint\", size: 16, encoding: DW_ATE_unsigned)";
             break;
         case TypeKind::Float:
             text = "!DIBasicType(name: \"float\", size: 32, encoding: DW_ATE_float)";
@@ -634,7 +642,11 @@ namespace gallt {
 
         lines_.push_back("!llvm.dbg.cu = !{!0}");
         lines_.push_back("!llvm.module.flags = !{!2, !3, !4}");
-        lines_.push_back("!2 = !{i32 2, !\"CodeView\", i32 1}");
+        if (pal::is_windows()) {
+            lines_.push_back("!2 = !{i32 2, !\"CodeView\", i32 1}");
+        } else if (pal::is_linux()) {
+            lines_.push_back("!2 = !{i32 7, !\"Dwarf Version\", i32 5}");
+        }
         lines_.push_back("!3 = !{i32 2, !\"Debug Info Version\", i32 3}");
         lines_.push_back("!4 = !{i32 1, !\"wchar_size\", i32 4}");
         std::string unit = "!0 = distinct !DICompileUnit(language: DW_LANG_C99, file: !1, "
@@ -708,6 +720,16 @@ namespace gallt {
         emit_line("declare void @gallt_output_bool(i8)");
         emit_line("declare void @gallt_output_ptr(ptr)");
         emit_line("declare void @gallt_output_string(ptr)");
+        emit_line("declare void @gallt_erroutput_i32(i32)");
+        emit_line("declare void @gallt_erroutput_u32(i32)");
+        emit_line("declare void @gallt_erroutput_i64(i64)");
+        emit_line("declare void @gallt_erroutput_u64(i64)");
+        emit_line("declare void @gallt_erroutput_f32(float)");
+        emit_line("declare void @gallt_erroutput_f64(double)");
+        emit_line("declare void @gallt_erroutput_char(i8)");
+        emit_line("declare void @gallt_erroutput_bool(i8)");
+        emit_line("declare void @gallt_erroutput_ptr(ptr)");
+        emit_line("declare void @gallt_erroutput_string(ptr)");
         emit_line("declare void @gallt_input_i32(ptr)");
         emit_line("declare void @gallt_input_u32(ptr)");
         emit_line("declare void @gallt_input_i64(ptr)");
@@ -963,6 +985,17 @@ namespace gallt {
                     continue;
                 }
 
+                if (var->address_taken || var->type.kind == TypeKind::String) {
+                    std::string initializer;
+                    if (build_static_global_initializer(var, initializer)) {
+                        emit_definition(var, initializer);
+                    } else {
+                        emit_definition(var, "zeroinitializer");
+                        runtime_globals_.push_back(var);
+                    }
+                    continue;
+                }
+
                 LocalInfo info;
                 if (fold_constant_declaration(var, info)) {
                     global_symbols_[var->name] = std::move(info);
@@ -1004,7 +1037,16 @@ namespace gallt {
         hoist_insert_index_ = lines_.size();
 
         for (AST::VariableDeclaration* var : runtime_globals_) {
-            if (var->initializer) {
+            const bool is_const = var->type.is_const ||
+                (var->type.kind == TypeKind::Array &&
+                    var->type.element_type &&
+                    var->type.element_type->is_const);
+            if (is_const && var->address_taken && var->initializer) {
+                if (!emit_constant_storage_initializer(var->initializer.get(),
+                    var->type, "@glt_g_" + var->name)) {
+                    emit_initializer_to_address(var, "@glt_g_" + var->name);
+                }
+            } else if (var->initializer) {
                 emit_initializer_to_address(var, "@glt_g_" + var->name);
             } else if (!var->constructed_by_lowering &&
                 var->type.kind == TypeKind::Struct) {

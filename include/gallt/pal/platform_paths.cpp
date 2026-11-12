@@ -57,12 +57,16 @@ namespace pal {
     std::vector<std::string> compile_debug_arguments(int debug_symbols_level) {
         std::vector<std::string> out;
 
+        if (debug_symbols_level >= 1) {
+            if (is_windows()) {
+                out.push_back("-gcodeview");
+            } else if (is_linux()) {
+                out.push_back("-gdwarf-5");
+            }
+        }
         if (debug_symbols_level == 1) {
             out.push_back("-gline-tables-only");
         } else if (debug_symbols_level >= 2) {
-#if SGC_PLATFORM_WINDOWS
-            out.push_back("-gcodeview");
-#endif
             out.push_back("-g");
         }
 
@@ -71,13 +75,9 @@ namespace pal {
 
     std::vector<std::string> link_debug_arguments(int debug_symbols_level) {
         std::vector<std::string> out;
-#if SGC_PLATFORM_WINDOWS
-        if (debug_symbols_level >= 2) {
+        if (is_windows() && debug_symbols_level >= 2) {
             out.push_back("-Wl,/DEBUG");
         }
-#else
-        (void)debug_symbols_level;
-#endif
         return out;
     }
 

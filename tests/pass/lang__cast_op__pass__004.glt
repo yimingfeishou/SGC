@@ -1,0 +1,30 @@
+// lang__cast_op__pass__004.glt
+// expect output
+// 41 17
+
+struct A {
+    int value
+}
+
+struct B {
+    int value
+}
+
+namespace conversions {
+    operator int (A value) {
+        return value.value + 40
+    }
+
+    operator int (B value) {
+        return value.value + 10
+    }
+}
+
+access namespace conversions
+
+int main() {
+    A a = {1}
+    B b = {7}
+    output(cast<int>(a), " ", cast<int>(b))
+    return 0
+}

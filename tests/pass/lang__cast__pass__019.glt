@@ -1,0 +1,47 @@
+// lang__cast__pass__019.glt
+// expect output
+// 4 4 7 6 0 true 7 0 1
+
+struct Value {
+    int number
+}
+
+operator void* (Value* value) {
+    return &value->number
+}
+
+int increment(int value) {
+    return value + 1
+}
+
+int side_effect_calls = 0
+
+int side_effect() {
+    side_effect_calls = side_effect_calls + 1
+    return 1
+}
+
+int main() {
+    int value = 4
+    int* pointer = &value
+    const int* readonly = pointer
+    void* raw = cast<void*>(pointer)
+    int* restored = cast<int*>(raw)
+    int* const fixed_pointer = &value
+    int* copied_pointer = cast<int*>(fixed_pointer)
+    const int constant = 7
+    int top_level = cast<int>(constant)
+    int top_level_added = cast<const int>(value)
+    Value object = {6}
+    void* object_pointer = cast<void*>(object)
+    int(int)* function_pointer = cast<int(int)*>(&increment)
+    int zero = cast<int>(null)
+    int* null_pointer = cast<int*>(null)
+    string empty = cast<string>(null)
+    cast<void>(side_effect())
+
+    output(*restored, " ", *copied_pointer, " ", top_level, " ", *cast<int*>(object_pointer))
+    output(" ", zero, " ", null_pointer == null, " ", function_pointer(6))
+    output(" ", strlen(empty), " ", side_effect_calls)
+    return 0
+}

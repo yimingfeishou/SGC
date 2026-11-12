@@ -78,6 +78,15 @@ namespace gallt {
     void CodeGenerator::emit_aggregate_assign(const std::string& dest_address,
         const AST::Type& dest_type, ExprValue& source, bool is_assignment,
         bool prefer_move) {
+        if (source.value.empty() && source.address.empty()) {
+            if (diagnostics_ != nullptr) {
+                diagnostics_->report_error(SourceLocation{},
+                    ErrorCode::ExpressionSyntaxError,
+                    "aggregate assignment source cannot be materialized");
+            }
+            return;
+        }
+
         if (dest_type.kind == TypeKind::String) {
             emit_string_assign(dest_address, source);
             destroy_owned_string(source);
@@ -85,6 +94,14 @@ namespace gallt {
         }
 
         if (dest_type.kind != TypeKind::Struct && dest_type.kind != TypeKind::Array) {
+            if (source.value.empty()) {
+                if (diagnostics_ != nullptr) {
+                    diagnostics_->report_error(SourceLocation{},
+                        ErrorCode::ExpressionSyntaxError,
+                        "aggregate assignment source has no value");
+                }
+                return;
+            }
             std::string converted = convert_value(source.value, source.type, dest_type);
             std::string type_text = llvm_type(dest_type);
             emit_line("store " + type_text + " " + converted + ", ptr " + dest_address);
@@ -105,18 +122,19 @@ namespace gallt {
 
         if (dest_type.kind == TypeKind::Struct) {
             std::string type_text = llvm_type(dest_type);
-            std::string source_storage = source.address;
-            if (source_storage.empty()) {
-                std::string loaded = source.value;
-                if (loaded.empty()) { return; }
-                source_storage = emit_alloca(type_text, "agg_temp");
-                emit_line("store " + type_text + " " + loaded + ", ptr " + source_storage);
+            if (!materialize_value_view(source, "agg_temp")) {
+                if (diagnostics_ != nullptr) {
+                    diagnostics_->report_error(SourceLocation{},
+                        ErrorCode::ExpressionSyntaxError,
+                        "aggregate assignment source cannot be materialized");
+                }
+                return;
             }
 
             if (prefer_move) {
-                emit_memberwise_move(dest_type, dest_address, source_storage, is_assignment);
+                emit_memberwise_move(dest_type, dest_address, source.address, is_assignment);
             } else {
-                emit_memberwise_copy(dest_type, dest_address, source_storage, is_assignment);
+                emit_memberwise_copy(dest_type, dest_address, source.address, is_assignment);
             }
         }
     }
@@ -252,6 +270,61 @@ namespace gallt {
         return true;
     }
 
+    void CodeGenerator::emit_explicit_constructor_call(
+        const std::string& address, const std::string& ctor_name,
+        std::vector<AST::Expression*>& arguments, SourceLocation loc) {
+        std::string callee = function_reference(ctor_name);
+        if (callee.empty()) {
+            callee = source_function_symbol(ctor_name);
+        }
+        AST::FunctionDefinition* ctor_def = nullptr;
+        auto found = function_by_name_.find(ctor_name);
+        if (found != function_by_name_.end()) {
+            ctor_def = found->second;
+        }
+        std::vector<AST::Expression*> call_arguments = arguments;
+        collect_constructor_defaults(ctor_name, call_arguments);
+        std::string call_text = "call void " + callee + "(ptr " + address;
+        std::vector<std::string> owned_arguments;
+
+        for (std::size_t i = 0; i < call_arguments.size(); ++i) {
+            bool explicit_move = false;
+            bool explicit_copy = false;
+            AST::Expression* argument = unwrap_copy_move_argument(
+                call_arguments[i], explicit_move, explicit_copy);
+            ExprValue value = gen_expr(argument);
+            AST::Type want = value.type;
+            const std::size_t parameter_index = i + 1;
+
+            if (ctor_def != nullptr &&
+                parameter_index < ctor_def->parameters.size()) {
+                want = ctor_def->parameters[parameter_index];
+            }
+
+            if (aggregate_parameter_uses_pointer(want) &&
+                (value.type.kind == TypeKind::Struct ||
+                    value.type.kind == TypeKind::String)) {
+                call_text += ", ptr " + aggregate_call_argument(want, value,
+                    !explicit_copy &&
+                        (explicit_move || !expression_is_lvalue(argument)));
+            } else {
+                call_text += ", " + llvm_type(want) + " " +
+                    convert_value(value.value, value.type, want);
+            }
+
+            if (!value.owned_string.empty()) {
+                owned_arguments.push_back(value.owned_string);
+            }
+        }
+
+        call_text += ")";
+        emit_line(call_text);
+        for (const std::string& owned : owned_arguments) {
+            emit_line("call void @gallt_string_destroy(ptr " + owned + ")");
+        }
+        (void)loc;
+    }
+
     void CodeGenerator::emit_struct_brace_initialization(const std::string& address,
         const AST::Type& struct_type, AST::ArrayInitializer* init) {
         require_lifecycle_functions(struct_type);
@@ -260,7 +333,29 @@ namespace gallt {
             lookup_struct_definition(struct_type.struct_name));
         if (def == nullptr) { return; }
 
-        if (init != nullptr && init->elements.empty()) {
+        if (init != nullptr && !def->constructor_names.empty()) {
+            std::vector<AST::Expression*> arguments;
+            bool expressions_only = true;
+
+            for (const auto& element : init->elements) {
+                auto* expression = dynamic_cast<AST::ExpressionInitializer*>(
+                    element.get());
+                if (expression == nullptr) {
+                    expressions_only = false;
+                    break;
+                }
+                arguments.push_back(expression->expr.get());
+            }
+
+            if (expressions_only && !init->lowered_ctor.empty()) {
+                emit_explicit_constructor_call(address, init->lowered_ctor,
+                    arguments, init->location);
+                return;
+            }
+        }
+
+        if (init != nullptr && init->elements.empty() &&
+            def->constructor_names.empty()) {
             if (emit_struct_default_constructor(address, def, init->location)) {
                 return;
             }
@@ -317,7 +412,8 @@ namespace gallt {
                 if (member.type.kind == TypeKind::Struct) {
                     const AST::StructDefinition* member_def =
                         lookup_struct_definition(member.type.struct_name);
-                    if (member_def != nullptr) {
+                    if (member_def != nullptr &&
+                        default_constructor_index(member_def) >= 0) {
                         handled = emit_struct_default_constructor(field_ptr,
                             member_def, member.location);
                     }

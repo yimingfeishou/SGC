@@ -1,6 +1,6 @@
 // lang__lifecycle__pass__015.glt
 // expect output
-// 5 6 7
+// 0 6 7
 
 struct S {
     int x
@@ -21,7 +21,7 @@ struct P {
 }
 
 int main() {
-    S s = {5}
+    S s
     P p = {6, 7}
     output(s.x, " ", p.a, " ", p.b)
     return 0

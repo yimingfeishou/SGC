@@ -15,7 +15,7 @@ namespace gallt {
         case TypeKind::Struct: {
             const AST::StructDefinition* def = lookup_struct_definition(type);
             if (def == nullptr) { return true; }
-            if (def->no_copy) { return false; }
+            if (def->no_copy || def->no_copy_ctor) { return false; }
 
             for (const auto& member : def->members) {
                 if (!type_is_copyable(member.type)) { return false; }
@@ -35,10 +35,52 @@ namespace gallt {
         case TypeKind::Struct: {
             const AST::StructDefinition* def = lookup_struct_definition(type);
             if (def == nullptr) { return true; }
-            if (def->no_move) { return false; }
+            if (def->no_move || def->no_move_ctor) { return false; }
 
             for (const auto& member : def->members) {
                 if (!type_is_movable(member.type)) { return false; }
+            }
+
+            return true;
+        }
+        default:
+            return true;
+        }
+    }
+
+    bool CodeGenerator::type_is_copy_assignable(const AST::Type& type) const {
+        switch (type.kind) {
+        case TypeKind::Array:
+            return type.element_type
+                ? type_is_copy_assignable(*type.element_type) : true;
+        case TypeKind::Struct: {
+            const AST::StructDefinition* def = lookup_struct_definition(type);
+            if (def == nullptr) { return true; }
+            if (def->no_copy || def->no_copy_assign) { return false; }
+
+            for (const auto& member : def->members) {
+                if (!type_is_copy_assignable(member.type)) { return false; }
+            }
+
+            return true;
+        }
+        default:
+            return true;
+        }
+    }
+
+    bool CodeGenerator::type_is_move_assignable(const AST::Type& type) const {
+        switch (type.kind) {
+        case TypeKind::Array:
+            return type.element_type
+                ? type_is_move_assignable(*type.element_type) : true;
+        case TypeKind::Struct: {
+            const AST::StructDefinition* def = lookup_struct_definition(type);
+            if (def == nullptr) { return true; }
+            if (def->no_move || def->no_move_assign) { return false; }
+
+            for (const auto& member : def->members) {
+                if (!type_is_move_assignable(member.type)) { return false; }
             }
 
             return true;
@@ -315,9 +357,33 @@ namespace gallt {
         ExprValue value = gen_expr(expr);
         if (out_type != nullptr) { *out_type = value.type; }
         if (!value.address.empty()) { return value.address; }
-        std::string storage = emit_alloca(llvm_type(value.type), "operand_tmp");
-        emit_line("store " + llvm_type(value.type) + " " + value.value + ", ptr " + storage);
-        return storage;
+        if (value.value_is_pointer_value) {
+            return value.value;
+        }
+        if (!materialize_value_view(value, "operand_tmp")) {
+            if (diagnostics_ != nullptr) {
+                diagnostics_->report_error(expr->location,
+                    ErrorCode::ExpressionSyntaxError,
+                    "expression cannot be materialized as an address");
+            }
+            return std::string();
+        }
+        return value.address;
+    }
+
+    bool CodeGenerator::materialize_value_view(ExprValue& value, const char* hint) {
+        if (!value.address.empty()) {
+            return true;
+        }
+        if (value.value.empty()) {
+            return false;
+        }
+
+        value.address = emit_alloca(llvm_type(value.type), hint);
+        emit_line("store " + llvm_type(value.type) + " " + value.value +
+            ", ptr " + value.address);
+        value.ownership = ResourceOwnership::NonOwning;
+        return true;
     }
 
     bool CodeGenerator::type_needs_cleanup(const AST::Type& type) {
@@ -493,28 +559,34 @@ namespace gallt {
         if (ir_name != struct_ir_names_.end()) { suffix = ir_name->second; }
         switch (kind) {
         case LifecycleKind::Constructor:
+            if (def->no_ctor) { return std::string(); }
             return def->constructor_names.empty()
                 ? ("__sgc_ctor$" + suffix) : std::string();
         case LifecycleKind::Destructor:
+            if (def->no_dtor) { return std::string(); }
             return def->destructor_name.empty()
                 ? ("__sgc_dtor$" + suffix) : std::string();
         case LifecycleKind::CopyConstructor:
-            if (def->no_copy || ast_function_exists(def->copy_constructor_name)) {
+            if (def->no_copy || def->no_copy_ctor ||
+                ast_function_exists(def->copy_constructor_name)) {
                 return std::string();
             }
             return "__sgc_copyctor$" + suffix;
         case LifecycleKind::MoveConstructor:
-            if (def->no_move || ast_function_exists(def->move_constructor_name)) {
+            if (def->no_move || def->no_move_ctor ||
+                ast_function_exists(def->move_constructor_name)) {
                 return std::string();
             }
             return "__sgc_movector$" + suffix;
         case LifecycleKind::CopyAssignment:
-            if (def->no_copy || ast_function_exists(def->copy_assignment_name)) {
+            if (def->no_copy || def->no_copy_assign ||
+                ast_function_exists(def->copy_assignment_name)) {
                 return std::string();
             }
             return "__sgc_copyassign$" + suffix;
         case LifecycleKind::MoveAssignment:
-            if (def->no_move || ast_function_exists(def->move_assignment_name)) {
+            if (def->no_move || def->no_move_assign ||
+                ast_function_exists(def->move_assignment_name)) {
                 return std::string();
             }
             return "__sgc_moveassign$" + suffix;
@@ -564,14 +636,20 @@ namespace gallt {
             for (LifecycleKind kind : kinds) {
                 std::string symbol = lifecycle_symbol(def, kind);
                 if (symbol.empty()) { continue; }
-                if (kind == LifecycleKind::CopyConstructor ||
-                    kind == LifecycleKind::CopyAssignment) {
+                if (kind == LifecycleKind::CopyConstructor) {
                     if (!type_is_copyable(struct_type)) { continue; }
                 }
 
-                if (kind == LifecycleKind::MoveConstructor ||
-                    kind == LifecycleKind::MoveAssignment) {
+                if (kind == LifecycleKind::CopyAssignment) {
+                    if (!type_is_copy_assignable(struct_type)) { continue; }
+                }
+
+                if (kind == LifecycleKind::MoveConstructor) {
                     if (!type_is_movable(struct_type)) { continue; }
+                }
+
+                if (kind == LifecycleKind::MoveAssignment) {
+                    if (!type_is_move_assignable(struct_type)) { continue; }
                 }
 
                 lifecycle_catalog_[symbol] = std::make_pair(def, kind);

@@ -15,11 +15,14 @@ namespace {
             if (a == 'l' && b == 'u') {
                 return text.substr(0, text.size() - 2);
             }
+            if (a == 's' && b == 'u') {
+                return text.substr(0, text.size() - 2);
+            }
         }
 
         if (!text.empty()) {
             char c = static_cast<char>(std::tolower(static_cast<unsigned char>(text.back())));
-            if (c == 'l' || c == 'u') {
+            if (c == 'l' || c == 's' || c == 'u') {
                 return text.substr(0, text.size() - 1);
             }
         }

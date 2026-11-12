@@ -17,11 +17,10 @@ namespace gallt {
     using namespace type_checker_detail;
 
     TypeChecker::TypeChecker(DiagnosticEngine& diag, bool require_main,
-        bool extended_semantics, std::optional<std::uint64_t> constexpr_depth,
+        std::optional<std::uint64_t> constexpr_depth,
         std::optional<std::uint64_t> constexpr_max_steps,
         std::optional<std::uint64_t> constexpr_max_integer_exponent)
-        : diag_(diag), require_main_(require_main),
-        extended_semantics_(extended_semantics) {
+        : diag_(diag), require_main_(require_main) {
         configure_constexpr_host();
 
         if (constexpr_depth.has_value() && *constexpr_depth > 0) {
@@ -266,7 +265,8 @@ namespace gallt {
         }
 
         bool EnterAccessNamespaceStatement(AST::AccessNamespaceStatement* node) override {
-            return report_unknown_node(node);
+            owner_.import_namespace_operators(node);
+            return false;
         }
 
         bool EnterAdditionNamespaceStatement(AST::AdditionNamespaceStatement* node) override {
@@ -525,6 +525,11 @@ namespace gallt {
         sym_output.is_builtin = true;
         sym_table_.declare(sym_output);
 
+        Symbol sym_erroutput = Symbol::make_function("erroutput", AST::Type::make_void(),
+            { AST::Type::make_string() }, {}, SourceLocation{}, nullptr);
+        sym_erroutput.is_builtin = true;
+        sym_table_.declare(sym_erroutput);
+
         Symbol sym_size = Symbol::make_function("size", AST::Type::make_int(),
             { AST::Type::make_void() }, {}, SourceLocation{}, nullptr);
         sym_size.is_builtin = true;
@@ -637,6 +642,7 @@ namespace gallt {
         const_values_.emplace_back();
         constexpr_values_.emplace_back();
         struct_scopes_.emplace_back();
+        imported_operator_scopes_.emplace_back();
     }
 
     void TypeChecker::exit_scope() {
@@ -652,6 +658,10 @@ namespace gallt {
 
         if (!struct_scopes_.empty()) {
             struct_scopes_.pop_back();
+        }
+
+        if (!imported_operator_scopes_.empty()) {
+            imported_operator_scopes_.pop_back();
         }
     }
 

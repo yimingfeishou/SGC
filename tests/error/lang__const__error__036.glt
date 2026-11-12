@@ -2,7 +2,7 @@
 // expect error ER 0148
 
 int f(int x) const {
-    input(x)
+    input(&x)
     return x
 }
 int main() { return 0 }

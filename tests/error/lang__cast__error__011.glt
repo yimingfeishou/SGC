@@ -1,0 +1,8 @@
+// lang__cast__error__011.glt
+// expect error ER 0032
+
+int main() {
+    const int fixed = 42
+    int* pointer = cast<int*>(&fixed)
+    return 0
+}

@@ -365,47 +365,61 @@ namespace gallt {
     }
 
     void CodeGenerator::emit_output_value(const AST::Type& type,
-        const std::string& address, const std::string& value) {
+        const std::string& address, const std::string& value, bool use_stderr) {
+        const std::string prefix = use_stderr ? "@gallt_erroutput_" : "@gallt_output_";
         switch (type.kind) {
         case TypeKind::Int:
-            emit_line("call void @gallt_output_i32(i32 " + value + ")");
+            emit_line("call void " + prefix + "i32(i32 " + value + ")");
             break;
         case TypeKind::Uint:
-            emit_line("call void @gallt_output_u32(i32 " + value + ")");
+            emit_line("call void " + prefix + "u32(i32 " + value + ")");
             break;
+        case TypeKind::Sint: {
+            std::string extended = new_temp("output_sint");
+            emit_line(extended + " = sext i16 " + value + " to i32");
+            emit_line("call void " + prefix + "i32(i32 " + extended + ")");
+            break;
+        }
+        case TypeKind::Suint: {
+            std::string extended = new_temp("output_suint");
+            emit_line(extended + " = zext i16 " + value + " to i32");
+            emit_line("call void " + prefix + "u32(i32 " + extended + ")");
+            break;
+        }
         case TypeKind::Lint:
-            emit_line("call void @gallt_output_i64(i64 " + value + ")");
+            emit_line("call void " + prefix + "i64(i64 " + value + ")");
             break;
         case TypeKind::Luint:
-            emit_line("call void @gallt_output_u64(i64 " + value + ")");
+            emit_line("call void " + prefix + "u64(i64 " + value + ")");
             break;
         case TypeKind::Float:
-            emit_line("call void @gallt_output_f32(float " + value + ")");
+            emit_line("call void " + prefix + "f32(float " + value + ")");
             break;
         case TypeKind::Double:
-            emit_line("call void @gallt_output_f64(double " + value + ")");
+            emit_line("call void " + prefix + "f64(double " + value + ")");
             break;
         case TypeKind::Char:
         case TypeKind::Uchar:
-            emit_line("call void @gallt_output_char(i8 " + value + ")");
+            emit_line("call void " + prefix + "char(i8 " + value + ")");
             break;
         case TypeKind::Bool:
-            emit_line("call void @gallt_output_bool(i8 " + value + ")");
+            emit_line("call void " + prefix + "bool(i8 " + value + ")");
             break;
         case TypeKind::String:
-            emit_line("call void @gallt_output_string(ptr " + address + ")");
+            emit_line("call void " + prefix + "string(ptr " + address + ")");
             break;
         case TypeKind::Pointer:
         case TypeKind::Function:
         case TypeKind::Array:
-            emit_line("call void @gallt_output_ptr(ptr " + address + ")");
+            emit_line("call void " + prefix + "ptr(ptr " + address + ")");
             break;
         default:
             break;
         }
     }
 
-    bool CodeGenerator::emit_output_pack_expansion(AST::Expression* expr) {
+    bool CodeGenerator::emit_output_pack_expansion(AST::Expression* expr,
+        bool use_stderr) {
         auto* post = dynamic_cast<AST::PostfixExpression*>(expr);
         if (post == nullptr ||
             post->op != AST::PostfixExpression::Operator::PackExpand) {
@@ -455,7 +469,7 @@ namespace gallt {
             break;
         }
 
-        emit_output_value(pack->element, address, value);
+        emit_output_value(pack->element, address, value, use_stderr);
         std::string next = new_temp("packnext");
         emit_line(next + " = add i32 " + index + ", 1");
         emit_line("store i32 " + next + ", ptr " + counter);

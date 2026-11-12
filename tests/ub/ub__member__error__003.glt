@@ -1,0 +1,34 @@
+// ub__member__error__003.glt
+// expect exit 0
+
+struct R {
+    int* p
+    int n
+
+    constructor (int x) {
+        n = x
+        p = heap(int, 1)
+        *p = x
+    }
+
+    copy_constructor (R* other) {
+        n = other->n
+        p = heap(int, 1)
+        *p = *(other->p)
+    }
+
+    destructor () {
+        if (p != null) {
+            free(p)
+            p = null
+        }
+    }
+}
+
+int main() {
+    R a = R(1)
+    output(cast<R>(a).n)
+    output(bitcopy<R>(a).n)
+    output(shallow_copy(a).n)
+    return 0
+}

@@ -7,8 +7,11 @@
 #include <cstdlib>
 #include <cstdio>
 #include <functional>
+#include <iomanip>
+#include <limits>
 #include <map>
 #include <set>
+#include <sstream>
 
 using namespace gallt::AST;
 
@@ -76,15 +79,33 @@ namespace gallt {
                     if (post != nullptr &&
                         post->op == PostfixExpression::Operator::PackExpand &&
                         pack_identifier_name(post->base.get(), pack_name)) {
-                        auto const_pack = sub.const_packs.find(pack_name);
+                        auto fixed = sub.fixed_pack_members.find(pack_name);
 
-                        if (const_pack != sub.const_packs.end()) {
-                            for (const ConstantValue& value : const_pack->second) {
+                        if (fixed != sub.fixed_pack_members.end()) {
+                            for (const std::string& member : fixed->second) {
                                 elements.push_back(
                                     std::make_unique<ExpressionInitializer>(
                                         element->location,
-                                        make_constant_literal(element->location,
-                                            value)));
+                                        std::make_unique<PrimaryExpression>(
+                                            element->location, member)));
+                            }
+
+                            continue;
+                        }
+
+                        auto const_pack = sub.const_packs.find(pack_name);
+
+                        if (const_pack != sub.const_packs.end()) {
+                            auto declared = sub.const_pack_element.find(pack_name);
+                            for (const ConstantValue& value : const_pack->second) {
+                                std::unique_ptr<Expression> literal =
+                                    declared != sub.const_pack_element.end()
+                                    ? make_typed_constant_literal(element->location,
+                                        value, declared->second)
+                                    : make_constant_literal(element->location, value);
+                                elements.push_back(
+                                    std::make_unique<ExpressionInitializer>(
+                                        element->location, std::move(literal)));
                             }
 
                             continue;
@@ -105,6 +126,7 @@ namespace gallt {
             auto clone = std::make_unique<ArrayInitializer>(init->location,
                 std::move(elements));
             clone->from_paren_call = arr_init->from_paren_call;
+            clone->lowered_ctor = arr_init->lowered_ctor;
             return clone;
         }
         return nullptr;
@@ -131,9 +153,10 @@ namespace gallt {
             text += "\"";
             type = TokenType::StringLiteral;
         } else if (value.is_float) {
-            char buffer[64];
-            std::snprintf(buffer, sizeof(buffer), "%g", value.float_value);
-            text = buffer;
+            std::ostringstream format;
+            format << std::setprecision(std::numeric_limits<double>::max_digits10)
+                << value.float_value;
+            text = format.str();
             type = TokenType::FloatLiteral;
         } else {
             text = std::to_string(value.int_value);
@@ -280,6 +303,7 @@ namespace gallt {
                         if (constant != sub.constants.end()) {
                             auto clone = std::make_unique<PostfixExpression>(e->location,
                                 make_constant_literal(e->location, constant->second), e->op);
+                            clone->is_bitcopy = e->is_bitcopy;
                             Type cast = Type::make_void();
                             substitute_type(e->cast_type, sub, cast);
                             clone->cast_type = std::move(cast);
@@ -290,8 +314,41 @@ namespace gallt {
             }
             auto clone = std::make_unique<PostfixExpression>(e->location,
                 clone_expression(e->base.get(), sub), e->op);
+            clone->is_bitcopy = e->is_bitcopy;
             clone->subscript_expr = clone_expression(e->subscript_expr.get(), sub);
             for (const auto& arg : e->arguments) {
+                if (e->op == PostfixExpression::Operator::FunctionCall) {
+                    auto* expansion = dynamic_cast<const PostfixExpression*>(
+                        arg.get());
+                    std::string pack_name;
+                    if (expansion != nullptr &&
+                        expansion->op == PostfixExpression::Operator::PackExpand &&
+                        pack_identifier_name(expansion->base.get(), pack_name)) {
+                        auto fixed = sub.fixed_pack_members.find(pack_name);
+                        if (fixed != sub.fixed_pack_members.end()) {
+                            for (const std::string& member : fixed->second) {
+                                clone->arguments.push_back(
+                                    std::make_unique<PrimaryExpression>(
+                                        arg->location, member));
+                            }
+                            continue;
+                        }
+                        auto constants = sub.const_packs.find(pack_name);
+                        if (constants != sub.const_packs.end()) {
+                            auto declared = sub.const_pack_element.find(pack_name);
+                            for (const ConstantValue& value : constants->second) {
+                                std::unique_ptr<Expression> literal =
+                                    declared != sub.const_pack_element.end()
+                                    ? make_typed_constant_literal(arg->location,
+                                        value, declared->second)
+                                    : make_constant_literal(arg->location, value);
+                                clone->arguments.push_back(
+                                    std::move(literal));
+                            }
+                            continue;
+                        }
+                    }
+                }
                 clone->arguments.push_back(clone_expression(arg.get(), sub));
             }
             Type cast = Type::make_void();
@@ -394,6 +451,36 @@ namespace gallt {
                 std::vector<std::unique_ptr<Expression>> args;
 
                 for (const auto& arg : e->construct_args) {
+                    auto* expansion = dynamic_cast<const PostfixExpression*>(
+                        arg.get());
+                    std::string pack_name;
+                    if (expansion != nullptr &&
+                        expansion->op == PostfixExpression::Operator::PackExpand &&
+                        pack_identifier_name(expansion->base.get(), pack_name)) {
+                        auto fixed = sub.fixed_pack_members.find(pack_name);
+                        if (fixed != sub.fixed_pack_members.end()) {
+                            for (const std::string& member : fixed->second) {
+                                args.push_back(
+                                    std::make_unique<PrimaryExpression>(
+                                        arg->location, member));
+                            }
+                            continue;
+                        }
+                        auto constants = sub.const_packs.find(pack_name);
+                        if (constants != sub.const_packs.end()) {
+                            auto declared = sub.const_pack_element.find(pack_name);
+                            for (const ConstantValue& value : constants->second) {
+                                std::unique_ptr<Expression> literal =
+                                    declared != sub.const_pack_element.end()
+                                    ? make_typed_constant_literal(arg->location,
+                                        value, declared->second)
+                                    : make_constant_literal(arg->location, value);
+                                args.push_back(
+                                    std::move(literal));
+                            }
+                            continue;
+                        }
+                    }
                     args.push_back(clone_expression(arg.get(), sub));
                 }
 
@@ -834,8 +921,14 @@ namespace gallt {
 
         auto clone = std::make_unique<StructDefinition>(def->location, name,
             std::vector<StructDefinition::Member>{});
+        clone->no_ctor = def->no_ctor;
+        clone->no_dtor = def->no_dtor;
         clone->no_copy = def->no_copy;
         clone->no_move = def->no_move;
+        clone->no_copy_ctor = def->no_copy_ctor;
+        clone->no_copy_assign = def->no_copy_assign;
+        clone->no_move_ctor = def->no_move_ctor;
+        clone->no_move_assign = def->no_move_assign;
 
         for (const auto& m : def->members) {
             clone->members.push_back(clone_member(m, sub));

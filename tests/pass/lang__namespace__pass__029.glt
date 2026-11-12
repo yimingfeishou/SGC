@@ -1,0 +1,24 @@
+// lang__namespace__pass__029.glt
+// expect output
+// 3
+
+struct G {
+    int v
+}
+
+namespace ns {
+    G operator + (G a, G b) {
+        G r = {a.v + b.v}
+        return r
+    }
+}
+
+access namespace ns
+
+int main() {
+    G a = {1}
+    G b = {2}
+    G c = a + b
+    output(c.v)
+    return 0
+}

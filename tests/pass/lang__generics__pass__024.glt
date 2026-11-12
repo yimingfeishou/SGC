@@ -2,7 +2,7 @@
 // expect output
 // 7 10.0 9
 
-generics Box<T> {
+generics BoxGeneric<T> {
     struct Box {
         T value
     }
@@ -14,7 +14,7 @@ generics Box<T> {
     }
 }
 
-generics IntArray<T> {
+generics IntArrayGeneric<T> {
     struct IntArray {
         T* data
     }
@@ -24,23 +24,23 @@ generics IntArray<T> {
     }
 }
 
-Box<double> operator * (Box<double> a, Box<double> b) {
-    Box<double> r
+BoxGeneric<double> operator * (BoxGeneric<double> a, BoxGeneric<double> b) {
+    BoxGeneric<double> r
     r.value = a.value * b.value
     return r
 }
 
 int main() {
-    Box<int> x = {3}
-    Box<int> y = {4}
-    Box<int> z = x + y
+    BoxGeneric<int> x = {3}
+    BoxGeneric<int> y = {4}
+    BoxGeneric<int> z = x + y
     output(z.value)
-    Box<double> p = {2.5}
-    Box<double> q = {4.0}
-    Box<double> w = p * q
+    BoxGeneric<double> p = {2.5}
+    BoxGeneric<double> q = {4.0}
+    BoxGeneric<double> w = p * q
     output(" ", w.value)
     int values[3] = {7, 8, 9}
-    IntArray<int> arr = {values}
+    IntArrayGeneric<int> arr = {values}
     output(" ", *arr[2])
     return 0
 }

@@ -13,8 +13,10 @@ namespace gallt {
         const std::unordered_map<std::string_view, TokenType> KEYWORD_MAP = {
             {"int", TokenType::Keyword_Int},
             {"lint", TokenType::Keyword_Lint},
+            {"sint", TokenType::Keyword_Sint},
             {"uint", TokenType::Keyword_Uint},
             {"luint", TokenType::Keyword_Luint},
+            {"suint", TokenType::Keyword_Suint},
             {"float", TokenType::Keyword_Float},
             {"double", TokenType::Keyword_Double},
             {"char", TokenType::Keyword_Char},
@@ -48,6 +50,7 @@ namespace gallt {
 {"export", TokenType::Keyword_Export},
 {"const", TokenType::Keyword_Const},
 {"cast", TokenType::Keyword_Cast},
+{"bitcopy", TokenType::Keyword_Bitcopy},
 };
 
         bool is_identifier_start(char c) noexcept {
@@ -80,12 +83,13 @@ namespace gallt {
             };
             if (suffix.size() == 1) {
                 char c = lower(suffix[0]);
-                return c == 'l' || c == 'u';
+                return c == 'l' || c == 's' || c == 'u';
             }
             if (suffix.size() == 2) {
                 char a = lower(suffix[0]);
                 char b = lower(suffix[1]);
-                return a == 'l' && b == 'u';
+                return (a == 'l' && b == 'u') ||
+                    (a == 's' && b == 'u');
             }
             return false;
         }
@@ -463,7 +467,7 @@ namespace gallt {
 
                 if (!valid) {
                     report_error(ErrorCode::InvalidNumericSuffix,
-                        "invalid numeric literal suffix: only 'f', 'l', 'u' and 'lu' "
+                        "invalid numeric literal suffix: only 'f', 'l', 's', 'u', 'lu' and 'su' "
                         "are allowed, got '" + std::string(suffix) + "'");
                 }
             }
@@ -748,9 +752,19 @@ namespace gallt {
                 return Token{ TokenType::Power, start_loc, "**" };
             }
 
+            if (!is_at_end() && peek() == '=') {
+                advance();
+                return Token{ TokenType::StarAssign, start_loc, "*=" };
+            }
+
             return Token{ TokenType::Star, start_loc, "*" };
 
         case '/':
+            if (!is_at_end() && peek() == '=') {
+                advance();
+                return Token{ TokenType::SlashAssign, start_loc, "/=" };
+            }
+
             return Token{ TokenType::Slash, start_loc, "/" };
 
         case '%':

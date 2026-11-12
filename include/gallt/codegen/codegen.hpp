@@ -240,6 +240,8 @@ namespace gallt {
             const AST::Type& type, std::string& out, bool include_type = true);
         bool build_constant_scalar(const AST::Expression* expr,
             const AST::Type& type, std::string& out);
+        bool emit_constant_storage_initializer(const AST::Initializer* init,
+            const AST::Type& type, const std::string& address);
         void emit_constant_aggregate_globals();
         void emit_expression_statement(AST::ExpressionStatement* stmt);
 
@@ -255,12 +257,20 @@ namespace gallt {
         void destroy_active_cleanup_scopes(std::size_t until_depth);
         void discard_current_cleanup_scope();
 
+        enum class ResourceOwnership {
+            None,
+            NonOwning,
+            Owning
+        };
+
         struct ExprValue {
             AST::Type type;
             std::string value;
             std::string address;
             bool is_lvalue = false;
             std::string owned_string;
+            ResourceOwnership ownership = ResourceOwnership::None;
+            bool value_is_pointer_value = false;
         };
 
         ExprValue gen_expr(AST::Expression* expr);
@@ -291,9 +301,9 @@ namespace gallt {
             std::string& heap_storage);
         void store_pack_element(const AST::Type& element, const std::string& slot,
             AST::Expression* expr, std::vector<std::string>& owned_args);
-        bool emit_output_pack_expansion(AST::Expression* expr);
+        bool emit_output_pack_expansion(AST::Expression* expr, bool use_stderr);
         void emit_output_value(const AST::Type& type, const std::string& address,
-            const std::string& value);
+            const std::string& value, bool use_stderr);
         bool gen_operator_call(AST::Expression* expr, ExprValue& out);
         ExprValue emit_operator_invocation(AST::FunctionDefinition* callee,
             std::vector<AST::Expression*>& final_arguments, bool postfix_dummy,
@@ -330,7 +340,10 @@ namespace gallt {
             const std::string& src);
         bool type_is_copyable(const AST::Type& type) const;
         bool type_is_movable(const AST::Type& type) const;
+        bool type_is_copy_assignable(const AST::Type& type) const;
+        bool type_is_move_assignable(const AST::Type& type) const;
         std::string operand_address(AST::Expression* expr, AST::Type* out_type = nullptr);
+        bool materialize_value_view(ExprValue& value, const char* hint);
         bool type_needs_cleanup(const AST::Type& type);
         std::string transfer_parameter_object(const AST::Type& type,
             ExprValue& value, bool move);
@@ -344,6 +357,9 @@ namespace gallt {
         int default_constructor_index(const AST::StructDefinition* def);
         bool emit_struct_default_constructor(const std::string& address,
             const AST::StructDefinition* def, SourceLocation loc);
+        void emit_explicit_constructor_call(const std::string& address,
+            const std::string& ctor_name,
+            std::vector<AST::Expression*>& arguments, SourceLocation loc);
         AST::FunctionDefinition* constructor_function_for(
             const AST::StructDefinition* def,
             const std::vector<AST::Type>& user_parameters) const;
@@ -358,7 +374,7 @@ namespace gallt {
         std::string to_i64_value(const std::string& value, const AST::Type& type);
         AST::Type resolved_type(const AST::Expression* expr) const;
 
-        void emit_output_call(AST::PostfixExpression* call);
+        void emit_output_call(AST::PostfixExpression* call, bool use_stderr);
         void emit_input_call(AST::PostfixExpression* call, ExprValue& result);
         void emit_free_call(AST::PostfixExpression* call);
         ExprValue emit_size_align_call(AST::PostfixExpression* call, bool is_size);

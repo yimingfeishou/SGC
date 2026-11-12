@@ -20,8 +20,10 @@ namespace gallt {
             switch (t) {
             case TokenType::Keyword_Int:
             case TokenType::Keyword_Lint:
+            case TokenType::Keyword_Sint:
             case TokenType::Keyword_Uint:
             case TokenType::Keyword_Luint:
+            case TokenType::Keyword_Suint:
             case TokenType::Keyword_Float:
             case TokenType::Keyword_Double:
             case TokenType::Keyword_Char:
@@ -163,7 +165,8 @@ namespace gallt {
                 }
 
                 if (call->op == PostfixExpression::Operator::Cast) {
-                    return call->cast_type.to_string() + "(" +
+                    return (call->is_bitcopy ? "bitcopy<" : "cast<") +
+                        call->cast_type.to_string() + ">(" +
                         compile_time_expr_text(call->base.get()) + ")";
                 }
             }

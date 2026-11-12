@@ -3,6 +3,6 @@
 
 const string cs = "abc"
 int main() {
-    bool r = strsetchar(cs, 0, 'x')
+    bool r = strsetchar(&cs, 0, 'x')
     return 0
 }

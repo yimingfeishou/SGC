@@ -1,0 +1,12 @@
+// lang__const__pass__047.glt
+// expect output
+// short|0123456789abcdef|local-value|local-value
+
+const string SHORT_TEXT = "short"
+const string LONG_TEXT = "0123456789abcdef"
+
+int main() {
+    const string LOCAL_TEXT = "local-value"
+    output(SHORT_TEXT, "|", LONG_TEXT, "|", LOCAL_TEXT, "|", LOCAL_TEXT, "\n")
+    return 0
+}

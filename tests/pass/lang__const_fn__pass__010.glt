@@ -1,0 +1,20 @@
+// lang__const_fn__pass__010.glt
+// expect output
+// 8 8
+
+sint twice(sint value) const {
+    const sint factor = 2s
+    return value * factor
+}
+
+suint add_three(suint value) const {
+    return value + 3su
+}
+
+const sint computed_sint = twice(4s)
+const suint computed_suint = add_three(5su)
+
+int main() {
+    output(computed_sint, " ", computed_suint)
+    return 0
+}

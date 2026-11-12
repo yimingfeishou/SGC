@@ -2,7 +2,6 @@
 // Gallt Standard Library
 // Naming Conventions: snake_case
 // All standard library statements are stored in the sl namespace
-// All standard libraries except for sl.glt itself, should import sl.glt and addition namespace sl
 // Copyright (c) Yimingfeishou
 
 guide "common.glt"
@@ -68,6 +67,10 @@ addition namespace sl {
 
     int __st_stdout_write(stream* s, string text) {
         output(text)
+        return strlen(text)
+    }
+    int __st_stderr_write(stream* s, string text) {
+        erroutput(text)
         return strlen(text)
     }
     bool __st_stdout_flush(stream* s) { return true }
@@ -160,6 +163,16 @@ addition namespace sl {
         stream* s = construct stream()
         s->kind = 0
         s->write = &__st_stdout_write
+        s->flush = &__st_stdout_flush
+        s->close = &__st_stdout_close
+        s->error = &__st_stdout_error
+        return s
+    }
+
+    stream* make_console_err() {
+        stream* s = construct stream()
+        s->kind = 4
+        s->write = &__st_stderr_write
         s->flush = &__st_stdout_flush
         s->close = &__st_stdout_close
         s->error = &__st_stdout_error
@@ -837,17 +850,23 @@ addition namespace sl {
     }
 
     stream* console_out = null
+    stream* console_err = null
     stream* console_in = null
 
     struct __stream_init_guard {
         constructor () {
             console_out = make_console_out()
+            console_err = make_console_err()
             console_in = make_console_in()
         }
         destructor () {
             if (console_out != null) {
                 destruct console_out
                 console_out = null
+            }
+            if (console_err != null) {
+                destruct console_err
+                console_err = null
             }
             if (console_in != null) {
                 destruct console_in
@@ -861,6 +880,9 @@ addition namespace sl {
     void init_streams() {
         if (console_out == null) {
             console_out = make_console_out()
+        }
+        if (console_err == null) {
+            console_err = make_console_err()
         }
         if (console_in == null) {
             console_in = make_console_in()

@@ -3,9 +3,7 @@
 // []
 
 int main() {
-    int value = 7
-    int* handle = &value
-    string text = cast<string>(handle)
+    string text = cast<string>(null)
     output("[", text, "]")
     return 0
 }

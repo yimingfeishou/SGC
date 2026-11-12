@@ -1,0 +1,37 @@
+// lang__generics__pass__067.glt
+// expect output
+// 0 42 3 10
+
+generics FirstType<T...> {
+    T[0] get_zero() {
+        T[0] value = 0
+        return value
+    }
+}
+
+generics MemberHolder<T...> {
+    struct Item {
+        T[0] value
+    }
+}
+
+generics ArrayHolder<T...> {
+    struct Item {
+        T[0] data[4]
+    }
+}
+
+generics Caster<T...> {
+    T[0] cast_item(luint raw) {
+        return bitcopy<T[0]>(raw)
+    }
+}
+
+int main() {
+    int zero = FirstType<int, string>.get_zero()
+    MemberHolder<int, string>.Item member = {42}
+    ArrayHolder<int, string>.Item array = {{1, 2, 3, 4}}
+    int converted = Caster<int, string>.cast_item(10lu)
+    output(zero, " ", member.value, " ", array.data[2], " ", converted)
+    return 0
+}

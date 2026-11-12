@@ -90,6 +90,7 @@ namespace gallt {
 
             auto propagate = [&](StructInfo& info) {
                 if (info.def->needs_destruction) { return; }
+                if (info.def->no_dtor) { return; }
 
                 for (const auto& member : info.def->members) {
                     if (type_needs_destruction(member.type)) {
@@ -254,6 +255,10 @@ namespace gallt {
         case TypeKind::String:
             return false;
         case TypeKind::Struct:
+            if (auto it = structs_.find(type.struct_name);
+                it != structs_.end() && it->second.def->no_dtor) {
+                return false;
+            }
             return has_destructor(type.struct_name);
         case TypeKind::Array:
             return type.element_type && type_needs_destruction(*type.element_type);
@@ -349,15 +354,45 @@ namespace gallt {
                 }
             }
 
-            if (info.no_copy) {
+            if (info.def->no_ctor && !info.constructors.empty()) {
+                report_template(info.constructors.front()->location,
+                    ErrorCode::NoConstructorViolation, { name });
+            }
+
+            if (info.def->no_dtor && info.destructor != nullptr) {
+                report_template(info.destructor->location,
+                    ErrorCode::NoDestructorViolation, { name });
+            }
+
+            if (info.def->no_copy) {
                 if (info.copy_constructor != nullptr || info.copy_assignment != nullptr) {
-                    report(info.def->location, ErrorCode::NoCopyViolation, { name });
+                    report_template(info.def->location, ErrorCode::NoCopyViolation,
+                        { name });
+                }
+            } else {
+                if (info.def->no_copy_ctor && info.copy_constructor != nullptr) {
+                    report_template(info.copy_constructor->location,
+                        ErrorCode::NoCopyConstructorViolation, { name });
+                }
+                if (info.def->no_copy_assign && info.copy_assignment != nullptr) {
+                    report_template(info.copy_assignment->location,
+                        ErrorCode::NoCopyAssignmentViolation, { name });
                 }
             }
 
-            if (info.no_move) {
+            if (info.def->no_move) {
                 if (info.move_constructor != nullptr || info.move_assignment != nullptr) {
-                    report(info.def->location, ErrorCode::NoMoveViolation, { name });
+                    report_template(info.def->location, ErrorCode::NoMoveViolation,
+                        { name });
+                }
+            } else {
+                if (info.def->no_move_ctor && info.move_constructor != nullptr) {
+                    report_template(info.move_constructor->location,
+                        ErrorCode::NoMoveConstructorViolation, { name });
+                }
+                if (info.def->no_move_assign && info.move_assignment != nullptr) {
+                    report_template(info.move_assignment->location,
+                        ErrorCode::NoMoveAssignmentViolation, { name });
                 }
             }
 

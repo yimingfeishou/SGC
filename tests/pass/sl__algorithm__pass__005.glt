@@ -1,0 +1,52 @@
+// sl__algorithm__pass__005.glt
+// expect output
+// true -1 true 4
+// false 77 false 77
+// 15 10 10
+
+guide "algorithm.glt"
+guide "generics.glt"
+access namespace sl
+
+int compare_int(int left, int right) {
+    if (left < right) {
+        return -1
+    }
+    if (left > right) {
+        return 1
+    }
+    return 0
+}
+
+int add_int(int left, int right) {
+    return left + right
+}
+
+int main() {
+    dynamic_array_generic<int>
+    dynamic_array_range_generic<int>
+    min_value_generic<int>
+
+    dynamic_array values = dynamic_array(4)
+    push(&values, 3)
+    push(&values, -1)
+    push(&values, 4)
+    push(&values, -1)
+    iterator it = begin(&values)
+    iterator_interface range = make_dynamic_range(&it)
+    int result = 0
+    output(min_value(&range, length(&values), &compare_int, &result), " ", result, " ")
+    output(max_value(&range, length(&values), &compare_int, &result), " ", result, "\n")
+
+    dynamic_array empty_values = dynamic_array(0)
+    iterator empty_it = begin(&empty_values)
+    iterator_interface empty_range = make_dynamic_range(&empty_it)
+    result = 77
+    output(min_value(&empty_range, 0, &compare_int, &result), " ", result, " ")
+    output(max_value(&range, length(&values), null, &result), " ", result, "\n")
+
+    output(accumulate(&range, length(&values), 10, &add_int), " ")
+    output(accumulate(&empty_range, 0, 10, &add_int), " ")
+    output(accumulate(&range, length(&values), 10, null))
+    return 0
+}

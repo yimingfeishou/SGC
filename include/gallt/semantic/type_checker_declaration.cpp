@@ -545,14 +545,15 @@ namespace gallt {
         if (target_type.struct_name != source_type.struct_name) { return; }
 
         if (is_move_source(expr)) {
-            const bool relaxed = extended_semantics_ &&
-                lifecycle_transfer::is_temporary_source(expr);
-            if (!relaxed && !type_is_movable(target_type)) {
-                report_error_template(loc, ErrorCode::NoMoveViolation,
+            const bool relaxed = lifecycle_transfer::is_temporary_source(expr);
+            if (!relaxed && !type_is_move_constructible(target_type)) {
+                report_error_template(loc,
+                    move_violation_code(target_type, false),
                     { target_type.struct_name });
             }
-        } else if (!type_is_copyable(target_type)) {
-            report_error_template(loc, ErrorCode::NoCopyViolation,
+        } else if (!type_is_copy_constructible(target_type)) {
+            report_error_template(loc,
+                copy_violation_code(target_type, false),
                 { target_type.struct_name });
         }
     }
@@ -569,6 +570,7 @@ namespace gallt {
             check_initializer_expressions(decl->initializer.get());
             Symbol sym = Symbol::make_variable(decl->name, decl->type, decl->location,
                   decl->initializer != nullptr);
+            sym.variable_node = decl;
             if (object_is_const) { sym.is_mutable = false; }
             sym_table_.declare(sym);
             return;
@@ -724,6 +726,8 @@ namespace gallt {
                     !const_qualification_ok(*init_type.pointee_type,
                         *decl->type.pointee_type) &&
                     is_address_of_const_identifier(expr_init->expr.get())) {
+                    report_error(expr_init->location, ErrorCode::ConstModification,
+                        "cannot remove const qualification from an address-of expression");
                     const_drop_reported = true;
                 }
 
@@ -789,6 +793,7 @@ namespace gallt {
 
           Symbol sym = Symbol::make_variable(decl->name, decl->type, decl->location,
               decl->initializer != nullptr);
+          sym.variable_node = decl;
           if (object_is_const) {
               sym.is_mutable = false;
           }
@@ -804,7 +809,10 @@ namespace gallt {
     void TypeChecker::check_struct_initializer(AST::ArrayInitializer* init,
         const AST::Type& struct_type, SourceLocation loc) {
         if (init == nullptr) { return; }
-        AST::StructDefinition* def = get_struct_definition(struct_type.struct_name);
+        AST::StructDefinition* def = struct_type.resolved_struct;
+        if (def == nullptr) {
+            def = get_struct_definition(struct_type.struct_name);
+        }
         if (def == nullptr) {
             if (type_has_unresolved_generic(struct_type)) {
                 check_initializer_expressions(init);
@@ -816,6 +824,83 @@ namespace gallt {
         }
 
         if (report_runtime_pack_expansion_in_initializer(init)) {
+            return;
+        }
+
+        if (!def->constructor_names.empty()) {
+            std::vector<AST::Expression*> arguments;
+            std::vector<AST::Type> argument_types;
+            std::vector<bool> argument_is_null;
+            bool expressions_only = true;
+
+            for (const auto& element : init->elements) {
+                auto* expression = dynamic_cast<AST::ExpressionInitializer*>(
+                    element.get());
+                if (expression == nullptr) {
+                    expressions_only = false;
+                    break;
+                }
+                arguments.push_back(expression->expr.get());
+            }
+
+            if (!expressions_only) {
+                check_initializer_expressions(init);
+                report_error(init->location,
+                    ErrorCode::FunctionArgTypeMismatch,
+                    "constructor arguments for type '" +
+                    struct_type.struct_name + "' must be expressions");
+                return;
+            }
+
+            bool arity_matches = false;
+            for (const auto& member : def->special_members) {
+                if (member == nullptr ||
+                    member->kind != AST::SpecialMemberFunction::Kind::Constructor) {
+                    continue;
+                }
+
+                std::size_t required = member->parameters.size();
+                for (std::size_t i = member->parameter_defaults.size(); i > 0; --i) {
+                    if (member->parameter_defaults[i - 1] != nullptr) {
+                        required = i - 1;
+                    } else {
+                        break;
+                    }
+                }
+
+                if (arguments.size() >= required &&
+                    arguments.size() <= member->parameters.size()) {
+                    arity_matches = true;
+                    break;
+                }
+            }
+
+            if (!arity_matches) {
+                check_initializer_expressions(init);
+                report_error(init->location,
+                    ErrorCode::FunctionArgCountMismatch,
+                    "no constructor of '" + struct_type.struct_name +
+                    "' matches " + std::to_string(arguments.size()) +
+                    " argument(s)");
+                return;
+            }
+
+            for (AST::Expression* argument : arguments) {
+                argument_types.push_back(check_expression(argument));
+                bool is_null = false;
+                if (auto* primary =
+                    dynamic_cast<AST::PrimaryExpression*>(argument)) {
+                    is_null = primary->kind == AST::PrimaryExpression::Kind::Null;
+                }
+                argument_is_null.push_back(is_null);
+            }
+
+            Symbol* ctor = resolve_constructor_overload(
+                struct_type.struct_name, argument_types, argument_is_null,
+                init->location);
+            if (ctor != nullptr && ctor->function_node != nullptr) {
+                init->lowered_ctor = ctor->function_node->name;
+            }
             return;
         }
 

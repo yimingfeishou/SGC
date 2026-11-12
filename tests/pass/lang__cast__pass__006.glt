@@ -13,8 +13,8 @@ int add(int a, int b) {
 int main() {
     Point point = {5}
     Point* handle = &point
-    file stream = cast<file>(handle)
-    int(int, int)* callback = cast<int(int, int)*>(handle)
+    file stream = bitcopy<file>(handle)
+    int(int, int)* callback = bitcopy<int(int, int)*>(handle)
     output(stream == null, " ", callback == null)
     return 0
 }

@@ -1,0 +1,26 @@
+// lang__access__pass__007.glt
+// expect output
+// 3 6
+
+struct Item {
+    int value
+}
+
+int operator + (Item a, Item b) {
+    return a.value + b.value
+}
+
+namespace extensions {
+    int operator + (Item a, int b) {
+        return a.value + b
+    }
+}
+
+access namespace extensions
+
+int main() {
+    Item a = {1}
+    Item b = {2}
+    output(a + b, " ", a + 5)
+    return 0
+}

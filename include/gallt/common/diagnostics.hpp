@@ -172,6 +172,12 @@ namespace gallt {
         FallthroughOutsideSwitch = 150,
         ConstexprRecursionTooDeep = 151,
         ConstantInitializerSideEffect = 152,
+        NoConstructorViolation = 153,
+        NoDestructorViolation = 154,
+        NoCopyConstructorViolation = 155,
+        NoMoveConstructorViolation = 156,
+        NoCopyAssignmentViolation = 157,
+        NoMoveAssignmentViolation = 158,
     };
 
     struct Diagnostic {

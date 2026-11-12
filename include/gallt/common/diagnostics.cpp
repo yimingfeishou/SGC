@@ -37,7 +37,7 @@ namespace gallt {
             { ErrorCode::MainReturnTypeError, "main must return int, but returns '[type]'" },
             { ErrorCode::InvalidCharLiteral, "invalid character constant: empty character or invalid escape sequence" },
             { ErrorCode::UnclosedStringLiteral, "invalid string constant: unterminated string literal" },
-            { ErrorCode::InvalidNumericSuffix, "invalid numeric literal suffix: only 'f', 'l', 'u' and 'lu' are allowed, got '[suffix]'" },
+            { ErrorCode::InvalidNumericSuffix, "invalid numeric literal suffix: only 'f', 'l', 's', 'u', 'lu' and 'su' are allowed, got '[suffix]'" },
             { ErrorCode::ElseWithoutIf, "'else' without a matching 'if'" },
             { ErrorCode::ReturnOutsideFunction, "'return' outside of a function body" },
             { ErrorCode::StatementInGlobalScope, "executable statements are not allowed at global scope" },
@@ -166,6 +166,12 @@ namespace gallt {
             { ErrorCode::FallthroughOutsideSwitch, "'fallthrough' statement may only appear inside a switch-case" },
             { ErrorCode::ConstexprRecursionTooDeep, "compile-time function expression recursion is too deep" },
             { ErrorCode::ConstantInitializerSideEffect, "constant '[const]' initializer has a side effect" },
+            { ErrorCode::NoConstructorViolation, "type '[type]' is marked [noctor]; constructors are not allowed" },
+            { ErrorCode::NoDestructorViolation, "type '[type]' is marked [nodtor]; destructors are not allowed" },
+            { ErrorCode::NoCopyConstructorViolation, "type '[type]' is marked [nocopyctor]; copy construction is not allowed" },
+            { ErrorCode::NoMoveConstructorViolation, "type '[type]' is marked [nomovector]; move construction is not allowed" },
+            { ErrorCode::NoCopyAssignmentViolation, "type '[type]' is marked [nocopyassign]; copy assignment is not allowed" },
+            { ErrorCode::NoMoveAssignmentViolation, "type '[type]' is marked [nomoveassign]; move assignment is not allowed" },
         };
 
         const char* const kUnknownErrorTemplate =

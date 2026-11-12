@@ -10,8 +10,10 @@ namespace gallt {
     enum class TokenType : std::uint16_t {
         Keyword_Int,
         Keyword_Lint,
+        Keyword_Sint,
         Keyword_Uint,
         Keyword_Luint,
+        Keyword_Suint,
         Keyword_Float,
         Keyword_Double,
         Keyword_Char,
@@ -45,6 +47,7 @@ namespace gallt {
         Keyword_Export,
         Keyword_Const,
         Keyword_Cast,
+        Keyword_Bitcopy,
         Identifier,
         IntegerLiteral,
         FloatLiteral,
@@ -54,6 +57,8 @@ namespace gallt {
         Assign,
         PlusAssign,
         MinusAssign,
+        StarAssign,
+        SlashAssign,
         AndAssign,
         OrAssign,
         XorAssign,
@@ -112,7 +117,7 @@ namespace gallt {
         bool is(TokenType t) const noexcept { return type == t; }
 
         bool is_keyword() const noexcept {
-            return type >= TokenType::Keyword_Int && type <= TokenType::Keyword_Cast;
+            return type >= TokenType::Keyword_Int && type <= TokenType::Keyword_Bitcopy;
         }
 
         bool is_literal() const noexcept {

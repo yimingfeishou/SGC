@@ -1,0 +1,30 @@
+// sl__string_view__pass__001.glt
+// expect output
+// 5 26 false 99 cdef
+// true true 12 H
+// -1 abc abcdefghijklmnopqrstuvwxyz
+
+guide "common.glt"
+access namespace sl
+
+int main() {
+    string short_text = "hello"
+    string long_text = "abcdefghijklmnopqrstuvwxyz"
+    string less_text = "abc"
+    string greater_text = "abd"
+    string ends_text = "wxyz"
+    string_view short_view = string_view(&short_text)
+    string_view long_view = string_view(&long_text)
+    string_view less_view = string_view(&less_text)
+    string_view greater_view = string_view(&greater_text)
+    string_view raw_view = string_view(string_view_data(long_view), 3)
+    string_view middle = string_view_substr(long_view, 2, 4)
+
+    output(string_view_length(short_view), " ", string_view_length(long_view), " ", string_view_empty(short_view), " ", cast<int>(string_view_at(long_view, 2)), " ", string_view_to_string(middle), "\n")
+    output(string_view_starts_with(long_view, string_view(&less_text)), " ", string_view_ends_with(long_view, string_view(&ends_text)), " ", string_view_find_char(long_view, 'm'), " ")
+
+    strsetchar(&short_text, 0, 'H')
+    output(string_view_at(short_view, 0), "\n")
+    output(string_view_compare(less_view, greater_view), " ", string_view_to_string(raw_view), " ", string_view_to_string(long_view))
+    return 0
+}

@@ -5,8 +5,8 @@
 int main() {
     int value = 7
     int* handle = &value
-    float single = cast<float>(handle)
-    double wide = cast<double>(handle)
+    float single = bitcopy<float>(handle)
+    double wide = bitcopy<double>(handle)
     output(single != 0.0f, " ", wide != 0.0)
     return 0
 }

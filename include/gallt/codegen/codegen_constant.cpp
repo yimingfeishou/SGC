@@ -89,8 +89,16 @@ namespace gallt {
             long long result = is_float ? static_cast<long long>(float_value) : int_value;
             switch (decl->type.kind) {
             case TypeKind::Char:
+                result = static_cast<long long>(static_cast<signed char>(result));
+                break;
+            case TypeKind::Sint:
+                result = static_cast<long long>(static_cast<short>(result));
+                break;
             case TypeKind::Uchar:
                 result = static_cast<long long>(static_cast<unsigned char>(result));
+                break;
+            case TypeKind::Suint:
+                result = static_cast<long long>(static_cast<unsigned short>(result));
                 break;
             case TypeKind::Bool:
                 result = (result != 0) ? 1 : 0;
@@ -192,6 +200,12 @@ namespace gallt {
         case TypeKind::Uchar:
             result = static_cast<long long>(static_cast<unsigned char>(result));
             break;
+        case TypeKind::Sint:
+            result = static_cast<long long>(static_cast<short>(result));
+            break;
+        case TypeKind::Suint:
+            result = static_cast<long long>(static_cast<unsigned short>(result));
+            break;
         case TypeKind::Bool:
             result = (result != 0) ? 1 : 0;
             break;
@@ -289,6 +303,193 @@ namespace gallt {
             out = include_type ? llvm_type(type) + " " + text : text;
             return true;
         }
+        return false;
+    }
+
+    bool CodeGenerator::emit_constant_storage_initializer(
+        const AST::Initializer* init, const AST::Type& type,
+        const std::string& address) {
+        if (init == nullptr) { return false; }
+
+        std::function<bool(const AST::Initializer*, const AST::Type&)> supported;
+        supported = [&](const AST::Initializer* candidate,
+            const AST::Type& candidate_type) -> bool {
+            if (candidate == nullptr) { return false; }
+
+            std::string ignored;
+            if (build_constant_initializer(candidate, candidate_type, ignored)) {
+                return true;
+            }
+
+            if (candidate_type.kind == TypeKind::String) {
+                auto* expression =
+                    dynamic_cast<const AST::ExpressionInitializer*>(candidate);
+                auto* literal = expression == nullptr ? nullptr :
+                    dynamic_cast<const AST::PrimaryExpression*>(
+                        expression->expr.get());
+                return literal != nullptr &&
+                    literal->kind == AST::PrimaryExpression::Kind::Literal &&
+                    literal->literal_token.type == TokenType::StringLiteral;
+            }
+
+            auto* elements =
+                dynamic_cast<const AST::ArrayInitializer*>(candidate);
+            if (elements == nullptr) { return false; }
+
+            if (candidate_type.kind == TypeKind::Struct) {
+                const AST::StructDefinition* def =
+                    lookup_struct_definition(candidate_type.struct_name);
+                if (def == nullptr) { return false; }
+                for (std::size_t i = 0; i < def->members.size(); ++i) {
+                    const AST::StructDefinition::Member& member = def->members[i];
+                    const AST::Initializer* element =
+                        i < elements->elements.size()
+                        ? elements->elements[i].get() : member.initializer.get();
+                    if (element != nullptr) {
+                        if (!supported(element, member.type)) { return false; }
+                    } else if (member.type.kind == TypeKind::Struct ||
+                        member.type.kind == TypeKind::Array) {
+                        AST::ArrayInitializer empty(candidate->location,
+                            std::vector<std::unique_ptr<AST::Initializer>>{});
+                        if (!supported(&empty, member.type)) { return false; }
+                    }
+                }
+                return true;
+            }
+
+            if (candidate_type.kind == TypeKind::Array &&
+                candidate_type.element_type) {
+                const std::size_t total =
+                    candidate_type.array_size.value_or(elements->elements.size());
+                for (std::size_t i = 0; i < total; ++i) {
+                    if (i < elements->elements.size()) {
+                        if (!supported(elements->elements[i].get(),
+                            *candidate_type.element_type)) {
+                            return false;
+                        }
+                    } else if (candidate_type.element_type->kind ==
+                            TypeKind::Struct ||
+                        candidate_type.element_type->kind == TypeKind::Array) {
+                        AST::ArrayInitializer empty(candidate->location,
+                            std::vector<std::unique_ptr<AST::Initializer>>{});
+                        if (!supported(&empty, *candidate_type.element_type)) {
+                            return false;
+                        }
+                    }
+                }
+                return true;
+            }
+
+            return false;
+        };
+
+        if (!supported(init, type)) { return false; }
+
+        std::string constant;
+        if (build_constant_initializer(init, type, constant)) {
+            emit_line("store " + constant + ", ptr " + address);
+            return true;
+        }
+
+        if (type.kind == TypeKind::String) {
+            auto* expression = dynamic_cast<const AST::ExpressionInitializer*>(init);
+            auto* literal = expression == nullptr ? nullptr :
+                dynamic_cast<const AST::PrimaryExpression*>(expression->expr.get());
+            if (literal == nullptr ||
+                literal->kind != AST::PrimaryExpression::Kind::Literal ||
+                literal->literal_token.type != TokenType::StringLiteral) {
+                return false;
+            }
+
+            const std::string bytes =
+                decode_escaped_bytes(literal->literal_token.lexeme, false);
+            std::string global;
+            auto found = string_literal_ids_.find(bytes);
+            if (found != string_literal_ids_.end()) {
+                global = found->second;
+            } else {
+                global = "str" + std::to_string(string_literals_.size());
+                string_literal_ids_[bytes] = global;
+                string_literals_.push_back({ bytes, global });
+            }
+
+            const std::size_t array_len = bytes.empty() ? 1u : bytes.size();
+            const std::string data = new_temp("conststr");
+            emit_line(data + " = getelementptr [" + std::to_string(array_len) +
+                " x i8], ptr @" + global + ", i64 0, i64 0");
+            emit_line("call void @gallt_string_init(ptr " + address + ", ptr " +
+                data + ", i64 " + std::to_string(bytes.size()) + ")");
+            return true;
+        }
+
+        auto* elements = dynamic_cast<const AST::ArrayInitializer*>(init);
+        if (elements == nullptr) { return false; }
+
+        if (type.kind == TypeKind::Struct) {
+            const AST::StructDefinition* def =
+                lookup_struct_definition(type.struct_name);
+            if (def == nullptr) { return false; }
+            const std::string struct_type = llvm_type(type);
+
+            for (std::size_t i = 0; i < def->members.size(); ++i) {
+                const AST::StructDefinition::Member& member = def->members[i];
+                const AST::Initializer* element = i < elements->elements.size()
+                    ? elements->elements[i].get() : member.initializer.get();
+                std::string field = new_temp("constfield");
+                emit_line(field + " = getelementptr " + struct_type + ", ptr " +
+                    address + ", i32 0, i32 " + std::to_string(i));
+                if (element != nullptr) {
+                    if (!emit_constant_storage_initializer(element, member.type,
+                        field)) {
+                        return false;
+                    }
+                } else if (member.type.kind == TypeKind::Struct ||
+                    member.type.kind == TypeKind::Array) {
+                    AST::ArrayInitializer empty(init->location,
+                        std::vector<std::unique_ptr<AST::Initializer>>{});
+                    if (!emit_constant_storage_initializer(&empty, member.type,
+                        field)) {
+                        return false;
+                    }
+                } else {
+                    emit_line("store " + llvm_type(member.type) +
+                        " zeroinitializer, ptr " + field);
+                }
+            }
+            return true;
+        }
+
+        if (type.kind == TypeKind::Array && type.element_type) {
+            const std::size_t total = type.array_size.value_or(
+                elements->elements.size());
+            const std::string array_type = llvm_type(type);
+
+            for (std::size_t i = 0; i < total; ++i) {
+                std::string element_address = new_temp("constelement");
+                emit_line(element_address + " = getelementptr " + array_type +
+                    ", ptr " + address + ", i64 0, i64 " + std::to_string(i));
+                if (i < elements->elements.size()) {
+                    if (!emit_constant_storage_initializer(
+                        elements->elements[i].get(), *type.element_type,
+                        element_address)) {
+                        return false;
+                    }
+                } else if (type.element_type->kind == TypeKind::Struct ||
+                    type.element_type->kind == TypeKind::Array) {
+                    AST::ArrayInitializer empty(init->location,
+                        std::vector<std::unique_ptr<AST::Initializer>>{});
+                    if (!emit_constant_storage_initializer(&empty,
+                        *type.element_type, element_address)) {
+                        return false;
+                    }
+                } else {
+                    emit_line("store " + llvm_type(*type.element_type) +
+                        " zeroinitializer, ptr " + element_address);
+                }
+            }
+            return true;
+        }
+
         return false;
     }
 
@@ -410,10 +611,13 @@ namespace gallt {
             (decl->type.kind == TypeKind::Array &&
                 decl->type.element_type &&
                 decl->type.element_type->is_const);
-
         if (declaration_is_const) {
             LocalInfo constant;
-            if (fold_constant_declaration(decl, constant)) {
+            const bool folded = decl->type.kind != TypeKind::String &&
+                (!decl->address_taken ||
+                decl->type.is_scalar()) &&
+                fold_constant_declaration(decl, constant);
+            if (folded && !decl->address_taken) {
                 if (scopes_.empty()) { push_scope(); }
                 scopes_.back()[decl->name] = std::move(constant);
                 return;
@@ -439,6 +643,13 @@ namespace gallt {
                 ", i8 0, i64 " + n + ", i1 false)");
         }
 
+        if (declaration_is_const && decl->address_taken &&
+            decl->initializer != nullptr &&
+            emit_constant_storage_initializer(decl->initializer.get(),
+                decl->type, address)) {
+            return;
+        }
+
         if (!decl->initializer) {
             if (declaration_is_const) {
                 std::string n = std::to_string(type_size(decl->type));
@@ -457,6 +668,33 @@ namespace gallt {
         }
 
         if (auto* expr_init = dynamic_cast<AST::ExpressionInitializer*>(decl->initializer.get())) {
+            if (auto* bitcopy = dynamic_cast<AST::PostfixExpression*>(
+                expr_init->expr.get())) {
+                if (bitcopy->op == AST::PostfixExpression::Operator::Cast &&
+                    bitcopy->is_bitcopy) {
+                    AST::Type source_type = resolved_type(bitcopy->base.get());
+                    AST::Type target_type = bitcopy->cast_type;
+                    AST::Type declaration_type = decl->type;
+                    source_type.is_const = false;
+                    target_type.is_const = false;
+                    declaration_type.is_const = false;
+
+                    if (source_type.kind == TypeKind::Struct &&
+                        source_type == target_type &&
+                        target_type == declaration_type) {
+                        std::string source_address = operand_address(
+                            bitcopy->base.get());
+                        if (!source_address.empty()) {
+                            emit_line("call void @llvm.memcpy.p0.p0.i64(ptr " +
+                                address + ", ptr " + source_address + ", i64 " +
+                                std::to_string(type_size(decl->type)) +
+                                ", i1 false)");
+                            return;
+                        }
+                    }
+                }
+            }
+
             if (auto* cm = dynamic_cast<AST::PrimaryExpression*>(expr_init->expr.get())) {
                 if (cm->kind == AST::PrimaryExpression::Kind::CopyMove) {
                     AST::Type source_type;
@@ -518,6 +756,8 @@ namespace gallt {
         case TypeKind::Int:
         case TypeKind::Uint:
         case TypeKind::Float: return 4;
+        case TypeKind::Sint:
+        case TypeKind::Suint: return 2;
         case TypeKind::Lint:
         case TypeKind::Luint:
         case TypeKind::Double: return 8;
@@ -557,6 +797,8 @@ namespace gallt {
         case TypeKind::Int:
         case TypeKind::Uint:
         case TypeKind::Float: return 4;
+        case TypeKind::Sint:
+        case TypeKind::Suint: return 2;
         case TypeKind::Lint:
         case TypeKind::Luint:
         case TypeKind::Double: return 8;

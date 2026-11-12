@@ -1,0 +1,12 @@
+// lang__generics__error__070.glt
+// expect error ER 0070
+
+generics Token<T> {
+    int Token = 41
+}
+
+Token<int>
+
+int main() {
+    return 0
+}

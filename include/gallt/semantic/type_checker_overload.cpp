@@ -34,6 +34,15 @@ namespace gallt {
 
     bool TypeChecker::validate_operator_definition(AST::FunctionDefinition* node) {
         if (node->is_conversion_operator) {
+            if (node->conversion_target_type.kind == TypeKind::Void ||
+                node->conversion_target_type.kind == TypeKind::Array ||
+                node->conversion_target_type.kind == TypeKind::Function) {
+                report_error_template(node->location,
+                    ErrorCode::ConversionOperatorTargetInvalid,
+                    { node->conversion_target_type.to_string() });
+                return false;
+            }
+
             if (node->parameters.size() != 1) {
                 report_error(node->location, ErrorCode::OperatorOverloadOperandCountMismatch,
                     "operator " + node->conversion_target_type.to_string());
@@ -44,6 +53,15 @@ namespace gallt {
                 report_error(node->location, ErrorCode::OperatorOverloadRequiresCustomType,
                     "operator " + node->conversion_target_type.to_string());
                 return false;
+            }
+
+            for (const auto& def : node->param_defaults) {
+                if (def != nullptr) {
+                    report_error_template(node->location,
+                        ErrorCode::OperatorOverloadDefaultArgumentNotAllowed,
+                        { node->conversion_target_type.to_string() });
+                    return false;
+                }
             }
 
             return true;
@@ -58,6 +76,7 @@ namespace gallt {
         bool binary_operator = (op == "/" || op == "%" || op == "**" || op == "==" ||
             op == "!=" || op == ">" || op == "<" || op == ">=" || op == "<=" ||
             op == "&&" || op == "||" || op == "+=" || op == "-=" ||
+            op == "*=" || op == "/=" ||
             op == "^" || op == "|" || op == "<<" || op == ">>" ||
             op == "&=" || op == "|=" || op == "^=" || op == "<<=" || op == ">>=");
         std::size_t expected = binary_operator ? 2u : 1u;
@@ -101,7 +120,8 @@ namespace gallt {
             return false;
         }
 
-        if (op == "+=" || op == "-=" || op == "&=" || op == "|=" || op == "^=" ||
+        if (op == "+=" || op == "-=" || op == "*=" || op == "/=" ||
+            op == "&=" || op == "|=" || op == "^=" ||
             op == "<<=" || op == ">>=") {
             if (node->parameters[0].kind != TypeKind::Pointer ||
                 node->parameters[0].pointee_type == nullptr ||
@@ -177,7 +197,9 @@ namespace gallt {
 
             operator_namespaces_[func] = name_namespace_prefix(func->name);
             std::string key = func->is_conversion_operator
-                ? std::string("operator") + func->conversion_target_type.to_string()
+                ? std::string("operator") +
+                    without_top_level_const(
+                        func->conversion_target_type).to_string()
                 : std::string("operator") + func->overloaded_operator;
             std::vector<AST::FunctionDefinition*>& bucket = operator_overloads_[key];
             for (AST::FunctionDefinition* existing : bucket) {
@@ -208,6 +230,20 @@ namespace gallt {
             }
 
             bucket.push_back(func);
+        }
+    }
+
+    void TypeChecker::import_namespace_operators(
+        const AST::AccessNamespaceStatement* node) {
+        if (node == nullptr || node->resolved_namespace.empty() ||
+            imported_operator_scopes_.empty()) {
+            return;
+        }
+
+        for (const auto& entry : operator_namespaces_) {
+            if (entry.second == node->resolved_namespace) {
+                imported_operator_scopes_.back().insert(entry.first);
+            }
         }
     }
 
@@ -266,6 +302,15 @@ namespace gallt {
         std::string scope = current_function_ != nullptr
             ? name_namespace_prefix(current_function_->name) : std::string();
         std::unordered_set<AST::FunctionDefinition*> collected;
+
+        for (const auto& imported : imported_operator_scopes_) {
+            for (AST::FunctionDefinition* candidate : found->second) {
+                if (imported.count(candidate) != 0 &&
+                    collected.insert(candidate).second) {
+                    result.push_back(candidate);
+                }
+            }
+        }
 
         for (;;) {
             bool found_in_scope = false;
@@ -420,30 +465,87 @@ namespace gallt {
 
         if (auto* cast = dynamic_cast<AST::PostfixExpression*>(expr)) {
             if (cast->op == AST::PostfixExpression::Operator::Cast) {
-                std::string key = std::string("operator") + cast->cast_type.to_string();
+                if (cast->is_bitcopy) {
+                    return false;
+                }
+                const AST::Type target =
+                    without_top_level_const(cast->cast_type);
+                if (is_null_literal_expr(cast->base.get())) {
+                    return false;
+                }
+
                 AST::Type operand_type = check_expression(cast->base.get());
-                if (is_custom_type(operand_type)) {
-                    std::vector<AST::FunctionDefinition*> candidates =
-                        scoped_operator_candidates(key,
-                            std::vector<AST::Type>{ operand_type });
-                    for (AST::FunctionDefinition* candidate : candidates) {
-                        if (candidate->parameters.size() != 1) {
-                            continue;
-                        }
+                const bool builtin_value_conversion =
+                    (is_numeric_type(operand_type) &&
+                        is_numeric_type(target)) ||
+                    (operand_type.kind != TypeKind::Pointer &&
+                        operand_type.kind != TypeKind::Array &&
+                        operand_type.kind != TypeKind::Function &&
+                        target.kind != TypeKind::Pointer &&
+                        target.kind != TypeKind::Function &&
+                        types_equal_ignoring_top_level_const(
+                            operand_type, target));
+                if (builtin_value_conversion ||
+                    cast_pointer_conversion_allowed(operand_type, target)) {
+                    return false;
+                }
+                if (!is_custom_type(operand_type) &&
+                    !is_custom_type(target)) {
+                    return false;
+                }
+                if (target.kind == TypeKind::Pointer &&
+                    !is_custom_type(operand_type)) {
+                    return false;
+                }
 
-                        AST::Type effective = operator_resolution::effective_operand_type(
-                            operand_type, cast->base->is_lvalue(),
-                            candidate->parameters[0]);
+                std::string key = std::string("operator") + target.to_string();
+                std::vector<AST::FunctionDefinition*> candidates =
+                    scoped_operator_candidates(key,
+                        std::vector<AST::Type>{ operand_type });
+                std::vector<std::pair<AST::FunctionDefinition*, int>> viable;
+                for (AST::FunctionDefinition* candidate : candidates) {
+                    if (candidate == nullptr ||
+                        candidate->parameters.size() != 1) {
+                        continue;
+                    }
 
-                        if (conversion_rank(effective, candidate->parameters[0]) >= 0) {
-                            resolved_operators_[expr] = candidate;
-                            out = candidate->return_type;
-                            return true;
-                        }
+                    AST::Type effective = operator_resolution::effective_operand_type(
+                        operand_type, cast->base->is_lvalue(),
+                        candidate->parameters[0]);
+                    const int rank =
+                        conversion_rank(effective, candidate->parameters[0]);
+                    if (rank >= 0) {
+                        viable.push_back({ candidate, rank });
                     }
                 }
 
-                return false;
+                if (viable.empty()) {
+                    return false;
+                }
+
+                std::vector<AST::FunctionDefinition*> best;
+                int best_rank = viable.front().second;
+                for (const auto& candidate : viable) {
+                    if (candidate.second < best_rank) {
+                        best_rank = candidate.second;
+                        best.clear();
+                    }
+                    if (candidate.second == best_rank) {
+                        best.push_back(candidate.first);
+                    }
+                }
+
+                if (best.size() != 1) {
+                    report_error_template(cast->location,
+                        ErrorCode::OperatorOverloadAmbiguous,
+                        { target.to_string() });
+                    out = AST::Type::make_error();
+                    return true;
+                }
+
+                resolved_operators_[expr] = best.front();
+                out = target;
+                return true;
             }
         }
         std::string symbol;
@@ -528,6 +630,10 @@ namespace gallt {
                 symbol = "+=";
             } else if (assign->op == AST::AssignmentExpression::Operator::MinusAssign) {
                 symbol = "-=";
+            } else if (assign->op == AST::AssignmentExpression::Operator::StarAssign) {
+                symbol = "*=";
+            } else if (assign->op == AST::AssignmentExpression::Operator::SlashAssign) {
+                symbol = "/=";
             } else if (assign->op == AST::AssignmentExpression::Operator::AndAssign) {
                 symbol = "&=";
             } else if (assign->op == AST::AssignmentExpression::Operator::OrAssign) {
@@ -631,8 +737,10 @@ namespace gallt {
             switch (t.kind) {
             case TypeKind::Int: return "i";
             case TypeKind::Lint: return "l";
+            case TypeKind::Sint: return "n";
             case TypeKind::Uint: return "u";
             case TypeKind::Luint: return "q";
+            case TypeKind::Suint: return "N";
             case TypeKind::Float: return "f";
             case TypeKind::Double: return "d";
             case TypeKind::Char: return "c";
@@ -879,12 +987,14 @@ namespace gallt {
             case TypeKind::Bool:
                 return 0;
             case TypeKind::Uchar: return 1;
-            case TypeKind::Int: return 2;
-            case TypeKind::Uint: return 3;
-            case TypeKind::Lint: return 4;
-            case TypeKind::Luint: return 5;
-            case TypeKind::Float: return 6;
-            case TypeKind::Double: return 7;
+            case TypeKind::Sint: return 2;
+            case TypeKind::Suint: return 3;
+            case TypeKind::Int: return 4;
+            case TypeKind::Uint: return 5;
+            case TypeKind::Lint: return 6;
+            case TypeKind::Luint: return 7;
+            case TypeKind::Float: return 8;
+            case TypeKind::Double: return 9;
             default: return -1;
             }
         };
@@ -904,7 +1014,8 @@ namespace gallt {
 
         if (from_pos >= 0 && to_pos >= 0) {
             const bool small_integer = from.kind == TypeKind::Bool ||
-                from.kind == TypeKind::Char || from.kind == TypeKind::Uchar;
+                from.kind == TypeKind::Char || from.kind == TypeKind::Uchar ||
+                from.kind == TypeKind::Sint || from.kind == TypeKind::Suint;
             const bool integral_promotion = small_integer &&
                 (to.kind == TypeKind::Int || to.kind == TypeKind::Uint);
             const bool floating_promotion = from.kind == TypeKind::Float &&

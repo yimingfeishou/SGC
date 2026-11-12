@@ -1,0 +1,35 @@
+// lang__generics__pass__070.glt
+// expect output
+// 123
+// 5 7
+
+struct RuntimePair {
+    int first
+    int second
+}
+
+generics ConstantEmit<int... Ns> {
+    void print() {
+        output(Ns..., "\n")
+    }
+}
+
+generics RuntimeArray<T...> {
+    int second(T... values) {
+        int items[2] = {values...}
+        return items[1]
+    }
+}
+
+generics RuntimeStruct<T...> {
+    int second(T... values) {
+        RuntimePair pair = {values...}
+        return pair.second
+    }
+}
+
+int main() {
+    ConstantEmit<1, 2, 3>.print()
+    output(RuntimeArray<int, int>.second(4, 5), " ", RuntimeStruct<int, int>.second(6, 7), "\n")
+    return 0
+}

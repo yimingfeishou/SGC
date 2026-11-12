@@ -1,0 +1,9 @@
+// lang__assignment__error__001.glt
+// expect error ER 0004
+
+int main() {
+    int value = 1
+    int* pointer = &value
+    pointer *= 2
+    return 0
+}

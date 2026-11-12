@@ -1,0 +1,13 @@
+// lang__lifecycle__error__014.glt
+// expect error ER 0157
+
+[nocopyassign] struct Blocked {
+    int value
+}
+
+int main() {
+    Blocked source = {1}
+    Blocked target = {2}
+    target = source
+    return 0
+}

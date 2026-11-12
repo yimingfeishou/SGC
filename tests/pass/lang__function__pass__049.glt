@@ -1,0 +1,13 @@
+// lang__function__pass__049.glt
+// expect output
+// 7 2.5 Z true
+
+int main() {
+    int i = 0
+    double d = 0.0
+    char c = '?'
+    bool b = false
+    input(&i, &d, &c, &b)
+    output(i, " ", d, " ", c, " ", b)
+    return 0
+}

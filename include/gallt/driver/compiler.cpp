@@ -528,7 +528,7 @@ namespace {
         lifecycle.run(&combined);
 
         TypeChecker checker(diag, emit_entry_point,
-            options.extended_semantics, options.constexpr_depth,
+            options.constexpr_depth,
             options.constexpr_max_steps,
             options.constexpr_max_integer_exponent);
 

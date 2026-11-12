@@ -6,15 +6,18 @@
 #include <string>
 #include <vector>
 
-const std::string VERSION = "0.5.0-1030 Preview";
+const std::string VERSION = "0.5.0-1112 Preview";
 
 namespace gallt {
 
-    int sgc_main(const std::vector<std::wstring>& arguments) {
-        pal::enable_utf8_console();
+    void print_startup_banner() {
         std::cout << "Standard Gallt Compiler " << VERSION << "\n";
         std::cout << "Project repository address: https://github.com/yimingfeishou/SGC\n";
         std::cout << "Copyright (c) Yimingfeishou\n\n";
+    }
+
+    int sgc_main(const std::vector<std::wstring>& arguments) {
+        pal::enable_utf8_console();
 
         std::vector<const wchar_t*> argv;
         argv.reserve(arguments.size());
@@ -27,9 +30,16 @@ namespace gallt {
 
         if (!parse_command_line(static_cast<int>(argv.size()), argv.data(),
             options)) {
+            if (!options.quiet) {
+                print_startup_banner();
+            }
             std::cerr << "sgc: " << options.error_message << "\n\n"
                       << help_text();
             return 2;
+        }
+
+        if (!options.quiet) {
+            print_startup_banner();
         }
 
         switch (options.mode) {

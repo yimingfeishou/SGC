@@ -1,0 +1,32 @@
+// sl__member__pass__001.glt
+// expect output
+// 0 0
+
+guide "generics.glt"
+
+generics Inner<U, string tag> {
+    int probe() { return 0 }
+}
+
+generics Outer<T, string member> {
+    int go() {
+        return Inner<T, member>.probe()
+    }
+}
+
+generics Test<T: struct> {
+    emit "luint test_offset(T* p) {\n"
+    emit "    return sl::offset_generic<T, \"x\">.offset(p)\n"
+    emit "}\n"
+}
+
+struct S { int x }
+struct SS { int x }
+
+int main() {
+    Outer<S, "x">
+    Test<SS>
+    SS ss
+    output(go(), " ", test_offset(&ss), "\n")
+    return 0
+}

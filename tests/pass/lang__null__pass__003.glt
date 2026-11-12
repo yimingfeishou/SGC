@@ -6,10 +6,10 @@ int main() {
     file f = null
     output(f == null)
     int value = 0
-    input(value)
+    input(&value)
     output(" ", value)
     string text = ""
-    input(text)
+    input(&text)
     output(" [", text, "]")
     return 0
 }

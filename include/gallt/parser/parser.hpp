@@ -242,7 +242,8 @@ namespace gallt {
         std::unique_ptr<AST::Expression> reject_legacy_type_conversion(
             SourceLocation loc);
 
-        bool parse_cast_target_type(AST::Type& out, bool allow_void);
+        bool parse_conversion_target_type(AST::Type& out, bool allow_void,
+            const char* keyword);
 
         std::unique_ptr<AST::Expression> parse_postfix_operator(
             std::unique_ptr<AST::Expression> base);

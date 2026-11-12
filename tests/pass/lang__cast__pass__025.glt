@@ -1,0 +1,22 @@
+// lang__cast__pass__025.glt
+// expect output
+// true true true true 40
+
+struct Container {
+    int values[3]
+}
+
+int main() {
+    int data[3] = {10, 20, 30}
+    int* decayed = bitcopy<int*>(data)
+    luint array_bits = bitcopy<luint>(data)
+    luint pointer_bits = bitcopy<luint>(&data[0])
+    int source = 0x01020304
+    uchar* raw = bitcopy<uchar*>(&source)
+    uchar lowest = bitcopy<uchar>(source)
+    Container box = {{40, 50, 60}}
+    int* member = bitcopy<int*>(box.values)
+    int first = bitcopy<int>(box)
+    output(*decayed == data[0], " ", array_bits == pointer_bits, " ", lowest == raw[0], " ", *member == box.values[0], " ", first)
+    return 0
+}

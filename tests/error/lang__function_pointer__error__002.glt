@@ -1,0 +1,8 @@
+// lang__function_pointer__error__002.glt
+// expect error ER 0019
+
+int foo(int) const *
+
+int main() {
+    return 0
+}

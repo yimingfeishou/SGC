@@ -1,0 +1,13 @@
+// lang__generics__error__071.glt
+// expect error ER 0061
+
+generics SignedOnly<T: sint> {
+    T identity(T value) {
+        return value
+    }
+}
+
+int main() {
+    suint value = SignedOnly<suint>.identity(1su)
+    return 0
+}

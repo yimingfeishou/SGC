@@ -317,8 +317,10 @@ namespace gallt {
         if (param_type_of(name, sub, out)) { return true; }
         if (name == "int") { out = AST::Type::make_int(); return true; }
         if (name == "lint") { out = AST::Type::make_lint(); return true; }
+        if (name == "sint") { out = AST::Type::make_sint(); return true; }
         if (name == "uint") { out = AST::Type::make_uint(); return true; }
         if (name == "luint") { out = AST::Type::make_luint(); return true; }
+        if (name == "suint") { out = AST::Type::make_suint(); return true; }
         if (name == "float") { out = AST::Type::make_float(); return true; }
         if (name == "double") { out = AST::Type::make_double(); return true; }
         if (name == "char") { out = AST::Type::make_char(); return true; }
@@ -385,12 +387,14 @@ namespace gallt {
             case TypeKind::Bool: return 0;
             case TypeKind::Char: return 0;
             case TypeKind::Uchar: return 1;
-            case TypeKind::Int: return 2;
-            case TypeKind::Uint: return 3;
-            case TypeKind::Lint: return 4;
-            case TypeKind::Luint: return 5;
-            case TypeKind::Float: return 6;
-            case TypeKind::Double: return 7;
+            case TypeKind::Sint: return 2;
+            case TypeKind::Suint: return 3;
+            case TypeKind::Int: return 4;
+            case TypeKind::Uint: return 5;
+            case TypeKind::Lint: return 6;
+            case TypeKind::Luint: return 7;
+            case TypeKind::Float: return 8;
+            case TypeKind::Double: return 9;
             default: return -1;
             }
         };
@@ -436,6 +440,9 @@ namespace gallt {
         case TypeKind::Uint:
         case TypeKind::Float:
             size = 4; align = 4; return true;
+        case TypeKind::Sint:
+        case TypeKind::Suint:
+            size = 2; align = 2; return true;
         case TypeKind::Lint:
         case TypeKind::Luint:
         case TypeKind::Double:
@@ -564,16 +571,77 @@ namespace gallt {
         const bool type_property = property == "is_integer" || property == "is_float" ||
             property == "is_double" || property == "is_char" || property == "is_bool" ||
             property == "is_struct" || property == "is_string" ||
-            property == "is_pointer" || property == "is_array";
+            property == "is_pointer" || property == "is_array" ||
+            property == "is_scalar" || property == "is_aggregate" ||
+            property == "is_constructed" || property == "is_special" ||
+            property == "is_trivial";
         if (type_property && !is_type_param) {
             report(receiver->location, ErrorCode::CompileTimePropertyNotApplicable,
                 std::vector<std::string>{ property, parameter });
             return false;
         }
 
+        auto struct_definition = [&](const AST::Type& candidate)
+            -> const AST::StructDefinition* {
+            if (candidate.kind != TypeKind::Struct) { return nullptr; }
+            auto instantiated = instantiated_structs_.find(candidate.struct_name);
+            if (instantiated != instantiated_structs_.end()) {
+                return instantiated->second;
+            }
+            auto declared = struct_defs_.find(candidate.struct_name);
+            return declared == struct_defs_.end() ? nullptr : declared->second;
+        };
+        auto is_constructed = [&](const AST::Type& candidate) {
+            const AST::StructDefinition* definition =
+                struct_definition(candidate);
+            if (definition == nullptr) { return false; }
+            if (!definition->constructor_names.empty()) { return true; }
+            for (const auto& member : definition->special_members) {
+                if (member != nullptr &&
+                    member->kind ==
+                        AST::SpecialMemberFunction::Kind::Constructor) {
+                    return true;
+                }
+            }
+            return false;
+        };
+        std::unordered_set<std::string> trivial_structs;
+        std::function<bool(const AST::Type&)> is_trivial =
+            [&](const AST::Type& candidate) -> bool {
+            if (candidate.is_scalar() ||
+                candidate.kind == TypeKind::Function) {
+                return true;
+            }
+            if (candidate.kind == TypeKind::File) { return true; }
+            if (candidate.kind == TypeKind::Array) {
+                return candidate.element_type &&
+                    is_trivial(*candidate.element_type);
+            }
+            if (candidate.kind != TypeKind::Struct) { return false; }
+            const AST::StructDefinition* definition =
+                struct_definition(candidate);
+            if (definition == nullptr ||
+                !definition->special_members.empty() ||
+                is_constructed(candidate)) {
+                return false;
+            }
+            if (!trivial_structs.insert(candidate.struct_name).second) {
+                return false;
+            }
+            for (const auto& member : definition->members) {
+                if (!is_trivial(member.type)) {
+                    trivial_structs.erase(candidate.struct_name);
+                    return false;
+                }
+            }
+            trivial_structs.erase(candidate.struct_name);
+            return true;
+        };
+
         if (property == "is_integer") {
             out = type.kind == TypeKind::Int || type.kind == TypeKind::Lint ||
                 type.kind == TypeKind::Uint || type.kind == TypeKind::Luint ||
+                type.kind == TypeKind::Sint || type.kind == TypeKind::Suint ||
                 type.kind == TypeKind::Char || type.kind == TypeKind::Uchar ||
                 type.kind == TypeKind::Bool;
             return true;
@@ -587,6 +655,29 @@ namespace gallt {
         if (property == "is_string") { return matches(TypeKind::String); }
         if (property == "is_pointer") { return matches(TypeKind::Pointer); }
         if (property == "is_array") { return matches(TypeKind::Array); }
+        if (property == "is_scalar") {
+            out = type.is_scalar() || type.kind == TypeKind::Function;
+            return true;
+        }
+        if (property == "is_aggregate") {
+            out = type.kind == TypeKind::Array ||
+                type.kind == TypeKind::Struct;
+            return true;
+        }
+        if (property == "is_constructed") {
+            out = is_constructed(type);
+            return true;
+        }
+        if (property == "is_special") {
+            out = type.kind == TypeKind::String ||
+                type.kind == TypeKind::File ||
+                type.kind == TypeKind::Void;
+            return true;
+        }
+        if (property == "is_trivial") {
+            out = is_trivial(type);
+            return true;
+        }
         return false;
     }
 
@@ -864,8 +955,29 @@ namespace gallt {
         if (auto* post = dynamic_cast<const PostfixExpression*>(expr)) {
             if (post->op == PostfixExpression::Operator::FunctionCall) {
                 ConstexprValue result;
-                if (evaluate_constexpr_call(post, sub, result)) {
+                if (evaluate_constexpr_call(post, sub, result) &&
+                    result.type.kind == TypeKind::Bool) {
                     out = result.as_bool();
+                    return true;
+                }
+            }
+        }
+
+        if (auto* primary = dynamic_cast<const PrimaryExpression*>(expr)) {
+            if (primary->kind == PrimaryExpression::Kind::Identifier) {
+                auto declared = sub.constant_types.find(primary->identifier);
+                auto constant = sub.constants.find(primary->identifier);
+                if (declared != sub.constant_types.end() &&
+                    constant != sub.constants.end() &&
+                    declared->second.kind == TypeKind::Bool) {
+                    out = constant->second.int_value != 0;
+                    return true;
+                }
+                auto member =
+                    constant_member_values_.find(primary->identifier);
+                if (member != constant_member_values_.end() &&
+                    member->second.type.kind == TypeKind::Bool) {
+                    out = member->second.as_bool();
                     return true;
                 }
             }
@@ -891,9 +1003,7 @@ namespace gallt {
             ConstantValue value;
             if (evaluate_constant_with_members(expr, sub, value)) {
                 if (value.is_float) {
-                    char buffer[64];
-                    std::snprintf(buffer, sizeof(buffer), "%g", value.float_value);
-                    out += buffer;
+                    out += format_float_literal(value.float_value);
                 } else {
                     out += std::to_string(value.int_value);
                 }
@@ -926,10 +1036,8 @@ namespace gallt {
                     if (constant->second.is_string) {
                         out += constant->second.string_value;
                     } else if (constant->second.is_float) {
-                        char buffer[64];
-                        std::snprintf(buffer, sizeof(buffer), "%g",
+                        out += format_float_literal(
                             constant->second.float_value);
-                        out += buffer;
                     } else {
                         out += std::to_string(constant->second.int_value);
                     }
@@ -942,10 +1050,7 @@ namespace gallt {
                 if (interpreted.type.kind == TypeKind::String) {
                     out += interpreted.string_value;
                 } else if (interpreted.type.is_floating()) {
-                    char buffer[64];
-                    std::snprintf(buffer, sizeof(buffer), "%g",
-                        interpreted.float_value);
-                    out += buffer;
+                    out += format_float_literal(interpreted.float_value);
                 } else if (interpreted.type.is_arithmetic()) {
                     out += std::to_string(interpreted.int_value);
                 } else {

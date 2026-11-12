@@ -1,0 +1,39 @@
+// lang__lifecycle__pass__038.glt
+// expect output
+// 2 2 3 5 6
+
+[nocopyctor] struct CopyConstructorBlocked {
+    int value
+}
+
+[nocopyassign] struct CopyAssignmentBlocked {
+    int value
+}
+
+[nomovector] struct MoveConstructorBlocked {
+    int value
+}
+
+[nomoveassign] struct MoveAssignmentBlocked {
+    int value
+}
+
+[noctor] [nodtor] [noctor] struct Unmanaged {
+    int value = 10
+}
+
+int main() {
+    CopyConstructorBlocked a = {1}
+    CopyConstructorBlocked b = {2}
+    a = b
+    CopyAssignmentBlocked c_source = {2}
+    CopyAssignmentBlocked c = c_source
+    CopyAssignmentBlocked d = {3}
+    MoveConstructorBlocked e = {4}
+    MoveConstructorBlocked f = {5}
+    e = move(f)
+    MoveAssignmentBlocked g = {6}
+    MoveAssignmentBlocked h = move(g)
+    output(a.value, " ", c.value, " ", d.value, " ", e.value, " ", h.value)
+    return 0
+}

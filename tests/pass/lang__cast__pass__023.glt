@@ -1,0 +1,19 @@
+// lang__cast__pass__023.glt
+// expect output
+// 12
+
+struct Buffer {
+    int value
+}
+
+operator void* (Buffer* buffer) {
+    return null
+}
+
+int main() {
+    Buffer buffer = {12}
+    Buffer* pointer = &buffer
+    void* raw = cast<void*>(pointer)
+    output(*cast<int*>(raw))
+    return 0
+}

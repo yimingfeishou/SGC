@@ -1,0 +1,18 @@
+// sl__stream_io__pass__001.glt
+// expect output
+// stdout
+
+guide "stream.glt"
+
+int main() {
+    sl::console_out << "stdout\n"
+    if (sl::console_in == null) {
+        return 1
+    }
+    sl::console_err << "global " << 42 << "\n"
+    sl::stream* local = sl::make_console_err()
+    local << "local " << true << "\n"
+    sl::stream_flush(local)
+    destruct local
+    return 0
+}

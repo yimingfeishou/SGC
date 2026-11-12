@@ -1,0 +1,22 @@
+// lang__cast__pass__021.glt
+// expect output
+// 1 true
+
+struct Buffer {
+    int value
+}
+
+int calls = 0
+
+operator void* (Buffer* buffer) {
+    calls = calls + 1
+    return null
+}
+
+int main() {
+    Buffer buffer = {9}
+    void* raw = bitcopy<void*>(buffer)
+    void* converted = cast<void*>(buffer)
+    output(calls, " ", converted == null)
+    return 0
+}

@@ -1,0 +1,31 @@
+// lang__const__pass__044.glt
+// expect output
+// 42 alpha beta 7 42 22
+
+struct Item {
+    string text
+    int value
+}
+
+int main() {
+    const int k = 42
+    const string text = "alpha"
+    const Item item = {"beta", 7}
+    const int values[2] = {11, 22}
+    int* int_pointer = bitcopy<int*>(&k)
+    string* text_pointer = bitcopy<string*>(&text)
+    Item* item_pointer = bitcopy<Item*>(&item)
+    int* member_pointer = bitcopy<int*>(&item.value)
+    int* element_pointer = bitcopy<int*>(&values[1])
+
+    const int* branch_pointer = null
+    if (k > 0) {
+        branch_pointer = &(k)
+    } else {
+        branch_pointer = &((k))
+    }
+
+    output(*int_pointer, " ", *text_pointer, " ", item_pointer->text, " ", *member_pointer)
+    output(" ", *branch_pointer, " ", *element_pointer)
+    return 0
+}

@@ -1,0 +1,12 @@
+// lang__lifecycle__error__013.glt
+// expect error ER 0155
+
+[nocopyctor] struct Blocked {
+    int value
+}
+
+int main() {
+    Blocked source = {1}
+    Blocked target = copy(source)
+    return 0
+}

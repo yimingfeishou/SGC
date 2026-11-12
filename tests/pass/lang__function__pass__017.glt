@@ -4,7 +4,7 @@
 
 int main() {
     double value = 0.0
-    input(value)
+    input(&value)
     output("double=[", value, "]")
     char c = 'x'
     return 0

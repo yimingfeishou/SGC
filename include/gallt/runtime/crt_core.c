@@ -197,6 +197,55 @@ void gallt_output_bool(unsigned char v) { fputs(v ? "true" : "false", stdout); f
 
 void gallt_output_ptr(const void* v) { printf("%p", v); fflush(stdout); }
 
+void gallt_erroutput_string(const gallt_string* s) {
+    if (s == NULL) { return; }
+    fwrite(gallt_string_data_ptr(s), 1, (size_t)s->length, stderr);
+    fflush(stderr);
+}
+
+void gallt_erroutput_i32(int32_t v) { fprintf(stderr, "%d", (int)v); fflush(stderr); }
+
+void gallt_erroutput_u32(uint32_t v) { fprintf(stderr, "%u", (unsigned)v); fflush(stderr); }
+
+void gallt_erroutput_i64(int64_t v) {
+    fprintf(stderr, "%lld", (long long)v);
+    fflush(stderr);
+}
+
+void gallt_erroutput_u64(uint64_t v) {
+    fprintf(stderr, "%llu", (unsigned long long)v);
+    fflush(stderr);
+}
+
+void gallt_erroutput_f32(float v) {
+    char buffer[80];
+    int n = gallt_format_fp((double)v, buffer, sizeof(buffer));
+    fwrite(buffer, 1, (size_t)n, stderr);
+    fflush(stderr);
+}
+
+void gallt_erroutput_f64(double v) {
+    char buffer[80];
+    int n = gallt_format_fp(v, buffer, sizeof(buffer));
+    fwrite(buffer, 1, (size_t)n, stderr);
+    fflush(stderr);
+}
+
+void gallt_erroutput_char(char v) {
+    fputc((unsigned char)v, stderr);
+    fflush(stderr);
+}
+
+void gallt_erroutput_bool(unsigned char v) {
+    fputs(v ? "true" : "false", stderr);
+    fflush(stderr);
+}
+
+void gallt_erroutput_ptr(const void* v) {
+    fprintf(stderr, "%p", v);
+    fflush(stderr);
+}
+
 void gallt_input_i32(int32_t* p) { if (scanf("%d", p) != 1 && p) { *p = 0; } }
 
 void gallt_input_u32(uint32_t* p) { if (scanf("%u", p) != 1 && p) { *p = 0; } }

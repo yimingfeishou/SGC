@@ -1,0 +1,9 @@
+// lang__cast__error__013.glt
+// expect error ER 0032
+
+int main() {
+    int value = 1
+    int* pointer = &value
+    double* other = cast<double*>(pointer)
+    return 0
+}

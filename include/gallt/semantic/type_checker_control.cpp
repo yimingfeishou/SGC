@@ -309,13 +309,15 @@ namespace gallt {
             if (expected.kind == TypeKind::Struct && actual.kind == TypeKind::Struct &&
                 actual.struct_name == expected.struct_name) {
                 if (is_move_source(return_stmt->value.get())) {
-                    if (!type_is_movable(expected)) {
+                    if (!type_is_move_constructible(expected)) {
                         report_error_template(return_stmt->location,
-                            ErrorCode::NoMoveViolation, { expected.struct_name });
+                            move_violation_code(expected, false),
+                            { expected.struct_name });
                     }
-                } else if (!type_is_copyable(expected)) {
+                } else if (!type_is_copy_constructible(expected)) {
                     report_error_template(return_stmt->location,
-                        ErrorCode::NoCopyViolation, { expected.struct_name });
+                        copy_violation_code(expected, false),
+                        { expected.struct_name });
                 }
             }
 

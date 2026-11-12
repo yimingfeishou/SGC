@@ -1,0 +1,9 @@
+// lang__cast__error__012.glt
+// expect error ER 0032
+
+int main() {
+    int value = 1
+    int* pointer = &value
+    const int* readonly = cast<const int*>(pointer)
+    return 0
+}

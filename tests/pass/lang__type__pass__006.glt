@@ -1,0 +1,50 @@
+// lang__type__pass__006.glt
+// expect output
+// 10001 01001 01100 00010
+
+struct Plain {
+    int value
+}
+
+struct Constructed {
+    int value
+
+    constructor (int source) {
+        value = source
+    }
+}
+
+generics Traits<T> {
+    int scalar() {
+        const if (T.is_scalar == true) return 1
+        const else return 0
+    }
+
+    int aggregate() {
+        const if (T.is_aggregate == true) return 1
+        const else return 0
+    }
+
+    int constructed() {
+        const if (T.is_constructed == true) return 1
+        const else return 0
+    }
+
+    int special() {
+        const if (T.is_special == true) return 1
+        const else return 0
+    }
+
+    int trivial() {
+        const if (T.is_trivial == true) return 1
+        const else return 0
+    }
+}
+
+int main() {
+    output(Traits<int>.scalar(), Traits<int>.aggregate(), Traits<int>.constructed(), Traits<int>.special(), Traits<int>.trivial(), " ")
+    output(Traits<Plain>.scalar(), Traits<Plain>.aggregate(), Traits<Plain>.constructed(), Traits<Plain>.special(), Traits<Plain>.trivial(), " ")
+    output(Traits<Constructed>.scalar(), Traits<Constructed>.aggregate(), Traits<Constructed>.constructed(), Traits<Constructed>.special(), Traits<Constructed>.trivial(), " ")
+    output(Traits<string>.scalar(), Traits<string>.aggregate(), Traits<string>.constructed(), Traits<string>.special(), Traits<string>.trivial())
+    return 0
+}

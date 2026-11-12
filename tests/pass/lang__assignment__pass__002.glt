@@ -1,0 +1,16 @@
+// lang__assignment__pass__002.glt
+// expect output
+// 7
+
+int calculate(int value) const {
+    value *= 3
+    value /= 2
+    return value
+}
+
+const int result = calculate(5)
+
+int main() {
+    output(result)
+    return 0
+}

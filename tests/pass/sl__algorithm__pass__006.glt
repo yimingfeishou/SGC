@@ -1,0 +1,54 @@
+// sl__algorithm__pass__006.glt
+// expect output
+// true 1 1 2 20 30
+
+guide "algorithm.glt"
+guide "generics.glt"
+access namespace sl
+
+hash_table_generic<int, int>
+
+int compare_entry(hash_table_entry left, hash_table_entry right) {
+    if (left.key < right.key) {
+        return -1
+    }
+    if (left.key > right.key) {
+        return 1
+    }
+    return 0
+}
+
+hash_table_entry add_ten_entry(hash_table_entry entry) {
+    entry.value = entry.value + 10
+    return entry
+}
+
+int main() {
+    hash_table_range_generic<int, int>
+    find_generic<hash_table_generic<int, int>.hash_table_entry>
+    count_generic<hash_table_generic<int, int>.hash_table_entry>
+    min_value_generic<hash_table_generic<int, int>.hash_table_entry>
+    transform_generic<hash_table_generic<int, int>.hash_table_entry>
+
+    hash_table table = hash_table(4)
+    set(&table, 1, 10)
+    set(&table, 2, 20)
+    iterator it = begin(&table)
+    iterator_interface range = make_hash_range(&it)
+    hash_table_entry target
+    target.key = 2
+    target.value = 0
+    int found = find(&range, length(&table), target, &compare_entry)
+    int matches = count_value(&range, length(&table), target, &compare_entry)
+    hash_table_entry smallest
+    hash_table_entry largest
+    min_value(&range, length(&table), &compare_entry, &smallest)
+    max_value(&range, length(&table), &compare_entry, &largest)
+    transform(&range, length(&table), &add_ten_entry)
+    int first_value = 0
+    int second_value = 0
+    get(&table, 1, &first_value)
+    get(&table, 2, &second_value)
+    output(found >= 0, " ", matches, " ", smallest.key, " ", largest.key, " ", first_value, " ", second_value)
+    return 0
+}

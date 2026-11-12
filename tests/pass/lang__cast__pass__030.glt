@@ -1,0 +1,23 @@
+// lang__cast__pass__030.glt
+// expect output
+// 11dtor(1)dtor(1)
+
+struct T {
+    int v
+
+    move_constructor (T* other) {
+        v = other->v
+        output("move")
+    }
+
+    destructor () {
+        output("dtor(", v, ")")
+    }
+}
+
+int main() {
+    T a = {1}
+    T b = bitcopy<T>(a)
+    output(a.v, b.v)
+    return 0
+}

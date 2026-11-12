@@ -39,7 +39,7 @@ namespace gallt {
         }
 
         bool EnterInstantiationStatement(const InstantiationStatement* node) override {
-            return reject(node, ErrorCode::EmitBlockNotExpandable);
+            return true;
         }
 
         bool EnterCondDefinition(const CondDefinition* node) override {
@@ -71,18 +71,10 @@ namespace gallt {
         }
 
         bool EnterPrimaryExpression(const PrimaryExpression* node) override {
-            if (node->generic_ref != nullptr) {
-                return reject(node, ErrorCode::EmitBlockNotExpandable);
-            }
-
             return true;
         }
 
         bool EnterType(const Type& type) override {
-            if (type.generic_ref != nullptr) {
-                return reject(root_, ErrorCode::EmitBlockNotExpandable);
-            }
-
             return true;
         }
 
@@ -250,8 +242,8 @@ namespace gallt {
             return;
         }
 
-        if (name == owning_generic) {
-            shorts[name] = binding;
+        if (name == owning_generic && name_declared_in_current_scope(name)) {
+            report(loc, ErrorCode::GenericShortNameConflict, std::vector<std::string>{ name });
             return;
         }
 
@@ -273,16 +265,29 @@ namespace gallt {
 
     void GenericExpander::collect_generics() {
         std::map<std::string, std::vector<GenericDefinition*>> by_name;
+        std::set<std::string> non_generic_names;
 
         for (auto& top : program_->top_levels) {
             if (auto* g = dynamic_cast<GenericDefinition*>(top.get())) {
                 by_name[g->name].push_back(g);
+            } else if (auto* sd = dynamic_cast<StructDefinition*>(top.get())) {
+                non_generic_names.insert(sd->name);
+            } else if (auto* fd = dynamic_cast<FunctionDefinition*>(top.get())) {
+                non_generic_names.insert(fd->name);
+            } else if (auto* ed = dynamic_cast<ExternDeclaration*>(top.get())) {
+                non_generic_names.insert(ed->name);
+            } else if (auto* vd = dynamic_cast<VariableDeclaration*>(top.get())) {
+                non_generic_names.insert(vd->name);
             }
         }
 
         for (auto& pair : by_name) {
             const std::string& name = pair.first;
             std::vector<GenericDefinition*>& defs = pair.second;
+            if (non_generic_names.count(name) != 0) {
+                report(defs.front()->location, ErrorCode::RedefinedIdentifier,
+                    std::vector<std::string>{ name });
+            }
             GenericEntry entry;
             std::vector<GenericDefinition*> before_primary;
             bool has_primary_shaped = false;
@@ -663,6 +668,8 @@ namespace gallt {
                             if (target.kind != TypeKind::Void) {
                                 const bool integral =
                                     target.kind == TypeKind::Int ||
+                                    target.kind == TypeKind::Sint ||
+                                    target.kind == TypeKind::Suint ||
                                     target.kind == TypeKind::Char ||
                                     target.kind == TypeKind::Bool;
                                 if (integral && value.is_float) {
@@ -746,16 +753,23 @@ namespace gallt {
                     if (found != primary_sub.types.end()) { target = found->second; }
                 }
                 if (target.kind != TypeKind::Void) {
-                    bool integral = (target.kind == TypeKind::Int || target.kind == TypeKind::Char ||
+                    bool integral = (target.kind == TypeKind::Int ||
+                        target.kind == TypeKind::Sint ||
+                        target.kind == TypeKind::Suint ||
+                        target.kind == TypeKind::Char ||
                         target.kind == TypeKind::Bool);
                     if (integral && value.is_float) {
                         value.is_float = false;
                         value.int_value = static_cast<long long>(value.float_value);
                     } else if (integral) {
-                        long long limit = (target.kind == TypeKind::Char) ? 255
-                            : (target.kind == TypeKind::Bool ? 1
-                                : (long long)0x7fffffffLL);
-                        if (value.int_value > limit || value.int_value < -limit - 1) {
+                        long long limit = (target.kind == TypeKind::Char) ? 127
+                            : (target.kind == TypeKind::Sint ? 32767
+                                : (target.kind == TypeKind::Suint ? 65535
+                                    : (target.kind == TypeKind::Bool ? 1
+                                        : (long long)0x7fffffffLL)));
+                        const long long minimum = (target.kind == TypeKind::Uchar ||
+                            target.kind == TypeKind::Suint) ? 0 : -limit - 1;
+                        if (value.int_value > limit || value.int_value < minimum) {
                             report(ref.location, ErrorCode::GenericNonTypeArgOutOfRange, std::vector<std::string>{ target.to_string() });
                             return std::nullopt;
                         }
@@ -832,13 +846,29 @@ namespace gallt {
                             element.kind == TypeKind::Bool ||
                             element.kind == TypeKind::Uint ||
                             element.kind == TypeKind::Lint ||
-                            element.kind == TypeKind::Luint;
+                            element.kind == TypeKind::Luint ||
+                            element.kind == TypeKind::Sint ||
+                            element.kind == TypeKind::Suint;
                         if (integral && value.is_float) {
                             value.is_float = false;
                             value.int_value =
                                 static_cast<long long>(value.float_value);
                         } else if (integral && element.kind == TypeKind::Char) {
-                            if (value.int_value < -128 || value.int_value > 255) {
+                            if (value.int_value < -128 || value.int_value > 127) {
+                                report(ref.location,
+                                    ErrorCode::GenericNonTypeArgOutOfRange,
+                                    std::vector<std::string>{ element.to_string() });
+                                return std::nullopt;
+                            }
+                        } else if (integral && element.kind == TypeKind::Sint) {
+                            if (value.int_value < -32768 || value.int_value > 32767) {
+                                report(ref.location,
+                                    ErrorCode::GenericNonTypeArgOutOfRange,
+                                    std::vector<std::string>{ element.to_string() });
+                                return std::nullopt;
+                            }
+                        } else if (integral && element.kind == TypeKind::Suint) {
+                            if (value.int_value < 0 || value.int_value > 65535) {
                                 report(ref.location,
                                     ErrorCode::GenericNonTypeArgOutOfRange,
                                     std::vector<std::string>{ element.to_string() });
@@ -1054,7 +1084,7 @@ namespace gallt {
             }
         }
 
-        auto materialize = [&](const std::string& member_name, bool register_short) -> std::string {
+        auto materialize = [&](const std::string& member_name) -> std::string {
             std::string first_target;
 
             for (TopLevel* member : block_member_ptrs) {
@@ -1066,8 +1096,14 @@ namespace gallt {
                     if (instantiated_members_.insert(mangled).second) {
                         auto clone = std::make_unique<StructDefinition>(sd->location, mangled,
                             std::vector<StructDefinition::Member>{});
+                        clone->no_ctor = sd->no_ctor;
+                        clone->no_dtor = sd->no_dtor;
                         clone->no_copy = sd->no_copy;
                         clone->no_move = sd->no_move;
+                        clone->no_copy_ctor = sd->no_copy_ctor;
+                        clone->no_copy_assign = sd->no_copy_assign;
+                        clone->no_move_ctor = sd->no_move_ctor;
+                        clone->no_move_assign = sd->no_move_assign;
 
                         instantiation_parent_targets_.push_back(mangled);
 
@@ -1087,14 +1123,6 @@ namespace gallt {
                         struct_defs_[mangled] = raw;
                         instantiated_structs_[mangled] = raw;
                         add_top_level(std::move(clone));
-                    }
-
-                    if (register_short) {
-                        ShortBinding binding;
-                        binding.target = mangled;
-                        binding.is_type = true;
-                        binding.instance = instance_key;
-                        register_short_name(sd->name, binding, ref.generic_name, sd->location);
                     }
 
                     if (!member_name.empty() && first_target.empty()) {
@@ -1118,18 +1146,6 @@ namespace gallt {
                         drain_deferred_instantiations();
                         register_function_definition(clone.get());
                         add_top_level(std::move(clone));
-                    }
-
-                    if (register_short) {
-                        ShortBinding binding;
-                        binding.target = mangled;
-                        binding.is_type = false;
-                        binding.instance = instance_key;
-
-                        if (!fd->is_operator) {
-                            register_short_name(fd->name, binding, ref.generic_name,
-                                fd->location);
-                        }
                     }
 
                     if (!member_name.empty() && first_target.empty()) {
@@ -1178,15 +1194,6 @@ namespace gallt {
                         add_top_level(std::unique_ptr<TopLevel>(cloned_top_level));
                     }
 
-                    if (register_short) {
-                        ShortBinding binding;
-                        binding.target = mangled;
-                        binding.is_type = false;
-                        binding.instance = instance_key;
-                        register_short_name(vd->name, binding, ref.generic_name,
-                            vd->location);
-                    }
-
                     if (!member_name.empty() && first_target.empty()) {
                         first_target = mangled;
                     }
@@ -1195,12 +1202,42 @@ namespace gallt {
             return first_target;
         };
 
-        if (whole_block) {
-            if (instantiated_blocks_.insert(instance_key).second) {
-                materialize(std::string(), true);
-            } else {
-                materialize(std::string(), false);
+        auto introduce_short_names = [&](const std::string& member_name) {
+            for (TopLevel* member : block_member_ptrs) {
+                ShortBinding binding;
+                std::string name;
+                SourceLocation location;
+
+                if (auto* sd = dynamic_cast<StructDefinition*>(member)) {
+                    if (!member_name.empty() && sd->name != member_name) { continue; }
+                    name = sd->name;
+                    binding.is_type = true;
+                    location = sd->location;
+                } else if (auto* fd = dynamic_cast<FunctionDefinition*>(member)) {
+                    if (!member_name.empty() && fd->name != member_name) { continue; }
+                    if (fd->is_operator) { continue; }
+                    name = fd->name;
+                    binding.is_type = false;
+                    location = fd->location;
+                } else if (auto* vd = dynamic_cast<VariableDeclaration*>(member)) {
+                    if (!member_name.empty() && vd->name != member_name) { continue; }
+                    name = vd->name;
+                    binding.is_type = false;
+                    location = vd->location;
+                } else {
+                    continue;
+                }
+
+                binding.target = instantiated_name(name);
+                binding.instance = instance_key;
+                register_short_name(name, binding, ref.generic_name, location);
             }
+        };
+
+        if (whole_block) {
+            instantiated_blocks_.insert(instance_key);
+            materialize(std::string());
+            introduce_short_names(std::string());
 
             return instance_key;
         }
@@ -1209,7 +1246,7 @@ namespace gallt {
             return instance_key;
         }
 
-        std::string target = materialize(ref.member, ref.member_scope_access);
+        std::string target = materialize(ref.member);
 
         if (target.empty()) {
             bool in_primary = false;
@@ -1237,6 +1274,10 @@ namespace gallt {
             }
 
             return std::nullopt;
+        }
+
+        if (ref.member_scope_access) {
+            introduce_short_names(ref.member);
         }
 
         return target;

@@ -1,0 +1,20 @@
+// lang__generics__pass__075.glt
+// expect output
+// [a b]
+// [ab]
+// [_20]
+// [ ]
+
+generics StringIdentity<string Value> {
+    void print() {
+        output("[", Value, "]\n")
+    }
+}
+
+int main() {
+    StringIdentity<"a b">.print()
+    StringIdentity<"ab">.print()
+    StringIdentity<"_20">.print()
+    StringIdentity<" ">.print()
+    return 0
+}

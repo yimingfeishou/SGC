@@ -1,0 +1,19 @@
+// lang__cast__pass__028.glt
+// expect output 9 10 11
+
+struct Pair {
+    int first
+    int second
+
+    constructor (int a, int b) {
+        first = a
+        second = b
+    }
+}
+
+int main() {
+    Pair copied = bitcopy<Pair>(Pair(9, 10))
+    int first = bitcopy<int>(Pair(11, 12))
+    output(copied.first, " ", copied.second, " ", first)
+    return 0
+}

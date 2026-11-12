@@ -1,0 +1,27 @@
+// lang__generics__pass__068.glt
+// expect output
+// 42
+
+generics Payload<T> {
+    struct Item {
+        T marker
+    }
+}
+
+generics Box<T, U> {
+    struct Value {
+        T data
+    }
+}
+
+generics Reader<T, R: struct> {
+    T read_value(R* record) {
+        return record->data
+    }
+}
+
+int main() {
+    Box<int, Payload<int>.Item>.Value record = {42}
+    output(Reader<int, Box<int, Payload<int>.Item>.Value>.read_value(&record), "\n")
+    return 0
+}

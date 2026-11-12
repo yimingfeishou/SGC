@@ -1,0 +1,19 @@
+// lang__generics__pass__080.glt
+// expect output
+
+generics Source<T> {
+    T value
+}
+
+generics Bad<T> {
+    emit {
+        T selected() {
+            return Source<int>.value
+        }
+    }
+}
+
+int main() {
+    Bad<int>
+    return 0
+}

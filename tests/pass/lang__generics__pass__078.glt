@@ -1,0 +1,31 @@
+// lang__generics__pass__078.glt
+// expect output
+// -12 44
+
+generics SignedBox<T: sint> {
+    struct Holder {
+        T value
+    }
+
+    T identity(T value) {
+        return value
+    }
+}
+
+generics UnsignedBox<T: suint> {
+    struct Holder {
+        T value
+    }
+
+    T identity(T value) {
+        return value
+    }
+}
+
+int main() {
+    SignedBox<sint>.Holder signed_holder = {-12s}
+    UnsignedBox<suint>.Holder unsigned_holder = {44su}
+    output(SignedBox<sint>.identity(signed_holder.value), " ")
+    output(UnsignedBox<suint>.identity(unsigned_holder.value))
+    return 0
+}

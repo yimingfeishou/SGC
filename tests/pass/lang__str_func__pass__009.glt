@@ -21,9 +21,9 @@ int main() {
     output("\n[", strsplitget("a,b,c", ",", 1), "][", strsplitget("a,b,c", ",", 9), "]")
     output("\n", strcharat("cat", 9) == '\0', " ", strupper("Gallt 26"), " ", strlower("Gallt 26"))
     string source = "payload"
-    string target = strmove(source)
+    string target = strmove(&source)
     output("\n[", target, "][", source, "] ", strlen(source))
     string text = "cat"
-    output("\n", strsetchar(text, 9, 'z'), " ", strsetchar(text, 0, 'b'), " ", text)
+    output("\n", strsetchar(&text, 9, 'z'), " ", strsetchar(&text, 0, 'b'), " ", text)
     return 0
 }

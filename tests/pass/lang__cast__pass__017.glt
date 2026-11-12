@@ -1,0 +1,30 @@
+// lang__cast__pass__017.glt
+// expect output
+// 4294967295 true -1 7 42 999
+
+struct RawValue {
+    int value
+}
+
+operator int (RawValue input) {
+    return 999
+}
+
+int main() {
+    int source = -1
+    uint bits = bitcopy<uint>(source)
+    int* original = &source
+    int* alias = bitcopy<int*>(original)
+    const int fixed = 7
+    int removed_const = bitcopy<int>(fixed)
+    int added_const = bitcopy<const int>(source)
+    double* mismatched = bitcopy<double*>(source)
+    int* removed_pointer_const = bitcopy<int*>(&fixed)
+    RawValue raw = {42}
+    int bypassed = bitcopy<int>(raw)
+    int converted = cast<int>(raw)
+    double representation = bitcopy<double>(source)
+    output(bits, " ", alias == original, " ", *alias, " ", removed_const)
+    output(" ", bypassed, " ", converted)
+    return 0
+}

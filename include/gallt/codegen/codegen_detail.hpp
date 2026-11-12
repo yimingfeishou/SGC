@@ -45,10 +45,14 @@ namespace gallt {
             out = AST::Type::make_int();
         } else if (name == "lint") {
             out = AST::Type::make_lint();
+        } else if (name == "sint") {
+            out = AST::Type::make_sint();
         } else if (name == "uint") {
             out = AST::Type::make_uint();
         } else if (name == "luint") {
             out = AST::Type::make_luint();
+        } else if (name == "suint") {
+            out = AST::Type::make_suint();
         } else if (name == "float") {
             out = AST::Type::make_float();
         } else if (name == "double") {

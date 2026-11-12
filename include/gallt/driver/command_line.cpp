@@ -73,6 +73,11 @@ namespace {
                 continue;
             }
 
+            if (arg == L"--quiet" || arg == L"-Q") {
+                out.quiet = true;
+                continue;
+            }
+
             if (arg == L"--compile" || arg == L"-C") {
                 out.mode = CommandMode::Compile;
                 continue;
@@ -143,20 +148,6 @@ namespace {
                 out.check_only = true;
             } else if (arg == L"--gallt-abi" || arg == L"-GA") {
                 out.gallt_abi = true;
-            } else if (arg == L"--extended-semantics") {
-                std::string* v = require_value(L"--extended-semantics");
-                if (!v) { return false; }
-
-                if (*v == "true") {
-                    out.extended_semantics = true;
-                } else if (*v == "false") {
-                    out.extended_semantics = false;
-                } else {
-                    out.mode = CommandMode::Invalid;
-                    out.error_message = "invalid extended semantics value: " + *v +
-                        " (expected true or false)";
-                    return false;
-                }
             } else if (arg == L"--stack") {
                 std::string* v = require_value(L"--stack");
                 if (!v) { return false; }
@@ -320,8 +311,6 @@ namespace {
             "--constexpr-max-steps <n>\n"
             "  sgc --compile --input \"file.glt\" --output \"program.exe\" "
             "--constexpr-max-integer-exponent <n>\n"
-            "  sgc --compile --input \"file.glt\" --output \"program.exe\" "
-            "--extended-semantics true\n"
             "  sgc --check-only --input \"file.glt\"\n"
             "  sgc --help\n"
             "  sgc --version\n"
@@ -329,6 +318,8 @@ namespace {
             "  --help, -H                    display help text\n"
             "  --version, -V                 display version text\n"
             "  --license, -L                 display license text\n"
+            "  --quiet, -Q                   suppress the startup version, copyright and\n"
+            "                                repository address information\n"
             "  --compile, -C                 compile a Gallt source file\n"
             "  --input, -I <path>            input Gallt source file\n"
             "  --output, -O <path>           output file\n"
@@ -379,9 +370,6 @@ namespace {
             "                                maximum exponent for compile-time\n"
             "                                integer exponentiation (non-zero\n"
             "                                positive integer; default 64)\n"
-            "  --extended-semantics <bool>   enable extended semantics: some constructs\n"
-            "                                forbidden by the Gallt standard behavior\n"
-            "                                are relaxed (true or false; default false)\n"
             "Conflicts:\n"
             "  --optimization-level and --debug-symbols cannot be combined\n"
             "  --debug and --release cannot be combined\n"
@@ -398,8 +386,8 @@ namespace {
 
         std::string version_text() {
             return
-            "Standard Gallt Compiler 0.5.0-1030 Preview (LLVM backend, x86-64 Windows)\n"
-            "Build date: 2026-10-30\n"
+            "Standard Gallt Compiler 0.5.0-1112 Preview (LLVM backend, x86-64 Windows)\n"
+            "Build date: 2026-11-12\n"
             "This version is experimental";
         }
 
@@ -407,8 +395,8 @@ namespace {
 
         std::string version_text() {
             return
-            "Standard Gallt Compiler 0.5.0-1030 Preview (LLVM backend, x86-64 Linux)\n"
-            "Build date: 2026-10-30\n"
+            "Standard Gallt Compiler 0.5.0-1112 Preview (LLVM backend, x86-64 Linux)\n"
+            "Build date: 2026-11-12\n"
             "This version is experimental";
         }
 
@@ -416,8 +404,8 @@ namespace {
 
         std::string version_text() {
             return
-            "Standard Gallt Compiler 0.5.0-1030 Preview (LLVM backend, x86-64 Unknown)\n"
-            "Build date: 2026-10-30\n"
+            "Standard Gallt Compiler 0.5.0-1112 Preview (LLVM backend, x86-64 Unknown)\n"
+            "Build date: 2026-11-12\n"
             "This version is experimental";
         }
 

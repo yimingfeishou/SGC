@@ -4,7 +4,7 @@
 const string FIXED = "abc"
 
 int main() {
-    string moved = strmove(FIXED)
+    string moved = strmove(&FIXED)
     output(moved)
     return 0
 }

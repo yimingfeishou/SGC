@@ -7,8 +7,11 @@
 #include <cstdlib>
 #include <cstdio>
 #include <functional>
+#include <iomanip>
+#include <limits>
 #include <map>
 #include <set>
+#include <sstream>
 
 using namespace gallt::AST;
 
@@ -232,12 +235,18 @@ namespace gallt {
 
                 if (defer_instantiation_dependency(ref)) {
                     out = Type::make_struct(ref.mangle());
+                    out.generic_ref = std::make_shared<GenericRef>(ref);
                     return true;
                 }
 
                 auto mangled = ensure_instantiation(ref, false);
                 if (!mangled.has_value()) { return false; }
                 out = Type::make_struct(*mangled);
+                out.generic_ref = std::make_shared<GenericRef>(ref);
+                auto resolved = instantiated_structs_.find(*mangled);
+                if (resolved != instantiated_structs_.end()) {
+                    out.resolved_struct = resolved->second;
+                }
                 return true;
             }
 
@@ -302,14 +311,19 @@ namespace gallt {
 
                 if (defer_instantiation_dependency(ref)) {
                     type.struct_name = ref.mangle();
-                    type.generic_ref.reset();
+                    type.generic_ref = std::make_shared<GenericRef>(ref);
                     break;
                 }
 
                 auto mangled = ensure_instantiation(ref, false);
                 if (mangled.has_value()) {
                     type.struct_name = *mangled;
-                    type.generic_ref.reset();
+                    type.generic_ref = std::make_shared<GenericRef>(ref);
+                    type.resolved_struct = nullptr;
+                    auto resolved = instantiated_structs_.find(*mangled);
+                    if (resolved != instantiated_structs_.end()) {
+                        type.resolved_struct = resolved->second;
+                    }
                 }
                 break;
             }
@@ -481,6 +495,9 @@ namespace gallt {
         if (type_name == "int" || type_name == "uint" || type_name == "float") {
             size = 4; align = 4; return true;
         }
+        if (type_name == "sint" || type_name == "suint") {
+            size = 2; align = 2; return true;
+        }
         if (type_name == "lint" || type_name == "luint" || type_name == "double") {
             size = 8; align = 8; return true;
         }
@@ -514,6 +531,8 @@ namespace gallt {
             [&](const AST::Type& type, std::size_t& out_size, std::size_t& out_align) -> bool {
             switch (type.kind) {
             case TypeKind::Int: case TypeKind::Float: out_size = 4; out_align = 4; return true;
+            case TypeKind::Sint: case TypeKind::Suint:
+                out_size = 2; out_align = 2; return true;
             case TypeKind::Double: out_size = 8; out_align = 8; return true;
             case TypeKind::Char: case TypeKind::Bool: out_size = 1; out_align = 1; return true;
             case TypeKind::String: out_size = 32; out_align = 8; return true;
@@ -559,10 +578,79 @@ namespace gallt {
 
     std::unique_ptr<Expression> GenericExpander::make_typed_constant_literal(SourceLocation loc,
         const ConstantValue& value, const AST::Type& type) {
-        if (value.is_float || type.kind == TypeKind::Float || type.kind == TypeKind::Double) {
+        if (type.kind == TypeKind::String) {
             return make_constant_literal(loc, value);
         }
-        return make_constant_literal(loc, value);
+
+        std::string text;
+        TokenType token_type = TokenType::IntegerLiteral;
+
+        switch (type.kind) {
+        case TypeKind::Bool:
+            text = value.int_value != 0 ? "true" : "false";
+            token_type = TokenType::BoolLiteral;
+            break;
+        case TypeKind::Char: {
+            char buffer[8];
+            std::snprintf(buffer, sizeof(buffer), "'\\x%02x'",
+                static_cast<unsigned>(static_cast<unsigned char>(value.int_value)));
+            text = buffer;
+            token_type = TokenType::CharLiteral;
+            break;
+        }
+        case TypeKind::Float:
+        case TypeKind::Double: {
+            std::ostringstream format;
+            format << std::setprecision(std::numeric_limits<double>::max_digits10)
+                << value.float_value;
+            if (type.kind == TypeKind::Float) {
+                format << 'f';
+            }
+            text = format.str();
+            token_type = TokenType::FloatLiteral;
+            break;
+        }
+        case TypeKind::Uint:
+            text = std::to_string(static_cast<unsigned int>(value.int_value)) + "u";
+            break;
+        case TypeKind::Lint:
+            text = std::to_string(value.int_value) + "l";
+            break;
+        case TypeKind::Sint:
+            text = std::to_string(static_cast<short>(value.int_value)) + "s";
+            break;
+        case TypeKind::Luint:
+            text = std::to_string(
+                static_cast<unsigned long long>(value.int_value)) + "lu";
+            break;
+        case TypeKind::Suint:
+            text = std::to_string(
+                static_cast<unsigned short>(value.int_value)) + "su";
+            break;
+        case TypeKind::Int:
+            text = std::to_string(value.int_value);
+            break;
+        case TypeKind::Uchar:
+            text = std::to_string(
+                static_cast<unsigned>(static_cast<unsigned char>(value.int_value)));
+            break;
+        default:
+            return make_constant_literal(loc, value);
+        }
+
+        lexeme_pool_.push_back(text);
+        Token literal(token_type, loc, lexeme_pool_.back());
+        std::unique_ptr<Expression> expression =
+            std::make_unique<PrimaryExpression>(loc, literal);
+        if (type.kind == TypeKind::Uchar) {
+            AST::Type target = type;
+            target.is_const = false;
+            return std::make_unique<PostfixExpression>(loc,
+                std::move(expression), PostfixExpression::Operator::Cast,
+                nullptr, std::vector<std::unique_ptr<Expression>>{},
+                std::move(target));
+        }
+        return expression;
     }
 
     std::vector<GenericPatternArg> GenericExpander::parameters_as_free_patterns(
@@ -608,9 +696,8 @@ namespace gallt {
             if (pattern.string_constant) { return "CS:" + pattern.string_value; }
 
             if (pattern.float_constant) {
-                char buffer[64];
-                std::snprintf(buffer, sizeof(buffer), "%g", pattern.float_value);
-                return std::string("C:") + buffer;
+                return std::string("C:") +
+                    format_float_literal(pattern.float_value);
             }
 
             return "C:" + std::to_string(pattern.int_value);

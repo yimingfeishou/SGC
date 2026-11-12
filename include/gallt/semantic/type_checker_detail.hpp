@@ -111,7 +111,7 @@ namespace gallt {
 
         enum class StringParamKind {
             StringValue,
-            StringRef,
+            StringPointer,
             IntValue,
             CharValue,
             FileHandle
@@ -135,7 +135,7 @@ namespace gallt {
                 { "strlen",       { { StringParamKind::StringValue }, StringResultKind::Int } },
                 { "strconcat",    { { StringParamKind::StringValue, StringParamKind::StringValue }, StringResultKind::String } },
                 { "strcopy",      { { StringParamKind::StringValue }, StringResultKind::String } },
-                { "strmove",      { { StringParamKind::StringRef }, StringResultKind::String } },
+                { "strmove",      { { StringParamKind::StringPointer }, StringResultKind::String } },
                 { "strcompare",   { { StringParamKind::StringValue, StringParamKind::StringValue }, StringResultKind::Int } },
                 { "strcontains",  { { StringParamKind::StringValue, StringParamKind::StringValue }, StringResultKind::Bool } },
                 { "strsubstr",    { { StringParamKind::StringValue, StringParamKind::IntValue, StringParamKind::IntValue }, StringResultKind::String } },
@@ -145,7 +145,7 @@ namespace gallt {
                 { "strlower",     { { StringParamKind::StringValue }, StringResultKind::String } },
                 { "strtrim",      { { StringParamKind::StringValue }, StringResultKind::String } },
                 { "strcharat",    { { StringParamKind::StringValue, StringParamKind::IntValue }, StringResultKind::Char } },
-                { "strsetchar",   { { StringParamKind::StringRef, StringParamKind::IntValue, StringParamKind::CharValue }, StringResultKind::Bool } },
+                { "strsetchar",   { { StringParamKind::StringPointer, StringParamKind::IntValue, StringParamKind::CharValue }, StringResultKind::Bool } },
                 { "strsplitcount",{ { StringParamKind::StringValue, StringParamKind::StringValue }, StringResultKind::Int } },
                 { "strsplitget",  { { StringParamKind::StringValue, StringParamKind::StringValue, StringParamKind::IntValue }, StringResultKind::String } },
                 { "strread",      { {}, StringResultKind::String } },
@@ -270,6 +270,107 @@ namespace gallt {
             }
         }
 
+        inline AST::Type without_top_level_const(AST::Type type) {
+            type.is_const = false;
+            return type;
+        }
+
+        inline bool const_qualification_equal(const AST::Type& left,
+            const AST::Type& right) {
+            if (left.is_const != right.is_const) { return false; }
+            if (left.kind != right.kind) { return true; }
+
+            switch (left.kind) {
+            case TypeKind::Array:
+                return !left.element_type || !right.element_type ||
+                    const_qualification_equal(*left.element_type,
+                        *right.element_type);
+            case TypeKind::Pointer:
+                return !left.pointee_type || !right.pointee_type ||
+                    const_qualification_equal(*left.pointee_type,
+                        *right.pointee_type);
+            case TypeKind::Function:
+                if ((left.return_type == nullptr) !=
+                        (right.return_type == nullptr) ||
+                    left.parameter_types.size() != right.parameter_types.size()) {
+                    return false;
+                }
+                if (left.return_type &&
+                    !const_qualification_equal(*left.return_type,
+                        *right.return_type)) {
+                    return false;
+                }
+                for (std::size_t i = 0; i < left.parameter_types.size(); ++i) {
+                    if (!const_qualification_equal(left.parameter_types[i],
+                        right.parameter_types[i])) {
+                        return false;
+                    }
+                }
+                return true;
+            default:
+                return true;
+            }
+        }
+
+        inline bool types_equal_ignoring_top_level_const(AST::Type left,
+            AST::Type right) {
+            left.is_const = false;
+            right.is_const = false;
+            return left == right;
+        }
+
+        inline bool cast_pointer_conversion_allowed(const AST::Type& from,
+            const AST::Type& to) {
+            if (from.kind == TypeKind::Array && to.kind == TypeKind::Pointer) {
+                return from.element_type && to.pointee_type &&
+                    const_qualification_equal(*from.element_type, *to.pointee_type) &&
+                    types_equal_ignoring_top_level_const(*from.element_type,
+                        *to.pointee_type);
+            }
+
+            if (from.kind == TypeKind::Function &&
+                to.kind == TypeKind::Function) {
+                return const_qualification_equal(from, to) &&
+                    types_equal_ignoring_top_level_const(from, to);
+            }
+
+            if (from.kind != TypeKind::Pointer ||
+                to.kind != TypeKind::Pointer ||
+                !from.pointee_type || !to.pointee_type) {
+                return false;
+            }
+
+            if (!const_qualification_equal(*from.pointee_type,
+                *to.pointee_type)) {
+                return false;
+            }
+
+            if (from.pointee_type->kind == TypeKind::Void ||
+                to.pointee_type->kind == TypeKind::Void) {
+                return true;
+            }
+
+            return types_equal_ignoring_top_level_const(*from.pointee_type,
+                *to.pointee_type);
+        }
+
+        inline bool supports_zero_value(const AST::Type& type) {
+            return type.kind == TypeKind::Bool ||
+                type.kind == TypeKind::Char ||
+                type.kind == TypeKind::Uchar ||
+                type.kind == TypeKind::Int ||
+                type.kind == TypeKind::Uint ||
+                type.kind == TypeKind::Sint ||
+                type.kind == TypeKind::Suint ||
+                type.kind == TypeKind::Lint ||
+                type.kind == TypeKind::Luint ||
+                type.kind == TypeKind::Float ||
+                type.kind == TypeKind::Double ||
+                type.kind == TypeKind::String ||
+                type.kind == TypeKind::Pointer ||
+                type.kind == TypeKind::Function;
+        }
+
         inline void collect_struct_names_from_type(const AST::Type& type,
             std::unordered_set<std::string>& out) {
             switch (type.kind) {
@@ -293,7 +394,9 @@ namespace gallt {
 
         inline bool type_has_unresolved_generic(const AST::Type& type) {
             if (type.kind == TypeKind::Error) { return true; }
-            if (type.generic_ref) { return true; }
+            if (type.generic_ref) {
+                return type.struct_name.find('$') == std::string::npos;
+            }
             if (type.element_type && type_has_unresolved_generic(*type.element_type)) {
                 return true;
             }

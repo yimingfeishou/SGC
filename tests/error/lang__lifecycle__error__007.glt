@@ -1,0 +1,11 @@
+// lang__lifecycle__error__007.glt
+// expect error ER 0153
+
+[noctor] struct Invalid {
+    constructor () {
+    }
+}
+
+int main() {
+    return 0
+}

@@ -1,0 +1,44 @@
+// lang__generics__pass__076.glt
+// expect output
+// first second true true
+
+double identity(double value) const {
+    return value
+}
+
+generics FloatTag<double Value> {
+    string get() {
+        return "base"
+    }
+}
+
+generics FloatTag<1.2345671> {
+    string get() {
+        return "first"
+    }
+}
+
+generics FloatTag<1.2345672> {
+    string get() {
+        return "second"
+    }
+}
+
+generics EmitValue<double Value> {
+    emit "double emitted_value() {\n"
+    emit "    return ", Value, "\n"
+    emit "}\n"
+}
+
+generics EmitCall<double Value> {
+    emit "double emitted_call() {\n"
+    emit "    return ", identity(Value), "\n"
+    emit "}\n"
+}
+
+int main() {
+    output(FloatTag<1.2345671>.get(), " ", FloatTag<1.2345672>.get(), " ")
+    output(EmitValue<1.234567890123>.emitted_value() == 1.234567890123, " ")
+    output(EmitCall<1.234567890123>.emitted_call() == 1.234567890123, "\n")
+    return 0
+}

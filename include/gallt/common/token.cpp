@@ -9,8 +9,10 @@ namespace gallt {
             static const std::unordered_map<std::string_view, TokenType> table = {
                 {"int", TokenType::Keyword_Int},
                 {"lint", TokenType::Keyword_Lint},
+                {"sint", TokenType::Keyword_Sint},
                 {"uint", TokenType::Keyword_Uint},
                 {"luint", TokenType::Keyword_Luint},
+                {"suint", TokenType::Keyword_Suint},
                 {"float", TokenType::Keyword_Float},
                 {"double", TokenType::Keyword_Double},
                 {"char", TokenType::Keyword_Char},
@@ -44,6 +46,7 @@ namespace gallt {
                 {"export", TokenType::Keyword_Export},
                 {"const", TokenType::Keyword_Const},
                 {"cast", TokenType::Keyword_Cast},
+                {"bitcopy", TokenType::Keyword_Bitcopy},
             };
             return table;
         }
@@ -53,8 +56,10 @@ namespace gallt {
         switch (type) {
         case TokenType::Keyword_Int: return "int";
         case TokenType::Keyword_Lint: return "lint";
+        case TokenType::Keyword_Sint: return "sint";
         case TokenType::Keyword_Uint: return "uint";
         case TokenType::Keyword_Luint: return "luint";
+        case TokenType::Keyword_Suint: return "suint";
         case TokenType::Keyword_Float: return "float";
         case TokenType::Keyword_Double: return "double";
         case TokenType::Keyword_Char: return "char";
@@ -88,6 +93,7 @@ namespace gallt {
         case TokenType::Keyword_Export: return "export";
         case TokenType::Keyword_Const: return "const";
         case TokenType::Keyword_Cast: return "cast";
+        case TokenType::Keyword_Bitcopy: return "bitcopy";
         case TokenType::Identifier: return "identifier";
         case TokenType::IntegerLiteral: return "integer literal";
         case TokenType::FloatLiteral: return "float literal";
@@ -97,6 +103,8 @@ namespace gallt {
         case TokenType::Assign: return "=";
         case TokenType::PlusAssign: return "+=";
         case TokenType::MinusAssign: return "-=";
+        case TokenType::StarAssign: return "*=";
+        case TokenType::SlashAssign: return "/=";
         case TokenType::AndAssign: return "&=";
         case TokenType::OrAssign: return "|=";
         case TokenType::XorAssign: return "^=";

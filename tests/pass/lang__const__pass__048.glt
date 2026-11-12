@@ -1,0 +1,15 @@
+// lang__const__pass__048.glt
+// expect output
+// 7 15 -32768 65535 28
+
+const sint constant_sint = 3s + 4s
+const suint constant_suint = 7su + 8su
+const sint narrowed_sint = cast<sint>(32768)
+const suint wrapped_suint = cast<suint>(-1)
+int values[constant_sint] = {1, 2, 3, 4, 5, 6, 7}
+
+int main() {
+    output(constant_sint, " ", constant_suint, " ", narrowed_sint, " ")
+    output(wrapped_suint, " ", size(values))
+    return 0
+}

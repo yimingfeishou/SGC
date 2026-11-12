@@ -5,10 +5,10 @@
 int main() {
     int value = 7
     int* handle = &value
-    int narrow = cast<int>(handle)
-    lint wide = cast<lint>(handle)
-    uint narrow_unsigned = cast<uint>(handle)
-    luint wide_unsigned = cast<luint>(handle)
+    int narrow = bitcopy<int>(handle)
+    lint wide = bitcopy<lint>(handle)
+    uint narrow_unsigned = bitcopy<uint>(handle)
+    luint wide_unsigned = bitcopy<luint>(handle)
     output(wide != 0, " ", wide_unsigned != 0, " ", cast<uint>(narrow) == narrow_unsigned)
     return 0
 }

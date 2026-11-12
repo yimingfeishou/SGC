@@ -1,0 +1,35 @@
+// sl__generics__pass__012.glt
+// expect output
+// 3 6 9
+
+guide "generics.glt"
+
+int first_capacity() {
+    sl::dynamic_array_generic<int>
+    sl::dynamic_array_generic<int>
+    dynamic_array values = dynamic_array(3)
+    return values.capacity
+}
+
+int second_capacity() {
+    sl::dynamic_array_generic<int>
+    dynamic_array values = dynamic_array(6)
+    return values.capacity
+}
+
+int nested_capacity() {
+    int capacity = 0
+
+    {
+        sl::dynamic_array_generic<int>
+        dynamic_array values = dynamic_array(9)
+        capacity = values.capacity
+    }
+
+    return capacity
+}
+
+int main() {
+    output(first_capacity(), " ", second_capacity(), " ", nested_capacity())
+    return 0
+}

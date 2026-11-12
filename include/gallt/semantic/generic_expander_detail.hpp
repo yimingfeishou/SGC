@@ -9,16 +9,27 @@
 #include <cstdlib>
 #include <cstdio>
 #include <functional>
+#include <iomanip>
+#include <limits>
 #include <map>
 #include <set>
+#include <sstream>
 
 namespace gallt {
     using namespace AST;
 
     namespace generic_expander_detail {
+        inline std::string format_float_literal(double value) {
+            std::ostringstream format;
+            format << std::setprecision(std::numeric_limits<double>::max_digits10)
+                << value;
+            return format.str();
+        }
+
         inline bool is_builtin_type_name(const std::string& name) {
-            return name == "int" || name == "lint" || name == "uint" ||
-                name == "luint" || name == "float" || name == "double" ||
+            return name == "int" || name == "lint" || name == "sint" ||
+                name == "uint" || name == "luint" || name == "suint" ||
+                name == "float" || name == "double" ||
                 name == "char" || name == "uchar" || name == "bool" ||
                 name == "string" || name == "file" || name == "void";
         }

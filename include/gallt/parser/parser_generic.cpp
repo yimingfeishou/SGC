@@ -208,8 +208,10 @@ namespace gallt {
             case TokenType::Identifier:
             case TokenType::Keyword_Int:
             case TokenType::Keyword_Lint:
+            case TokenType::Keyword_Sint:
             case TokenType::Keyword_Uint:
             case TokenType::Keyword_Luint:
+            case TokenType::Keyword_Suint:
             case TokenType::Keyword_Float:
             case TokenType::Keyword_Double:
             case TokenType::Keyword_Char:
@@ -220,6 +222,7 @@ namespace gallt {
             case TokenType::Keyword_Void:
             case TokenType::Keyword_Const:
             case TokenType::Keyword_Cast:
+            case TokenType::Keyword_Bitcopy:
             case TokenType::IntegerLiteral:
             case TokenType::FloatLiteral:
             case TokenType::CharLiteral:
@@ -405,28 +408,38 @@ namespace gallt {
 
                 return std::make_unique<PrimaryExpression>(loc, id);
             }
-            case TokenType::Keyword_Cast: {
+            case TokenType::Keyword_Cast:
+            case TokenType::Keyword_Bitcopy: {
+                const bool is_bitcopy =
+                    current_.type == TokenType::Keyword_Bitcopy;
                 advance();
                 Type cast_type;
 
-                if (!parse_cast_target_type(cast_type, false)) { return nullptr; }
+                const char* keyword = is_bitcopy ? "bitcopy" : "cast";
+                if (!parse_conversion_target_type(cast_type, false, keyword)) {
+                    return nullptr;
+                }
 
                 auto operand = parse_compile_time_expression();
                 if (operand == nullptr) { return nullptr; }
                 if (!expect(TokenType::RightParen,
-                    "expected ')' after compile-time cast")) {
+                    std::string("expected ')' after compile-time ") + keyword)) {
                     return nullptr;
                 }
 
-                return std::make_unique<PostfixExpression>(loc, std::move(operand),
+                auto result = std::make_unique<PostfixExpression>(loc, std::move(operand),
                     PostfixExpression::Operator::Cast,
                     nullptr, std::vector<std::unique_ptr<Expression>>{},
                     std::move(cast_type));
+                result->is_bitcopy = is_bitcopy;
+                return result;
             }
             case TokenType::Keyword_Int:
             case TokenType::Keyword_Lint:
+            case TokenType::Keyword_Sint:
             case TokenType::Keyword_Uint:
             case TokenType::Keyword_Luint:
+            case TokenType::Keyword_Suint:
             case TokenType::Keyword_Float:
             case TokenType::Keyword_Double:
             case TokenType::Keyword_Char:
@@ -533,8 +546,10 @@ namespace gallt {
             case TokenType::LeftParen:
             case TokenType::Keyword_Int:
             case TokenType::Keyword_Lint:
+            case TokenType::Keyword_Sint:
             case TokenType::Keyword_Uint:
             case TokenType::Keyword_Luint:
+            case TokenType::Keyword_Suint:
             case TokenType::Keyword_Float:
             case TokenType::Keyword_Double:
             case TokenType::Keyword_Char:
@@ -561,8 +576,10 @@ namespace gallt {
             case TokenType::Tilde:
             case TokenType::Keyword_Int:
             case TokenType::Keyword_Lint:
+            case TokenType::Keyword_Sint:
             case TokenType::Keyword_Uint:
             case TokenType::Keyword_Luint:
+            case TokenType::Keyword_Suint:
             case TokenType::Keyword_Float:
             case TokenType::Keyword_Double:
             case TokenType::Keyword_Char:

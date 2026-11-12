@@ -1,0 +1,15 @@
+// lang__construct__error__002.glt
+// expect error ER 0011
+
+struct Constructed {
+    int value
+
+    constructor (int source) {
+        value = source
+    }
+}
+
+int main() {
+    Constructed item = {1, 2}
+    return 0
+}

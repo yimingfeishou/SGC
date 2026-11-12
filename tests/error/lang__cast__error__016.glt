@@ -1,0 +1,11 @@
+// lang__cast__error__016.glt
+// expect error ER 0032
+
+int add(int left, int right) {
+    return left + right
+}
+
+int main() {
+    void* raw = cast<void*>(&add)
+    return 0
+}

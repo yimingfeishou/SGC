@@ -29,7 +29,7 @@ int main() {
     output("copy: [", a, "][", b, "]\n")
 
     string source = "payload"
-    string moved = strmove(source)
+    string moved = strmove(&source)
     output("move: [", moved, "][", source, "][", strlen(source), "]\n")
 
     output("compare: ", strcompare("abc", "abd"), " ", strcompare("abc", "abc"), " ", strcompare("abd", "abc"), " ", strcompare("abc", "ab"), " ", strcompare("ab", "abc"), "\n")
@@ -42,7 +42,7 @@ int main() {
 
     string text = "cat"
     output("charat: ", strcharat(text, 0), " ", strcharat(text, 2), " ", strcharat(text, 9) == '\0', " ", strcharat(text, -1) == '\0', "\n")
-    output("setchar: ", strsetchar(text, 0, 'b'), " [", text, "] ", strsetchar(text, 9, 'z'), "\n")
+    output("setchar: ", strsetchar(&text, 0, 'b'), " [", text, "] ", strsetchar(&text, 9, 'z'), "\n")
 
     output("splitcount: ", strsplitcount("a,b,c", ","), " ", strsplitcount("abc", ""), " ", strsplitcount("", ","), "\n")
     output("splitget: [", strsplitget("a,b,c", ",", 0), "][", strsplitget("a,b,c", ",", 1), "][", strsplitget("a,b,c", ",", 2), "][", strsplitget("a,b,c", ",", 9), "]\n")

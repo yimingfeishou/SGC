@@ -1,0 +1,15 @@
+// lang__construct__error__003.glt
+// expect error ER 0012
+
+struct Constructed {
+    int value
+
+    constructor (int source) {
+        value = source
+    }
+}
+
+int main() {
+    Constructed item = {"invalid"}
+    return 0
+}

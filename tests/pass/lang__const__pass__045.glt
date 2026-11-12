@@ -1,0 +1,18 @@
+// lang__const__pass__045.glt
+// expect output
+// constant text longer than fifteen bytes
+// nested constant text longer than fifteen bytes 9
+
+struct LongItem {
+    string text
+    int value
+}
+
+int main() {
+    const string text = "constant text longer than fifteen bytes"
+    const LongItem item = {"nested constant text longer than fifteen bytes", 9}
+    string* text_pointer = bitcopy<string*>(&text)
+    LongItem* item_pointer = bitcopy<LongItem*>(&item)
+    output(*text_pointer, "\n", item_pointer->text, " ", item_pointer->value)
+    return 0
+}

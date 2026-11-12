@@ -1,0 +1,24 @@
+// lang__generics__pass__069.glt
+// expect output
+// [relay]0 1 2 99 
+// [relay]0 99 
+
+void sink(string tag, int... values) {
+    output("[", tag, "]")
+    for (int i = 0; i < values.length; i++) {
+        output(values[i], " ")
+    }
+    output("\n")
+}
+
+generics Forward<T...> {
+    void relay(T... values) {
+        sink("relay", 0, values..., 99)
+    }
+}
+
+int main() {
+    Forward<int, int>.relay(1, 2)
+    Forward<>.relay()
+    return 0
+}

@@ -101,6 +101,9 @@ namespace gallt {
         case TypeKind::Uint:
         case TypeKind::Float:
             return 4;
+        case TypeKind::Sint:
+        case TypeKind::Suint:
+            return 2;
         case TypeKind::Lint:
         case TypeKind::Luint:
         case TypeKind::Double:
@@ -156,6 +159,9 @@ namespace gallt {
         case TypeKind::Uint:
         case TypeKind::Float:
             return 4;
+        case TypeKind::Sint:
+        case TypeKind::Suint:
+            return 2;
         case TypeKind::Lint:
         case TypeKind::Luint:
         case TypeKind::Double:
@@ -212,8 +218,12 @@ namespace gallt {
             }
         } else if (name == "lint") {
             named = AST::Type::make_lint();
+        } else if (name == "sint") {
+            named = AST::Type::make_sint();
         } else if (name == "luint") {
             named = AST::Type::make_luint();
+        } else if (name == "suint") {
+            named = AST::Type::make_suint();
         } else if (name == "double") {
             named = AST::Type::make_double();
         } else if (name == "char") {
@@ -247,6 +257,7 @@ namespace gallt {
         if (type_has_unresolved_generic(type)) { return true; }
         if (type.kind == TypeKind::Int || type.kind == TypeKind::Lint ||
             type.kind == TypeKind::Uint || type.kind == TypeKind::Luint ||
+            type.kind == TypeKind::Sint || type.kind == TypeKind::Suint ||
             type.kind == TypeKind::Float ||
             type.kind == TypeKind::Double || type.kind == TypeKind::Char ||
             type.kind == TypeKind::Uchar ||
@@ -283,9 +294,20 @@ namespace gallt {
         if (auto* prim = dynamic_cast<AST::PrimaryExpression*>(expr)) {
             if (prim->kind == AST::PrimaryExpression::Kind::Literal &&
                 prim->literal_token.type == TokenType::IntegerLiteral) {
-                std::string_view lexeme = prim->literal_token.lexeme;
+                std::string_view lexeme = AST::Type::strip_integer_suffix(
+                    prim->literal_token.lexeme);
+                int base = 10;
+                if (lexeme.size() > 2 && lexeme[0] == '0' &&
+                    (lexeme[1] == 'x' || lexeme[1] == 'X')) {
+                    base = 16;
+                    lexeme = lexeme.substr(2);
+                } else if (lexeme.size() > 1 && lexeme[0] == '0') {
+                    base = 8;
+                    lexeme = lexeme.substr(1);
+                }
                 size_t value = 0;
-                auto [ptr, ec] = std::from_chars(lexeme.data(), lexeme.data() + lexeme.size(), value);
+                auto [ptr, ec] = std::from_chars(lexeme.data(),
+                    lexeme.data() + lexeme.size(), value, base);
                 if (ec == std::errc()) { return value; }
             }
         }
@@ -572,6 +594,9 @@ namespace gallt {
         if (auto* post = dynamic_cast<PostfixExpression*>(expr)) {
             switch (post->op) {
             case PostfixExpression::Operator::Cast:
+                if (post->is_bitcopy) {
+                    return false;
+                }
                 return is_compile_time_constant_expression(post->base.get()) &&
                     (post->cast_type.is_arithmetic() ||
                         post->cast_type.kind == TypeKind::String);
@@ -919,6 +944,8 @@ namespace gallt {
         switch (type.kind) {
         case TypeKind::Int: case TypeKind::Uint:
         case TypeKind::Float: size = 4; align = 4; return true;
+        case TypeKind::Sint: case TypeKind::Suint:
+            size = 2; align = 2; return true;
         case TypeKind::Lint: case TypeKind::Luint:
         case TypeKind::Double: size = 8; align = 8; return true;
         case TypeKind::Char: case TypeKind::Uchar:
@@ -1005,6 +1032,148 @@ namespace gallt {
         default:
             return true;
         }
+    }
+
+    bool TypeChecker::type_is_copy_constructible(const AST::Type& type) const {
+        switch (type.kind) {
+        case TypeKind::Array:
+            return type.element_type
+                ? type_is_copy_constructible(*type.element_type) : true;
+        case TypeKind::Struct: {
+            AST::StructDefinition* def = get_struct_definition(type.struct_name);
+            if (def == nullptr) { return true; }
+            if (def->no_copy || def->no_copy_ctor) { return false; }
+
+            for (const auto& special : def->special_members) {
+                if (special != nullptr &&
+                    special->kind == SpecialMemberFunction::Kind::CopyConstructor) {
+                    return true;
+                }
+            }
+
+            for (const auto& member : def->members) {
+                if (!type_is_copy_constructible(member.type)) { return false; }
+            }
+
+            return true;
+        }
+        default:
+            return true;
+        }
+    }
+
+    bool TypeChecker::type_is_move_constructible(const AST::Type& type) const {
+        switch (type.kind) {
+        case TypeKind::Array:
+            return type.element_type
+                ? type_is_move_constructible(*type.element_type) : true;
+        case TypeKind::Struct: {
+            AST::StructDefinition* def = get_struct_definition(type.struct_name);
+            if (def == nullptr) { return true; }
+            if (def->no_move || def->no_move_ctor) { return false; }
+
+            for (const auto& special : def->special_members) {
+                if (special != nullptr &&
+                    special->kind == SpecialMemberFunction::Kind::MoveConstructor) {
+                    return true;
+                }
+            }
+
+            for (const auto& member : def->members) {
+                if (!type_is_move_constructible(member.type)) { return false; }
+            }
+
+            return true;
+        }
+        default:
+            return true;
+        }
+    }
+
+    bool TypeChecker::type_is_copy_assignable(const AST::Type& type) const {
+        switch (type.kind) {
+        case TypeKind::Array:
+            return type.element_type
+                ? type_is_copy_assignable(*type.element_type) : true;
+        case TypeKind::Struct: {
+            AST::StructDefinition* def = get_struct_definition(type.struct_name);
+            if (def == nullptr) { return true; }
+            if (def->no_copy || def->no_copy_assign) { return false; }
+
+            for (const auto& special : def->special_members) {
+                if (special != nullptr &&
+                    special->kind == SpecialMemberFunction::Kind::CopyAssignment) {
+                    return true;
+                }
+            }
+
+            for (const auto& member : def->members) {
+                if (!type_is_copy_assignable(member.type)) { return false; }
+            }
+
+            return true;
+        }
+        default:
+            return true;
+        }
+    }
+
+    bool TypeChecker::type_is_move_assignable(const AST::Type& type) const {
+        switch (type.kind) {
+        case TypeKind::Array:
+            return type.element_type
+                ? type_is_move_assignable(*type.element_type) : true;
+        case TypeKind::Struct: {
+            AST::StructDefinition* def = get_struct_definition(type.struct_name);
+            if (def == nullptr) { return true; }
+            if (def->no_move || def->no_move_assign) { return false; }
+
+            for (const auto& special : def->special_members) {
+                if (special != nullptr &&
+                    special->kind == SpecialMemberFunction::Kind::MoveAssignment) {
+                    return true;
+                }
+            }
+
+            for (const auto& member : def->members) {
+                if (!type_is_move_assignable(member.type)) { return false; }
+            }
+
+            return true;
+        }
+        default:
+            return true;
+        }
+    }
+
+    ErrorCode TypeChecker::copy_violation_code(const AST::Type& type,
+        bool assignment) const {
+        AST::StructDefinition* def = type.kind == TypeKind::Struct
+            ? get_struct_definition(type.struct_name) : nullptr;
+        if (def != nullptr && !def->no_copy) {
+            if (assignment && def->no_copy_assign) {
+                return ErrorCode::NoCopyAssignmentViolation;
+            }
+            if (!assignment && def->no_copy_ctor) {
+                return ErrorCode::NoCopyConstructorViolation;
+            }
+        }
+        return ErrorCode::NoCopyViolation;
+    }
+
+    ErrorCode TypeChecker::move_violation_code(const AST::Type& type,
+        bool assignment) const {
+        AST::StructDefinition* def = type.kind == TypeKind::Struct
+            ? get_struct_definition(type.struct_name) : nullptr;
+        if (def != nullptr && !def->no_move) {
+            if (assignment && def->no_move_assign) {
+                return ErrorCode::NoMoveAssignmentViolation;
+            }
+            if (!assignment && def->no_move_ctor) {
+                return ErrorCode::NoMoveConstructorViolation;
+            }
+        }
+        return ErrorCode::NoMoveViolation;
     }
 
     bool TypeChecker::is_move_source(const AST::Expression* expr) {

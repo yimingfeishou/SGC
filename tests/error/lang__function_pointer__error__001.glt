@@ -5,7 +5,7 @@ int add(int a, int b) {
     return a + b
 }
 int main() {
-    void* h = cast<void*>(&add)
+    void* h = bitcopy<void*>(&add)
     int(int, int)* f = int(int, int)*(h)
     return 0
 }

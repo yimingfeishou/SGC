@@ -1,0 +1,11 @@
+// lang__cast__pass__022.glt
+// expect output
+// 10 10
+
+int main() {
+    int values[2] = {10, 20}
+    int* pointer = cast<int*>(values)
+    const int* readonly = pointer
+    output(*pointer, " ", *readonly)
+    return 0
+}

@@ -1,0 +1,15 @@
+// lang__generics__pass__077.glt
+// expect exit 0
+
+guide "generics.glt"
+
+sl::result_generic<int, int>.result g
+
+sl::result_generic<int, int>.result f() {
+    sl::result_generic<int, int>.result r = sl::result_generic<int, int>.ok(1)
+    return r
+}
+
+int main() {
+    return 0
+}

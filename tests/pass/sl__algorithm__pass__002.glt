@@ -1,0 +1,71 @@
+// sl__algorithm__pass__002.glt
+// expect output
+// 1 -1 0 1 4 6 4 4 0 6
+// true 1 4 true 4 4
+// false false true 0 0
+// 0 0 3
+
+guide "algorithm.glt"
+guide "generics.glt"
+access namespace sl
+
+int compare_int(int left, int right) {
+    if (left < right) {
+        return -1
+    }
+    if (left > right) {
+        return 1
+    }
+    return 0
+}
+
+int main() {
+    dynamic_array_generic<int>
+    dynamic_array_range_generic<int>
+    binary_search_generic<int>
+
+    dynamic_array data = dynamic_array(6)
+    push(&data, 1)
+    push(&data, 2)
+    push(&data, 2)
+    push(&data, 2)
+    push(&data, 4)
+    push(&data, 6)
+    iterator it = begin(&data)
+    iterator_interface range = make_dynamic_range(&it)
+    int item_count = length(&data)
+    output(binary_search(&range, item_count, 2, &compare_int), " ")
+    output(binary_search(&range, item_count, 3, &compare_int), " ")
+    output(lower_bound(&range, item_count, 0, &compare_int), " ")
+    output(lower_bound(&range, item_count, 2, &compare_int), " ")
+    output(lower_bound(&range, item_count, 3, &compare_int), " ")
+    output(lower_bound(&range, item_count, 7, &compare_int), " ")
+    output(upper_bound(&range, item_count, 2, &compare_int), " ")
+    output(upper_bound(&range, item_count, 3, &compare_int), " ")
+    output(upper_bound(&range, item_count, 0, &compare_int), " ")
+    output(upper_bound(&range, item_count, 7, &compare_int), "\n")
+
+    int first = -1
+    int last = -1
+    output(equal_range(&range, item_count, 2, &compare_int, &first, &last), " ", first, " ", last, " ")
+    output(equal_range(&range, item_count, 3, &compare_int, &first, &last), " ", first, " ", last, "\n")
+
+    output(equal_range(&range, item_count, 2, &compare_int, null, &last), " ")
+    output(equal_range(&range, item_count, 2, &compare_int, &first, null), " ")
+    dynamic_array empty_values = dynamic_array(0)
+    iterator empty_it = begin(&empty_values)
+    iterator_interface empty_range = make_dynamic_range(&empty_it)
+    output(equal_range(&empty_range, 0, 2, &compare_int, &first, &last), " ", first, " ", last, "\n")
+
+    dynamic_array duplicate = dynamic_array(4)
+    push(&duplicate, 2)
+    push(&duplicate, 2)
+    push(&duplicate, 2)
+    push(&duplicate, 4)
+    iterator duplicate_it = begin(&duplicate)
+    iterator_interface duplicate_range = make_dynamic_range(&duplicate_it)
+    output(binary_search(&duplicate_range, 4, 2, &compare_int), " ")
+    output(lower_bound(&duplicate_range, 4, 2, &compare_int), " ")
+    output(upper_bound(&duplicate_range, 4, 2, &compare_int))
+    return 0
+}

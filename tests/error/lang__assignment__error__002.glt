@@ -1,0 +1,10 @@
+// lang__assignment__error__002.glt
+// expect error ER 0019
+
+int main() {
+    int value = 0
+    value++ = 1
+    ++value = 2
+    (value++)++
+    return 0
+}

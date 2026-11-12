@@ -9,6 +9,9 @@
 #include <string_view>
 #include <optional>
 #include <cstdio>
+#include <iomanip>
+#include <limits>
+#include <sstream>
 
 namespace gallt {
     namespace AST {
@@ -39,7 +42,7 @@ namespace gallt {
         struct GenericRef;
 
         enum class TypeKind {
-            Int, Lint, Uint, Luint, Float, Double, Char, Uchar, Bool, String, File, Void,
+            Int, Lint, Sint, Uint, Luint, Suint, Float, Double, Char, Uchar, Bool, String, File, Void,
             Array, Pointer, Struct, Function, Error
         };
 
@@ -83,9 +86,13 @@ namespace gallt {
 
             static Type make_lint() { return Type(TypeKind::Lint); }
 
+            static Type make_sint() { return Type(TypeKind::Sint); }
+
             static Type make_uint() { return Type(TypeKind::Uint); }
 
             static Type make_luint() { return Type(TypeKind::Luint); }
+
+            static Type make_suint() { return Type(TypeKind::Suint); }
 
             static Type make_float() { return Type(TypeKind::Float); }
 
@@ -160,19 +167,21 @@ namespace gallt {
 
             bool is_integer() const {
                 return kind == TypeKind::Int || kind == TypeKind::Lint ||
-                    kind == TypeKind::Uint || kind == TypeKind::Luint ||
+                    kind == TypeKind::Sint || kind == TypeKind::Uint ||
+                    kind == TypeKind::Luint || kind == TypeKind::Suint ||
                     kind == TypeKind::Char || kind == TypeKind::Uchar ||
                     kind == TypeKind::Bool;
             }
 
             bool is_signed_integer() const {
                 return kind == TypeKind::Char || kind == TypeKind::Int ||
-                    kind == TypeKind::Lint;
+                    kind == TypeKind::Sint || kind == TypeKind::Lint;
             }
 
             bool is_unsigned_integer() const {
                 return kind == TypeKind::Uchar || kind == TypeKind::Uint ||
-                    kind == TypeKind::Luint || kind == TypeKind::Bool;
+                    kind == TypeKind::Suint || kind == TypeKind::Luint ||
+                    kind == TypeKind::Bool;
             }
 
             int promotion_rank() const {
@@ -180,12 +189,14 @@ namespace gallt {
                 case TypeKind::Char:
                 case TypeKind::Bool: return 1;
                 case TypeKind::Uchar: return 2;
-                case TypeKind::Int: return 3;
-                case TypeKind::Uint: return 4;
-                case TypeKind::Lint: return 5;
-                case TypeKind::Luint: return 6;
-                case TypeKind::Float: return 7;
-                case TypeKind::Double: return 8;
+                case TypeKind::Sint: return 3;
+                case TypeKind::Suint: return 4;
+                case TypeKind::Int: return 5;
+                case TypeKind::Uint: return 6;
+                case TypeKind::Lint: return 7;
+                case TypeKind::Luint: return 8;
+                case TypeKind::Float: return 9;
+                case TypeKind::Double: return 10;
                 default: return 0;
                 }
             }
@@ -195,6 +206,8 @@ namespace gallt {
                 case TypeKind::Char:
                 case TypeKind::Uchar:
                 case TypeKind::Bool: return 8;
+                case TypeKind::Sint:
+                case TypeKind::Suint: return 16;
                 case TypeKind::Int:
                 case TypeKind::Uint: return 32;
                 case TypeKind::Lint:
@@ -274,9 +287,10 @@ namespace gallt {
             }
 
             if (float_constant) {
-                char buf[64];
-                std::snprintf(buf, sizeof(buf), "%g", float_value);
-                return std::string(buf);
+                std::ostringstream format;
+                format << std::setprecision(
+                    std::numeric_limits<double>::max_digits10) << float_value;
+                return format.str();
             }
 
             return std::to_string(int_value);
@@ -322,30 +336,15 @@ namespace gallt {
             for (const GenericArgument& arg : arguments) {
                 out += "$";
                 std::string norm = arg.normalize();
-                for (char c : norm) {
-                    switch (c) {
-                    case '*': out += "P"; break;
-                    case '[': out += "A"; break;
-                    case ']': out += "Z"; break;
-                    case '<': out += "L"; break;
-                    case '>': out += "G"; break;
-                    case ',': out += "C"; break;
-                    case ' ': break;
-                    case '.': out += "D"; break;
-                    case ':': out += "S"; break;
-                    case '\"': out += "Q"; break;
-                    case '$': out += "X"; break;
-                    default:
-                        if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
-                            (c >= '0' && c <= '9') || c == '_') {
-                            out += c;
-                        } else {
-                            char buffer[8];
-                            std::snprintf(buffer, sizeof(buffer), "_%02X",
-                                static_cast<unsigned>(static_cast<unsigned char>(c)));
-                            out += buffer;
-                        }
-                        break;
+                for (unsigned char c : norm) {
+                    if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                        (c >= '0' && c <= '9')) {
+                        out += static_cast<char>(c);
+                    } else {
+                        char buffer[8];
+                        std::snprintf(buffer, sizeof(buffer), "_%02X",
+                            static_cast<unsigned>(c));
+                        out += buffer;
                     }
                 }
             }
@@ -380,6 +379,7 @@ namespace gallt {
         public:
             std::vector<std::unique_ptr<Initializer>> elements;
             bool from_paren_call = false;
+            std::string lowered_ctor;
 
             ArrayInitializer(SourceLocation loc, std::vector<std::unique_ptr<Initializer>> elems)
                 : Initializer(loc), elements(std::move(elems)) {
@@ -527,8 +527,14 @@ namespace gallt {
 
             std::string name;
             std::vector<Member> members;
+            bool no_ctor = false;
+            bool no_dtor = false;
             bool no_copy = false;
             bool no_move = false;
+            bool no_copy_ctor = false;
+            bool no_copy_assign = false;
+            bool no_move_ctor = false;
+            bool no_move_assign = false;
             bool needs_destruction = false;
             std::string destructor_name;
             std::string copy_constructor_name;
@@ -633,6 +639,7 @@ namespace gallt {
         class AccessNamespaceStatement : public TopLevel, public Statement {
         public:
             std::vector<std::string> path;
+            std::string resolved_namespace;
             SourceLocation location;
 
             AccessNamespaceStatement(SourceLocation loc, std::vector<std::string> p)
@@ -754,6 +761,7 @@ namespace gallt {
             std::unique_ptr<Initializer> initializer;
 
             bool constructed_by_lowering = false;
+            bool address_taken = false;
 
             VariableDeclaration(SourceLocation loc, Type t, std::string_view n,
                 std::optional<size_t> arr_sz = std::nullopt,
@@ -920,8 +928,9 @@ namespace gallt {
         class AssignmentExpression : public Expression {
         public:
             enum class Operator {
-                Assign, PlusAssign, MinusAssign, AndAssign, OrAssign, XorAssign,
-                ShiftLeftAssign, ShiftRightAssign
+                Assign, PlusAssign, MinusAssign, StarAssign, SlashAssign,
+                AndAssign, OrAssign, XorAssign, ShiftLeftAssign,
+                ShiftRightAssign
             };
 
             std::unique_ptr<Expression> left;
@@ -1115,6 +1124,7 @@ namespace gallt {
             std::vector<Expression*> borrowed_arguments;
             Type cast_type;
             std::string member_name;
+            bool is_bitcopy = false;
 
             PostfixExpression(SourceLocation loc,
                 std::unique_ptr<Expression> base_,
@@ -1135,9 +1145,7 @@ namespace gallt {
             bool is_lvalue() const override {
                 return op == Operator::Subscript ||
                     op == Operator::Dot ||
-                    op == Operator::Arrow ||
-                    op == Operator::Increment ||
-                    op == Operator::Decrement;
+                    op == Operator::Arrow;
             }
         };
 

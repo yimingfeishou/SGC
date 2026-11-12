@@ -380,8 +380,10 @@ namespace {
         if (param.kind == TypeKind::Double && arg_type.kind == TypeKind::Float) { return true; }
         if (param.kind == TypeKind::Int && arg_type.is_integer()) { return true; }
         if (param.kind == TypeKind::Lint && arg_type.is_integer()) { return true; }
+        if (param.kind == TypeKind::Sint && arg_type.is_integer()) { return true; }
         if (param.kind == TypeKind::Uint && arg_type.is_integer()) { return true; }
         if (param.kind == TypeKind::Luint && arg_type.is_integer()) { return true; }
+        if (param.kind == TypeKind::Suint && arg_type.is_integer()) { return true; }
         if (param.kind == TypeKind::Uchar && arg_type.is_integer()) { return true; }
         if (param.kind == TypeKind::Bool && arg_type.is_integer()) { return true; }
         if (param.kind == TypeKind::Char && arg_type.is_integer()) { return true; }
@@ -402,12 +404,14 @@ namespace {
             case TypeKind::Bool:
                 return 0;
             case TypeKind::Uchar: return 1;
-            case TypeKind::Int: return 2;
-            case TypeKind::Uint: return 3;
-            case TypeKind::Lint: return 4;
-            case TypeKind::Luint: return 5;
-            case TypeKind::Float: return 6;
-            case TypeKind::Double: return 7;
+            case TypeKind::Sint: return 2;
+            case TypeKind::Suint: return 3;
+            case TypeKind::Int: return 4;
+            case TypeKind::Uint: return 5;
+            case TypeKind::Lint: return 6;
+            case TypeKind::Luint: return 7;
+            case TypeKind::Float: return 8;
+            case TypeKind::Double: return 9;
             default: return -1;
             }
         };
@@ -423,7 +427,10 @@ namespace {
 
         if (from_pos >= 0 && to_pos >= 0) {
             const bool small_integer = arg_type.kind == TypeKind::Bool ||
-                arg_type.kind == TypeKind::Char || arg_type.kind == TypeKind::Uchar;
+                arg_type.kind == TypeKind::Char ||
+                arg_type.kind == TypeKind::Uchar ||
+                arg_type.kind == TypeKind::Sint ||
+                arg_type.kind == TypeKind::Suint;
             bool promotion = (small_integer && (param.kind == TypeKind::Int ||
                 param.kind == TypeKind::Uint)) ||
                 (arg_type.kind == TypeKind::Float && param.kind == TypeKind::Double);
@@ -520,6 +527,35 @@ namespace {
             return nullptr;
         }
         return viable[best].ctor;
+    }
+
+    void LifecycleLowering::report_constructor_mismatch(const StructInfo& info,
+        std::size_t argument_count, SourceLocation loc) {
+        bool arity_matches = false;
+
+        for (const AST::SpecialMemberFunction* ctor : info.constructors) {
+            std::size_t required = ctor->parameters.size();
+
+            for (std::size_t i = ctor->parameter_defaults.size(); i > 0; --i) {
+                if (ctor->parameter_defaults[i - 1] != nullptr) {
+                    required = i - 1;
+                } else {
+                    break;
+                }
+            }
+
+            if (argument_count >= required &&
+                argument_count <= ctor->parameters.size()) {
+                arity_matches = true;
+                break;
+            }
+        }
+
+        const ErrorCode code = arity_matches
+            ? ErrorCode::FunctionArgTypeMismatch
+            : ErrorCode::FunctionArgCountMismatch;
+        report(loc, code, "no constructor of '" + info.def->name +
+            "' matches " + std::to_string(argument_count) + " argument(s)");
     }
 
     void LifecycleLowering::rewrite_initializer(Initializer* init) {
@@ -626,7 +662,19 @@ namespace {
                                 decl->location, std::move(call)));
                             return;
                         }
+
+                        report_constructor_mismatch(info, args.size(),
+                            decl->location);
+                        decl->initializer.reset();
+                        return;
                     }
+                }
+
+                if (!info.constructors.empty()) {
+                    report_constructor_mismatch(info,
+                        brace->elements.size(), decl->location);
+                    decl->initializer.reset();
+                    return;
                 }
 
                 return;
@@ -652,6 +700,57 @@ namespace {
 
                 report(decl->location, ErrorCode::FunctionArgCountMismatch,
                     "type '" + struct_name + "' has no default constructor");
+            } else if (info.def->no_ctor) {
+                report(decl->location, ErrorCode::FunctionArgCountMismatch,
+                    "type '" + struct_name + "' has no default constructor");
+            } else {
+                std::unordered_set<std::string> visiting;
+                std::function<bool(const AST::Type&)> default_constructible =
+                    [&](const AST::Type& type) -> bool {
+                    if (type.kind == TypeKind::Array) {
+                        return type.element_type &&
+                            default_constructible(*type.element_type);
+                    }
+                    if (type.kind != TypeKind::Struct) { return true; }
+                    StructInfo* member_info = find_struct_info(type.struct_name);
+                    if (member_info == nullptr) { return true; }
+                    if (member_info->def->no_ctor) { return false; }
+                    if (!member_info->constructors.empty()) {
+                        for (const AST::SpecialMemberFunction* ctor :
+                            member_info->constructors) {
+                            std::size_t required = ctor->parameters.size();
+                            for (std::size_t i =
+                                ctor->parameter_defaults.size(); i > 0; --i) {
+                                if (ctor->parameter_defaults[i - 1] != nullptr) {
+                                    required = i - 1;
+                                } else {
+                                    break;
+                                }
+                            }
+                            if (required == 0) { return true; }
+                        }
+                        return false;
+                    }
+                    if (!visiting.insert(type.struct_name).second) {
+                        return true;
+                    }
+                    for (const AST::StructDefinition::Member& member :
+                        member_info->def->members) {
+                        if (member.initializer != nullptr) { continue; }
+                        if (!default_constructible(member.type)) {
+                            visiting.erase(type.struct_name);
+                            return false;
+                        }
+                    }
+                    visiting.erase(type.struct_name);
+                    return true;
+                };
+
+                if (!default_constructible(decl->type)) {
+                    report(decl->location, ErrorCode::FunctionArgCountMismatch,
+                        "type '" + struct_name +
+                        "' has no usable default constructor");
+                }
             }
             return;
         }
@@ -696,6 +795,10 @@ namespace {
                         call->location, std::move(elements));
                     aggregate->from_paren_call = true;
                     decl->initializer = std::move(aggregate);
+                } else {
+                    report_constructor_mismatch(info, call->arguments.size(),
+                        call->location);
+                    decl->initializer.reset();
                 }
                 return;
             }

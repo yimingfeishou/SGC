@@ -1,0 +1,74 @@
+// sl__algorithm__pass__001.glt
+// expect output
+// 1 -1 1 4 5 -1 3 4
+// false true false
+// true false true
+// false false false
+// 0 0
+
+guide "algorithm.glt"
+guide "generics.glt"
+access namespace sl
+
+int compare_int(int left, int right) {
+    if (left < right) {
+        return -1
+    }
+    if (left > right) {
+        return 1
+    }
+    return 0
+}
+
+bool is_even(int value) {
+    return value % 2 == 0
+}
+
+bool greater_than_three(int value) {
+    return value > 3
+}
+
+int main() {
+    dynamic_array_generic<int>
+    dynamic_array_range_generic<int>
+    find_generic<int>
+    count_generic<int>
+
+    dynamic_array data = dynamic_array(6)
+    push(&data, 1)
+    push(&data, 2)
+    push(&data, 3)
+    push(&data, 2)
+    push(&data, 4)
+    push(&data, 2)
+    iterator it = begin(&data)
+    iterator_interface range = make_dynamic_range(&it)
+    int item_count = length(&data)
+    output(find(&range, item_count, 2, &compare_int), " ")
+    output(find(&range, item_count, 9, &compare_int), " ")
+    output(find_if(&range, item_count, &is_even), " ")
+    output(find_if(&range, item_count, &greater_than_three), " ")
+    output(find_last(&range, item_count, 2, &compare_int), " ")
+    output(find_last(&range, item_count, 9, &compare_int), " ")
+    output(count_value(&range, item_count, 2, &compare_int), " ")
+    output(count_if(&range, item_count, &is_even), "\n")
+
+    output(all_of(&range, item_count, &greater_than_three), " ")
+    output(any_of(&range, item_count, &greater_than_three), " ")
+    output(none_of(&range, item_count, &greater_than_three), "\n")
+
+    dynamic_array empty_values = dynamic_array(0)
+    iterator empty_it = begin(&empty_values)
+    iterator_interface empty_range = make_dynamic_range(&empty_it)
+    output(all_of(&empty_range, 0, &is_even), " ")
+    output(any_of(&empty_range, 0, &is_even), " ")
+    output(none_of(&empty_range, 0, &is_even), "\n")
+
+    output(all_of(&empty_range, 0, null), " ")
+    output(any_of(&empty_range, 0, null), " ")
+    output(none_of(&empty_range, 0, null), "\n")
+
+    output(count_if(null, item_count, &is_even), " ")
+    output(count_value(&range, item_count, 2, null))
+    return 0
+}

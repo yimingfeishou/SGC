@@ -778,18 +778,6 @@ namespace gallt {
                 owner_.rewrite_statement(child.get());
             }
 
-            std::vector<std::unique_ptr<Statement>> kept;
-            kept.reserve(node->statements.size());
-
-            for (std::unique_ptr<Statement>& child : node->statements) {
-                if (dynamic_cast<AccessNamespaceStatement*>(child.get()) != nullptr) {
-                    continue;
-                }
-
-                kept.push_back(std::move(child));
-            }
-
-            node->statements = std::move(kept);
             owner_.pop_scope();
             return false;
         }
@@ -935,18 +923,6 @@ namespace gallt {
                     owner_.rewrite_statement(child.get());
                 }
 
-                std::vector<std::unique_ptr<Statement>> kept;
-                kept.reserve(clause.statements.size());
-
-                for (std::unique_ptr<Statement>& child : clause.statements) {
-                    if (dynamic_cast<AccessNamespaceStatement*>(child.get()) != nullptr) {
-                        continue;
-                    }
-
-                    kept.push_back(std::move(child));
-                }
-
-                clause.statements = std::move(kept);
                 owner_.pop_scope();
             }
 
@@ -1121,6 +1097,7 @@ namespace gallt {
         if (path.empty()) { return; }
         if (poisoned_node(node)) { return; }
         PoisonGuard guard(*this, node);
+        node->resolved_namespace.clear();
         if (scopes_.empty()) { push_scope(); }
         auto access_order = access_orders_.find(node);
         const std::size_t visible_through = access_order != access_orders_.end()
@@ -1138,6 +1115,10 @@ namespace gallt {
                     member_addition != info.member_from_addition.end() &&
                     member_addition->second &&
                     member_order->second > visible_through) {
+                    continue;
+                }
+
+                if (kv.first.rfind("__glt_op_", 0) == 0) {
                     continue;
                 }
 
@@ -1195,6 +1176,7 @@ namespace gallt {
 
         auto namespace_target = resolve_namespace_target(namespace_prefix_, path);
         if (namespace_target.has_value()) {
+            node->resolved_namespace = internal_name(*namespace_target);
             import_namespace(*namespace_target);
             return;
         }
@@ -1289,6 +1271,7 @@ namespace gallt {
 
             if (auto* ac = dynamic_cast<AccessNamespaceStatement*>(node.get())) {
                 handle_access_namespace(ac);
+                out.push_back(std::move(node));
                 continue;
             }
 

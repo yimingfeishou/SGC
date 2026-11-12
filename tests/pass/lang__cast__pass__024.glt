@@ -1,0 +1,11 @@
+// lang__cast__pass__024.glt
+// expect output
+
+struct Value {
+    int number
+}
+
+int main() {
+    bitcopy<Value>(null)
+    return 0
+}

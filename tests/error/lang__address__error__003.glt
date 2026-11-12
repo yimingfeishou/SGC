@@ -1,0 +1,11 @@
+// lang__address__error__003.glt
+// expect error ER 0036
+
+int main() {
+    int value = 0
+    int* before = &(value++)
+    int* after = &(++value)
+    input(&(value--))
+    input(&(--value))
+    return 0
+}

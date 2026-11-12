@@ -10,7 +10,8 @@ namespace gallt {
 
             while (count < 2 && count + 1 < lexeme.size()) {
                 const char c = lexeme[lexeme.size() - 1 - count];
-                if (c == 'l' || c == 'L' || c == 'u' || c == 'U') {
+                if (c == 'l' || c == 'L' || c == 's' || c == 'S' ||
+                    c == 'u' || c == 'U') {
                     ++count;
                 } else {
                     break;
@@ -36,8 +37,16 @@ namespace gallt {
                 return make_luint();
             }
 
+            if (suffix.size() == 2 && lower(suffix[0]) == 's' && lower(suffix[1]) == 'u') {
+                return make_suint();
+            }
+
             if (suffix.size() == 1 && lower(suffix[0]) == 'l') {
                 return make_lint();
+            }
+
+            if (suffix.size() == 1 && lower(suffix[0]) == 's') {
+                return make_sint();
             }
 
             if (suffix.size() == 1 && lower(suffix[0]) == 'u') {
@@ -69,8 +78,10 @@ namespace gallt {
             switch (kind) {
             case TypeKind::Int:
             case TypeKind::Lint:
+            case TypeKind::Sint:
             case TypeKind::Uint:
             case TypeKind::Luint:
+            case TypeKind::Suint:
             case TypeKind::Float:
             case TypeKind::Double:
             case TypeKind::Char:
@@ -152,8 +163,10 @@ namespace gallt {
                 switch (type.kind) {
                 case TypeKind::Int:    out << "int"; break;
                 case TypeKind::Lint:   out << "lint"; break;
+                case TypeKind::Sint:   out << "sint"; break;
                 case TypeKind::Uint:   out << "uint"; break;
                 case TypeKind::Luint:  out << "luint"; break;
+                case TypeKind::Suint:  out << "suint"; break;
                 case TypeKind::Float:  out << "float"; break;
                 case TypeKind::Double: out << "double"; break;
                 case TypeKind::Char:   out << "char"; break;

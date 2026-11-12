@@ -1,0 +1,67 @@
+// sl__algorithm__pass__003.glt
+// expect output
+// 3 1 2 3
+// 2 4 5 0
+// 7 7 7
+// 8 8 7
+// 4 1 2 1 2 3 4
+
+guide "algorithm.glt"
+guide "generics.glt"
+access namespace sl
+
+int main() {
+    dynamic_array_generic<int>
+    dynamic_array_range_generic<int>
+    copy_range_generic<int>
+
+    dynamic_array source = dynamic_array(5)
+    push(&source, 1)
+    push(&source, 2)
+    push(&source, 3)
+    push(&source, 4)
+    push(&source, 5)
+    dynamic_array target = dynamic_array(3)
+    push(&target, 0)
+    push(&target, 0)
+    push(&target, 0)
+    iterator src_it = begin(&source)
+    iterator dst_it = begin(&target)
+    iterator_interface source_range = make_dynamic_range(&src_it)
+    iterator_interface target_range = make_dynamic_range(&dst_it)
+    output(copy_range(&target_range, length(&target), &source_range, length(&source)), " ", get(&target, 0), " ", get(&target, 1), " ", get(&target, 2), "\n")
+
+    dynamic_array short_source = dynamic_array(2)
+    push(&short_source, 4)
+    push(&short_source, 5)
+    dynamic_array wide_target = dynamic_array(3)
+    push(&wide_target, 0)
+    push(&wide_target, 0)
+    push(&wide_target, 0)
+    src_it = begin(&short_source)
+    dst_it = begin(&wide_target)
+    output(copy_range(&target_range, length(&wide_target), &source_range, length(&short_source)), " ", get(&wide_target, 0), " ", get(&wide_target, 1), " ", get(&wide_target, 2), "\n")
+
+    dst_it = begin(&target)
+    copy_range_generic<int>.fill(&target_range, length(&target), 7)
+    output(get(&target, 0), " ", get(&target, 1), " ", get(&target, 2), "\n")
+
+    dst_it = begin(&target)
+    copy_range_generic<int>.fill_n(&target_range, length(&target), 2, 8)
+    output(get(&target, 0), " ", get(&target, 1), " ", get(&target, 2), "\n")
+
+    dynamic_array overlap = dynamic_array(6)
+    push(&overlap, 1)
+    push(&overlap, 2)
+    push(&overlap, 3)
+    push(&overlap, 4)
+    push(&overlap, 5)
+    push(&overlap, 6)
+    src_it = begin(&overlap)
+    dst_it = begin(&overlap)
+    iterator_next(&dst_it)
+    iterator_next(&dst_it)
+    target_range.start = 2
+    output(copy_range_backward(&target_range, 4, &source_range, 4), " ", get(&overlap, 0), " ", get(&overlap, 1), " ", get(&overlap, 2), " ", get(&overlap, 3), " ", get(&overlap, 4), " ", get(&overlap, 5))
+    return 0
+}

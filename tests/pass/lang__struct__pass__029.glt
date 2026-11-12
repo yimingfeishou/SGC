@@ -1,0 +1,45 @@
+// lang__struct__pass__029.glt
+// expect output
+// 30 AB3
+
+struct Number {
+    int value
+}
+
+Number make_number(int value) {
+    Number result
+    result.value = value
+    return result
+}
+
+Number combine_numbers(Number first, Number second) {
+    Number result
+    result.value = first.value + second.value
+    return result
+}
+
+struct Text {
+    string value
+    int number
+}
+
+Text make_text(string value, int number) {
+    Text result
+    result.value = value
+    result.number = number
+    return result
+}
+
+Text combine_text(Text first, Text second) {
+    Text result
+    result.value = first.value + second.value
+    result.number = first.number + second.number
+    return result
+}
+
+int main() {
+    Number number = combine_numbers(make_number(10), make_number(20))
+    Text text = combine_text(make_text("A", 1), make_text("B", 2))
+    output(number.value, " ", text.value, text.number, "\n")
+    return 0
+}

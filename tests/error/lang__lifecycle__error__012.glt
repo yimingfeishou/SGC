@@ -1,0 +1,11 @@
+// lang__lifecycle__error__012.glt
+// expect error ER 0158
+
+[nomoveassign] struct Invalid {
+    move_assignment (Invalid* other) {
+    }
+}
+
+int main() {
+    return 0
+}

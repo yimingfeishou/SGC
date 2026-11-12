@@ -1,0 +1,20 @@
+// sl__str_func__pass__005.glt
+// expect output
+// 0
+
+guide "generics.glt"
+
+generics Test<T: struct> {
+    emit "luint test_offset(T* p) {\n"
+    emit "    return sl::offset_generic<T, \"x\">.offset(p)\n"
+    emit "}\n"
+}
+
+struct S { int x }
+
+int main() {
+    Test<S>
+    S s
+    output(test_offset(&s), "\n")
+    return 0
+}

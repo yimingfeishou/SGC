@@ -1,0 +1,22 @@
+// lang__generics__pass__074.glt
+// expect output
+// AB
+
+generics FloatIdentity<double Value> {
+    void print() {
+        if (Value == 1.2345671) {
+            output("A")
+        } else if (Value == 1.2345672) {
+            output("B")
+        } else {
+            output("X")
+        }
+    }
+}
+
+int main() {
+    FloatIdentity<1.2345671>.print()
+    FloatIdentity<1.2345672>.print()
+    output("\n")
+    return 0
+}

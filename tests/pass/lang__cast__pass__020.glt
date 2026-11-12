@@ -1,0 +1,19 @@
+// lang__cast__pass__020.glt
+// expect output
+// 42 42 0
+
+struct Raw {
+    int value
+}
+
+int main() {
+    Raw raw = {42}
+    int value = bitcopy<int>(raw)
+    int source = 42
+    int* pointer = &source
+    char* bytes = bitcopy<char*>(pointer)
+    int zero = cast<int>(null)
+    bitcopy<void>(source)
+    output(value, " ", cast<int>(*bytes), " ", zero)
+    return 0
+}

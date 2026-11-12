@@ -1,0 +1,21 @@
+// lang__construct__pass__020.glt
+// expect output
+// 10
+
+struct Constructed {
+    int value
+
+    constructor (int source) {
+        value = source * 2
+    }
+}
+
+struct Holder {
+    Constructed item
+}
+
+int main() {
+    Holder holder = {{5}}
+    output(holder.item.value)
+    return 0
+}

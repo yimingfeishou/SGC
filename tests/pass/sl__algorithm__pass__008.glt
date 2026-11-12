@@ -1,0 +1,128 @@
+// sl__algorithm__pass__008.glt
+// expect output
+// 0 1 2 -1 0 0 3
+
+guide "algorithm.glt"
+guide "generics.glt"
+access namespace sl
+
+struct probe_state {
+    int* values
+    int index
+    int limit
+    int writes
+    int nexts
+    int fail_at
+}
+
+void probe_seek(void* context, int offset) {
+    probe_state* state = cast<probe_state*>(context)
+    if (offset < 0) {
+        offset = 0
+    }
+    if (offset > state->limit) {
+        offset = state->limit
+    }
+    state->index = offset
+}
+
+bool probe_valid(void* context) {
+    probe_state* state = cast<probe_state*>(context)
+    return state->index >= 0 && state->index < state->limit
+}
+
+void probe_read(void* context, void* value) {
+    probe_state* state = cast<probe_state*>(context)
+    *cast<int*>(value) = state->values[state->index]
+}
+
+bool probe_next(void* context) {
+    probe_state* state = cast<probe_state*>(context)
+    state->nexts = state->nexts + 1
+    state->index = state->index + 1
+    return state->index < state->limit
+}
+
+bool probe_write(void* context, void* value) {
+    probe_state* state = cast<probe_state*>(context)
+    if (state->index == state->fail_at) {
+        return false
+    }
+    state->values[state->index] = *cast<int*>(value)
+    state->writes = state->writes + 1
+    return true
+}
+
+bool probe_swap(void* context, int left, int right) {
+    probe_state* state = cast<probe_state*>(context)
+    if (left < 0 || right < 0 || left >= state->limit || right >= state->limit) {
+        return false
+    }
+    int value = state->values[left]
+    state->values[left] = state->values[right]
+    state->values[right] = value
+    return true
+}
+
+iterator_interface make_probe(probe_state* state) {
+    iterator_interface range
+    range.context = cast<void*>(state)
+    range.start = 0
+    range.seek = &probe_seek
+    range.valid = &probe_valid
+    range.read = &probe_read
+    range.next = &probe_next
+    range.write = &probe_write
+    range.swap = &probe_swap
+    return range
+}
+
+void reset_probe(probe_state* state, int* values, int limit, int fail_at) {
+    state->values = values
+    state->index = 0
+    state->limit = limit
+    state->writes = 0
+    state->nexts = 0
+    state->fail_at = fail_at
+}
+
+int double_value(int value) {
+    return value * 2
+}
+
+int main() {
+    transform_generic<int>
+    copy_range_generic<int>
+
+    int fill_values[3] = {1, 2, 3}
+    probe_state fill_state
+    reset_probe(&fill_state, fill_values, 3, 0)
+    iterator_interface fill_range = make_probe(&fill_state)
+    fill(&fill_range, 3, 9)
+
+    int fill_n_values[3] = {1, 2, 3}
+    probe_state fill_n_state
+    reset_probe(&fill_n_state, fill_n_values, 3, 1)
+    iterator_interface fill_n_range = make_probe(&fill_n_state)
+    fill_n(&fill_n_range, 3, 3, 9)
+
+    int transform_values[3] = {1, 2, 3}
+    probe_state transform_state
+    reset_probe(&transform_state, transform_values, 3, 2)
+    iterator_interface transform_range = make_probe(&transform_state)
+    transform(&transform_range, 3, &double_value)
+
+    int source_values[3] = {1, 2, 3}
+    int target_values[3] = {0, 0, 0}
+    probe_state source_state
+    probe_state target_state
+    reset_probe(&source_state, source_values, 3, -1)
+    reset_probe(&target_state, target_values, 3, 1)
+    iterator_interface source_range = make_probe(&source_state)
+    iterator_interface target_range = make_probe(&target_state)
+    int copied = copy_range_backward(&target_range, 3, &source_range, 3)
+
+    output(fill_state.nexts, " ", fill_n_state.nexts, " ", transform_state.nexts)
+    output(" ", copied, " ", target_values[0], " ", target_values[1], " ", target_values[2])
+    return 0
+}

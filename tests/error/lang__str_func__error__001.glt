@@ -4,6 +4,6 @@
 const string FIXED = "abc"
 
 int main() {
-    output(strsetchar(FIXED, 0, 'x'))
+    output(strsetchar(&FIXED, 0, 'x'))
     return 0
 }

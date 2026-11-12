@@ -146,6 +146,8 @@ namespace gallt {
         if (current_.type == TokenType::Assign ||
             current_.type == TokenType::PlusAssign ||
             current_.type == TokenType::MinusAssign ||
+            current_.type == TokenType::StarAssign ||
+            current_.type == TokenType::SlashAssign ||
             current_.type == TokenType::AndAssign ||
             current_.type == TokenType::OrAssign ||
             current_.type == TokenType::XorAssign ||
@@ -170,6 +172,8 @@ namespace gallt {
                 case TokenType::Assign: op = AssignmentExpression::Operator::Assign; break;
                 case TokenType::PlusAssign: op = AssignmentExpression::Operator::PlusAssign; break;
                 case TokenType::MinusAssign: op = AssignmentExpression::Operator::MinusAssign; break;
+                case TokenType::StarAssign: op = AssignmentExpression::Operator::StarAssign; break;
+                case TokenType::SlashAssign: op = AssignmentExpression::Operator::SlashAssign; break;
                 case TokenType::AndAssign: op = AssignmentExpression::Operator::AndAssign; break;
                 case TokenType::OrAssign: op = AssignmentExpression::Operator::OrAssign; break;
                 case TokenType::XorAssign: op = AssignmentExpression::Operator::XorAssign; break;
@@ -672,8 +676,10 @@ namespace gallt {
 
         case TokenType::Keyword_Int:
         case TokenType::Keyword_Lint:
+        case TokenType::Keyword_Sint:
         case TokenType::Keyword_Uint:
         case TokenType::Keyword_Luint:
+        case TokenType::Keyword_Suint:
         case TokenType::Keyword_Float:
         case TokenType::Keyword_Double:
         case TokenType::Keyword_Char:
@@ -709,25 +715,33 @@ namespace gallt {
             return reject_legacy_type_conversion(loc);
         }
 
-        case TokenType::Keyword_Cast: {
+        case TokenType::Keyword_Cast:
+        case TokenType::Keyword_Bitcopy: {
+            const bool is_bitcopy = current_.type == TokenType::Keyword_Bitcopy;
             advance();
             Type cast_type;
 
-            if (!parse_cast_target_type(cast_type, true)) { return nullptr; }
+            const char* keyword = is_bitcopy ? "bitcopy" : "cast";
+            if (!parse_conversion_target_type(cast_type, true, keyword)) {
+                return nullptr;
+            }
 
             auto operand = parse_expression();
             if (operand == nullptr) {
                 report_error_at(loc, ErrorCode::ExpressionSyntaxError,
-                    "expected expression in cast<...>");
+                    std::string("expected expression in ") + keyword + "<...>");
                 return nullptr;
             }
-            if (!expect(TokenType::RightParen, "expected ')' after cast operand")) {
+            if (!expect(TokenType::RightParen,
+                std::string("expected ')' after ") + keyword + " operand")) {
                 return nullptr;
             }
-            return std::make_unique<PostfixExpression>(
+            auto result = std::make_unique<PostfixExpression>(
                 loc, std::move(operand), PostfixExpression::Operator::Cast,
                 nullptr, std::vector<std::unique_ptr<Expression>>{},
                 std::move(cast_type));
+            result->is_bitcopy = is_bitcopy;
+            return result;
         }
 
         case TokenType::Identifier: {
@@ -787,8 +801,10 @@ namespace gallt {
             case TokenType::Identifier:
             case TokenType::Keyword_Int:
             case TokenType::Keyword_Lint:
+            case TokenType::Keyword_Sint:
             case TokenType::Keyword_Uint:
             case TokenType::Keyword_Luint:
+            case TokenType::Keyword_Suint:
             case TokenType::Keyword_Float:
             case TokenType::Keyword_Double:
             case TokenType::Keyword_Char:
@@ -912,10 +928,11 @@ namespace gallt {
         return operand;
     }
 
-    bool Parser::parse_cast_target_type(Type& out, bool allow_void) {
+    bool Parser::parse_conversion_target_type(Type& out, bool allow_void,
+        const char* keyword) {
         if (current_.type != TokenType::Less) {
             report_error(ErrorCode::ExpressionSyntaxError,
-                "expected '<' after 'cast'");
+                std::string("expected '<' after '") + keyword + "'");
             return false;
         }
 
@@ -925,7 +942,7 @@ namespace gallt {
             current_.type == TokenType::RightParen ||
             current_.type == TokenType::EndOfFile) {
             report_error(ErrorCode::ExpressionSyntaxError,
-                "expected a target type in cast<...>");
+                std::string("expected a target type in ") + keyword + "<...>");
             return false;
         }
 
@@ -936,11 +953,13 @@ namespace gallt {
             if (suffix.has_value()) { target = std::move(suffix.value()); }
         }
 
-        if (!expect(TokenType::Greater, "expected '>' after cast target type")) {
+        if (!expect(TokenType::Greater,
+            std::string("expected '>' after ") + keyword + " target type")) {
             return false;
         }
 
-        if (!expect(TokenType::LeftParen, "expected '(' after cast target type")) {
+        if (!expect(TokenType::LeftParen,
+            std::string("expected '(' after ") + keyword + " target type")) {
             return false;
         }
 

@@ -1,0 +1,67 @@
+// lang__generics__pass__072.glt
+// expect output
+// Alice 20 true
+// Bob 30 true
+//  18 false
+
+struct Person {
+    string name = ""
+    int age = 18
+    bool active = true
+}
+
+struct name_arg {
+    string value
+
+    constructor (string v) {
+        value = v
+    }
+}
+
+struct age_arg {
+    int value
+
+    constructor (int v) {
+        value = v
+    }
+}
+
+struct active_arg {
+    bool value
+
+    constructor (bool v) {
+        value = v
+    }
+}
+
+generics NamedApply<First, Rest...> {
+    Person apply(Person p, First first, Rest... rest) {
+        const if (First.is_same<name_arg> == true) {
+            p.name = first.value
+        } const else if (First.is_same<age_arg> == true) {
+            p.age = first.value
+        } const else if (First.is_same<active_arg> == true) {
+            p.active = first.value
+        } const else {}
+
+        const if (Rest.empty) {
+            return p
+        } const else {
+            return NamedApply<Rest...>.apply(p, rest...)
+        }
+    }
+}
+
+int main() {
+    Person base = {""}
+
+    Person a = NamedApply<name_arg, age_arg>.apply(base, name_arg("Alice"), age_arg(20))
+    Person b = NamedApply<age_arg, name_arg>.apply(base, age_arg(30), name_arg("Bob"))
+    Person c = NamedApply<active_arg>.apply(base, active_arg(false))
+
+    output(a.name, " ", a.age, " ", a.active, "\n")
+    output(b.name, " ", b.age, " ", b.active, "\n")
+    output(c.name, " ", c.age, " ", c.active, "\n")
+
+    return 0
+}

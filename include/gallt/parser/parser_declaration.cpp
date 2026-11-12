@@ -30,6 +30,13 @@ namespace gallt {
                     ErrorCode::ExportRequiresFunctionDefinition,
                     { std::string("variable declaration") });
             }
+            if (ret_type.kind == TypeKind::Array &&
+                ret_type.pack_projection == PackProjectionKind::None &&
+                ret_type.array_suffix_from_type_specifier) {
+                report_error_at(loc, ErrorCode::ExpressionSyntaxError,
+                    "array size must follow the global variable name");
+                return nullptr;
+            }
             std::optional<size_t> array_size = std::nullopt;
             std::unique_ptr<Expression> array_size_expr;
             Type var_type = finish_declarator_type(std::move(ret_type), true, &array_size,
@@ -70,6 +77,14 @@ namespace gallt {
         }
 
         const bool const_qualified = match(TokenType::Keyword_Const);
+
+        if (const_qualified &&
+            (current_.type == TokenType::Star || current_.type == TokenType::Power)) {
+            report_error_at(current_location(), ErrorCode::ExpressionSyntaxError,
+                "unexpected '" + std::string(current_.lexeme) +
+                    "' after const-qualified function parameter list");
+            return nullptr;
+        }
 
         if (current_.type == TokenType::Star || current_.type == TokenType::Power) {
             if (exported) {
@@ -247,6 +262,8 @@ namespace gallt {
         case TokenType::Decrement:
         case TokenType::PlusAssign:
         case TokenType::MinusAssign:
+        case TokenType::StarAssign:
+        case TokenType::SlashAssign:
         case TokenType::AndAssign:
         case TokenType::OrAssign:
         case TokenType::XorAssign:
@@ -406,16 +423,34 @@ namespace gallt {
 
     std::unique_ptr<StructDefinition> Parser::parse_struct_definition() {
         SourceLocation loc = current_location();
+        bool no_ctor = false;
+        bool no_dtor = false;
         bool no_copy = false;
         bool no_move = false;
+        bool no_copy_ctor = false;
+        bool no_copy_assign = false;
+        bool no_move_ctor = false;
+        bool no_move_assign = false;
 
         while (at_struct_attribute()) {
             advance();
             std::string attr(current_.lexeme);
-            if (attr == "nocopy") {
+            if (attr == "noctor") {
+                no_ctor = true;
+            } else if (attr == "nodtor") {
+                no_dtor = true;
+            } else if (attr == "nocopy") {
                 no_copy = true;
             } else if (attr == "nomove") {
                 no_move = true;
+            } else if (attr == "nocopyctor") {
+                no_copy_ctor = true;
+            } else if (attr == "nocopyassign") {
+                no_copy_assign = true;
+            } else if (attr == "nomovector") {
+                no_move_ctor = true;
+            } else if (attr == "nomoveassign") {
+                no_move_assign = true;
             }
             advance();
             expect(TokenType::RightBracket, "expected ']' after struct attribute");
@@ -445,6 +480,8 @@ namespace gallt {
             if (current_.type == TokenType::RightBrace) {
                 break;
             }
+
+            SourceLocation member_loc = current_location();
 
             if (current_.type == TokenType::Keyword_Export) {
                 report_error_template(ErrorCode::ExportNotAllowedInContext,
@@ -560,6 +597,13 @@ namespace gallt {
             }
 
             Type member_type = parse_type(true);
+            if (member_type.kind == TypeKind::Array &&
+                member_type.pack_projection == PackProjectionKind::None &&
+                member_type.array_suffix_from_type_specifier) {
+                report_error(ErrorCode::ExpressionSyntaxError,
+                    "array size must follow the struct member name");
+                return nullptr;
+            }
 
             std::string member_name;
             if (!check_identifier_name(member_name, "member name")) {
@@ -574,7 +618,7 @@ namespace gallt {
             if (member_type.kind == TypeKind::Void ||
                 (member_type.kind == TypeKind::Array &&
                     member_type.element_type && member_type.element_type->kind == TypeKind::Void)) {
-                report_error_at(loc, ErrorCode::ExpressionSyntaxError,
+                report_error_at(member_loc, ErrorCode::ExpressionSyntaxError,
                     "struct member cannot have void type");
                 break;
             }
@@ -596,7 +640,7 @@ namespace gallt {
                 break;
             }
 
-            members.emplace_back(loc, std::move(member_type), member_name,
+            members.emplace_back(member_loc, std::move(member_type), member_name,
                 array_size, std::move(function_pointer_type), std::move(init));
             members.back().array_size_expr = std::move(member_size_expr);
         }
@@ -606,8 +650,14 @@ namespace gallt {
         }
 
         auto def = std::make_unique<StructDefinition>(loc, struct_name, std::move(members));
+        def->no_ctor = no_ctor;
+        def->no_dtor = no_dtor;
         def->no_copy = no_copy;
         def->no_move = no_move;
+        def->no_copy_ctor = no_copy_ctor;
+        def->no_copy_assign = no_copy_assign;
+        def->no_move_ctor = no_move_ctor;
+        def->no_move_assign = no_move_assign;
         def->special_members = std::move(special_members);
         return def;
     }
@@ -635,6 +685,13 @@ namespace gallt {
     std::unique_ptr<VariableDeclaration> Parser::parse_variable_declaration() {
         SourceLocation loc = current_location();
         Type var_type = parse_type(true);
+        if (var_type.kind == TypeKind::Array &&
+            var_type.pack_projection == PackProjectionKind::None &&
+            var_type.array_suffix_from_type_specifier) {
+            report_error_at(loc, ErrorCode::ExpressionSyntaxError,
+                "array size must follow the variable name");
+            return nullptr;
+        }
 
         std::string var_name;
         if (!check_identifier_name(var_name, "variable name")) {
@@ -871,6 +928,10 @@ namespace gallt {
             advance();
             base_type = Type::make_lint();
             break;
+        case TokenType::Keyword_Sint:
+            advance();
+            base_type = Type::make_sint();
+            break;
         case TokenType::Keyword_Uint:
             advance();
             base_type = Type::make_uint();
@@ -878,6 +939,10 @@ namespace gallt {
         case TokenType::Keyword_Luint:
             advance();
             base_type = Type::make_luint();
+            break;
+        case TokenType::Keyword_Suint:
+            advance();
+            base_type = Type::make_suint();
             break;
         case TokenType::Keyword_Float:
             advance();
@@ -1262,7 +1327,12 @@ namespace gallt {
         if (current_.type != TokenType::LeftBracket) { return false; }
         Token name = lookahead(1);
         if (name.type != TokenType::Identifier) { return false; }
-        if (name.lexeme != "nocopy" && name.lexeme != "nomove") { return false; }
+        if (name.lexeme != "noctor" && name.lexeme != "nodtor" &&
+            name.lexeme != "nocopy" && name.lexeme != "nomove" &&
+            name.lexeme != "nocopyctor" && name.lexeme != "nocopyassign" &&
+            name.lexeme != "nomovector" && name.lexeme != "nomoveassign") {
+            return false;
+        }
         return lookahead_type(2) == TokenType::RightBracket;
     }
 
@@ -1288,6 +1358,32 @@ namespace gallt {
             if (lookahead_type(1) == TokenType::Identifier ||
                declaration_name_after_star_suffix(1)) {
                 return true;
+            }
+
+            if (lookahead_type(1) == TokenType::LeftBracket &&
+                (declared_type_names_.find(name) != declared_type_names_.end() ||
+                    is_active_type_pack(name))) {
+                std::size_t i = 1;
+                while (lookahead_type(i) == TokenType::LeftBracket) {
+                    int bracket_depth = 0;
+                    while (lookahead_type(i) != TokenType::EndOfFile) {
+                        if (lookahead_type(i) == TokenType::LeftBracket) {
+                            ++bracket_depth;
+                        } else if (lookahead_type(i) == TokenType::RightBracket) {
+                            --bracket_depth;
+                            if (bracket_depth == 0) {
+                                ++i;
+                                break;
+                            }
+                        }
+                        ++i;
+                    }
+                }
+                if (lookahead_type(i) == TokenType::Dot &&
+                    lookahead_type(i + 1) == TokenType::Identifier) {
+                    i += 2;
+                }
+                return lookahead_type(i) == TokenType::Identifier;
             }
 
             if (declared_type_names_.find(name) != declared_type_names_.end() &&
@@ -1585,6 +1681,13 @@ namespace gallt {
     std::unique_ptr<VariableDeclaration> Parser::parse_variable_declaration_with_type(
         Type base_type, bool allow_empty_array) {
         SourceLocation loc = current_location();
+        if (base_type.kind == TypeKind::Array &&
+            base_type.pack_projection == PackProjectionKind::None &&
+            base_type.array_suffix_from_type_specifier) {
+            report_error_at(loc, ErrorCode::ExpressionSyntaxError,
+                "array size must follow the variable name");
+            return nullptr;
+        }
         std::string var_name;
         if (!check_identifier_name(var_name, "variable name")) {
             return nullptr;

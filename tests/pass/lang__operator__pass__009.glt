@@ -1,0 +1,11 @@
+// lang__operator__pass__009.glt
+// expect output
+// 2 2 3
+
+int main() {
+    int value = 1
+    int prefix = ++value
+    int postfix = value++
+    output(prefix, " ", postfix, " ", value)
+    return 0
+}

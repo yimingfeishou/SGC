@@ -4,8 +4,8 @@
 const string FIXED = "abc"
 
 int main() {
-    output(strsetchar(FIXED, 0, 'x'))
-    string moved = strmove(FIXED)
+    output(strsetchar(&FIXED, 0, 'x'))
+    string moved = strmove(&FIXED)
     output(" ", moved)
     return 0
 }

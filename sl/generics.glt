@@ -2,7 +2,6 @@
 // Gallt Standard Library
 // Naming Conventions: snake_case
 // All standard library statements are stored in the sl namespace
-// All standard libraries except for sl.glt itself, should import sl.glt and addition namespace sl
 // Copyright (c) Yimingfeishou
 
 guide "sl.glt"
@@ -430,6 +429,14 @@ addition namespace sl {
                 return zero_value()
             }
             return it->owner->data[it->state.index]
+        }
+
+        bool __iterator_set(iterator* it, T value) {
+            if (!iterator_valid(it)) {
+                return false
+            }
+            it->owner->data[it->state.index] = value
+            return true
         }
 
         bool iterator_next(iterator* it) {
@@ -1301,6 +1308,14 @@ addition namespace sl {
             return result
         }
 
+        bool __iterator_set(iterator* it, hash_table_entry value) {
+            if (!iterator_valid(it)) {
+                return false
+            }
+            it->owner->values[it->state.index] = value.value
+            return true
+        }
+
         bool iterator_next(iterator* it) {
             if (!iterator_valid(it)) {
                 return false
@@ -1698,8 +1713,8 @@ addition namespace sl {
 
     generics offset_generic<T: struct, string member> {
         emit "luint offset(" + T.typename + "* ptr) {\n"
-        emit "    luint base = cast<luint>(ptr)\n"
-        emit "    luint mem = cast<luint>(&ptr->" + member + ")\n"
+        emit "    luint base = bitcopy<luint>(ptr)\n"
+        emit "    luint mem = bitcopy<luint>(&ptr->" + member + ")\n"
         emit "    return mem - base\n"
         emit "}\n"
     }

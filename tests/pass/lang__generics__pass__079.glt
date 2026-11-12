@@ -1,0 +1,15 @@
+// lang__generics__pass__079.glt
+// expect output
+
+generics Source<T> {
+    T value
+}
+
+generics Bad<T> {
+    emit "Source<int>\n"
+}
+
+int main() {
+    Bad<int>
+    return 0
+}

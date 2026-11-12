@@ -1,0 +1,45 @@
+// lang__generics__pass__071.glt
+// expect output
+// 10 11 13
+
+struct Constructed {
+    int value
+
+    constructor (int v) {
+        value = v
+    }
+}
+
+generics RuntimeConstruct<T...> {
+    Constructed* make(T... values) {
+        return construct Constructed(values...)
+    }
+}
+
+generics PlacementConstruct<T...> {
+    Constructed* make_at(Constructed* target, T... values) {
+        construct Constructed(values...) at target
+        return target
+    }
+}
+
+generics ConstantConstruct<int... Ns> {
+    Constructed* make() {
+        return construct Constructed(Ns...)
+    }
+}
+
+int main() {
+    Constructed* first = RuntimeConstruct<int>.make(10)
+    Constructed* second_slot = heap(Constructed)
+    Constructed* second = PlacementConstruct<int>.make_at(second_slot, 11)
+    Constructed* third = ConstantConstruct<13>.make()
+    output(first->value, " ", second->value, " ", third->value, "\n")
+    first->destructor()
+    free(first)
+    second->destructor()
+    free(second)
+    third->destructor()
+    free(third)
+    return 0
+}

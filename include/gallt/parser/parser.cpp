@@ -242,8 +242,10 @@ namespace gallt {
         case TokenType::Identifier:
         case TokenType::Keyword_Int:
         case TokenType::Keyword_Lint:
+        case TokenType::Keyword_Sint:
         case TokenType::Keyword_Uint:
         case TokenType::Keyword_Luint:
+        case TokenType::Keyword_Suint:
         case TokenType::Keyword_Float:
         case TokenType::Keyword_Double:
         case TokenType::Keyword_Char:
@@ -283,6 +285,7 @@ namespace gallt {
         case TokenType::Keyword_Null:
         case TokenType::Keyword_Heap:
         case TokenType::Keyword_Cast:
+        case TokenType::Keyword_Bitcopy:
         case TokenType::Keyword_Const:
         case TokenType::Keyword_Generics:
         case TokenType::LeftParen:
@@ -616,6 +619,7 @@ namespace gallt {
                     return parse_operator_definition();
                 }
                 if (tt == TokenType::Identifier && looks_like_generic_instantiation()) {
+                    const std::size_t start = mark();
                     SourceLocation ref_loc = current_location();
                     GenericRef ref = parse_generic_reference(current_.lexeme);
                     bool declaration_follows = (current_.type == TokenType::Identifier ||
@@ -623,6 +627,11 @@ namespace gallt {
                     if (!declaration_follows) {
                         expect_stmt_end("generic instantiation");
                         return std::make_unique<InstantiationStatement>(ref_loc, std::move(ref));
+                    }
+                    if (current_.type == TokenType::Identifier &&
+                        lookahead_type(1) == TokenType::LeftParen) {
+                        reset_to(start);
+                        return parse_function_definition();
                     }
                     if (ref.member.empty()) {
                         Type t = Type::make_struct(ref.to_string());

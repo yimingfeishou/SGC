@@ -1,5 +1,5 @@
 // lang__generics__error__042.glt
-// expect error ER 0101
+// expect error ER 0076
 
 generics Source<T> {
     T value

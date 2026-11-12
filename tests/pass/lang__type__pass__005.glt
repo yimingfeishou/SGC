@@ -1,0 +1,25 @@
+// lang__type__pass__005.glt
+// expect output
+// 2 2 2 2
+// 12 34
+// 15 38
+// -3 3
+
+sint add_sint(sint left, sint right) {
+    return left + right
+}
+
+suint add_suint(suint left, suint right) {
+    return left + right
+}
+
+int main() {
+    sint signed_value = 12s
+    suint unsigned_value = 34su
+    output(size(sint), " ", align(sint), " ", size(suint), " ", align(suint), "\n")
+    output(signed_value, " ", unsigned_value, "\n")
+    output(add_sint(signed_value, 3s), " ", add_suint(unsigned_value, 4su), "\n")
+    sint negative = -7s
+    output(negative / 2s, " ", unsigned_value / 10su, "\n")
+    return 0
+}

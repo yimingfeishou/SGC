@@ -273,7 +273,12 @@ namespace gallt {
         case TypeKind::Luint:
             return static_cast<long long>(
                 static_cast<unsigned long long>(value));
+        case TypeKind::Sint:
+            return static_cast<long long>(static_cast<short>(value));
+        case TypeKind::Suint:
+            return static_cast<long long>(static_cast<unsigned short>(value));
         case TypeKind::Char:
+            return static_cast<long long>(static_cast<signed char>(value));
         case TypeKind::Uchar:
             return static_cast<long long>(static_cast<unsigned char>(value));
         case TypeKind::Bool:
@@ -360,8 +365,10 @@ namespace gallt {
         switch (type.kind) {
         case TypeKind::Int:
         case TypeKind::Lint:
+        case TypeKind::Sint:
         case TypeKind::Uint:
         case TypeKind::Luint:
+        case TypeKind::Suint:
         case TypeKind::Float:
         case TypeKind::Double:
         case TypeKind::Char:
@@ -396,8 +403,10 @@ namespace gallt {
         switch (type.kind) {
         case TypeKind::Int:
         case TypeKind::Lint:
+        case TypeKind::Sint:
         case TypeKind::Uint:
         case TypeKind::Luint:
+        case TypeKind::Suint:
         case TypeKind::Char:
         case TypeKind::Uchar:
         case TypeKind::Bool:
@@ -896,6 +905,18 @@ namespace gallt {
                     return false;
                 }
                 break;
+            case AssignmentExpression::Operator::StarAssign:
+                if (!apply_arithmetic(ArithmeticOp::Multiply, *target, right,
+                    result)) {
+                    return false;
+                }
+                break;
+            case AssignmentExpression::Operator::SlashAssign:
+                if (!apply_arithmetic(ArithmeticOp::Divide, *target, right,
+                    result)) {
+                    return false;
+                }
+                break;
             case AssignmentExpression::Operator::AndAssign:
                 if (!apply_bitwise(BitwiseOp::And, *target, right, result)) {
                     return false;
@@ -1211,6 +1232,9 @@ namespace gallt {
             return true;
         }
         case PostfixExpression::Operator::Cast: {
+            if (expr->is_bitcopy) {
+                return fail(ConstexprFailure::Unsupported);
+            }
             ConstexprValue base;
             if (!eval(expr->base.get(), base)) { return false; }
             if (!coerce(base, expr->cast_type, out)) {

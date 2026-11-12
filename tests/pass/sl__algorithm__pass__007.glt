@@ -1,0 +1,44 @@
+// sl__algorithm__pass__007.glt
+// expect output
+// 1 2 2
+// true apple true zebra xpearapple
+
+guide "algorithm.glt"
+guide "generics.glt"
+access namespace sl
+
+int compare_string(string left, string right) {
+    return strcompare(left, right)
+}
+
+string join_string(string left, string right) {
+    return left + right
+}
+
+int main() {
+    dynamic_array_generic<string>
+    dynamic_array_range_generic<string>
+    find_generic<string>
+    count_generic<string>
+    min_value_generic<string>
+
+    dynamic_array words = dynamic_array(4)
+    push(&words, "a")
+    push(&words, "b")
+    push(&words, "b")
+    push(&words, "d")
+    iterator it = begin(&words)
+    iterator_interface range = make_dynamic_range(&it)
+    output(find(&range, 4, "b", &compare_string), " ")
+    output(find_last(&range, 4, "b", &compare_string), " ")
+    output(count_value(&range, 4, "b", &compare_string), "\n")
+
+    push(&words, "zebra")
+    set(&words, 0, "pear")
+    set(&words, 1, "apple")
+    string text = ""
+    output(min_value(&range, length(&words), &compare_string, &text), " ", text, " ")
+    output(max_value(&range, length(&words), &compare_string, &text), " ", text, " ")
+    output(accumulate(&range, 2, "x", &join_string))
+    return 0
+}

@@ -1,0 +1,8 @@
+// lang__cast__pass__018.glt
+// expect output
+
+int main() {
+    int x = 1
+    cast<void>(x)
+    return 0
+}

@@ -9,7 +9,8 @@ int main() {
     int value = 1
     int* slot = &value
     Point p = {2}
-    input(slot)
-    input(p)
+    input(value)
+    input(&slot)
+    input(&p)
     return 0
 }

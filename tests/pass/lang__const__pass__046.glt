@@ -1,0 +1,27 @@
+// lang__const__pass__046.glt
+// expect output
+// 42 global text longer than fifteen bytes 7 8 11
+
+struct GlobalItem {
+    string text
+    int value
+}
+
+const int global_value = 42
+const string global_text = "global text longer than fifteen bytes"
+const GlobalItem global_item = {"global text longer than fifteen bytes", 7}
+int mutable_value = 10
+int runtime_value = mutable_value + 1
+
+int main() {
+    int* value_pointer = bitcopy<int*>(&global_value)
+    string* text_pointer = bitcopy<string*>(&global_text)
+    GlobalItem* item_pointer = bitcopy<GlobalItem*>(&global_item)
+    int* mutable_pointer = &mutable_value
+    int* runtime_pointer = &runtime_value
+    *mutable_pointer = 8
+
+    output(*value_pointer, " ", *text_pointer, " ", item_pointer->value)
+    output(" ", *mutable_pointer, " ", *runtime_pointer)
+    return 0
+}

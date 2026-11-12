@@ -36,6 +36,7 @@ namespace gallt {
         bool is_builtin = false;
 
         AST::StructDefinition* struct_node = nullptr;
+        AST::VariableDeclaration* variable_node = nullptr;
 
         size_t param_index = 0;
 

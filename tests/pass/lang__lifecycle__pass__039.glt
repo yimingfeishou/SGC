@@ -1,0 +1,24 @@
+// lang__lifecycle__pass__039.glt
+// expect output
+// ctor(1);move(1);dtor(0);ctor(2);move(2);dtor(0);[A]copy(1);copy(1);dtor(1);[B]dtor(1);dtor(2);dtor(1);
+
+struct T {
+    int v
+    constructor (int x) { v = x; output("ctor(", x, ");") }
+    copy_constructor (T* o) { v = o->v; output("copy(", v, ");") }
+    move_constructor (T* o) { v = o->v; o->v = 0; output("move(", v, ");") }
+    destructor () { output("dtor(", v, ");") }
+}
+
+T make(int x) {
+    return T(x)
+}
+
+int main() {
+    T a = make(1)
+    T b = make(2)
+    output("[A]")
+    T c = true ? a : b
+    output("[B]")
+    return 0
+}

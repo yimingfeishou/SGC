@@ -1,0 +1,54 @@
+// lang__generics__pass__073.glt
+// expect output
+// A|true|BC|true|corrupt 3
+
+struct DirtyPlaced {
+    string name = ""
+    int value = 3
+
+    constructor (string label) {
+        name = label
+    }
+}
+
+generics CharValue<char Value> {
+    void print() {
+        output(Value, "|")
+    }
+}
+
+generics BoolValue<bool Value> {
+    void print() {
+        output(Value, "|")
+    }
+}
+
+generics CharPack<char... Values> {
+    void print() {
+        output(Values..., "|")
+    }
+}
+
+generics DoubleValue<double Value> {
+    bool exact() {
+        return Value == 1.234567890123
+    }
+}
+
+int main() {
+    CharValue<'A'>.print()
+    BoolValue<true>.print()
+    CharPack<'B', 'C'>.print()
+    output(DoubleValue<1.234567890123>.exact(), "|")
+
+    lint storage[5]
+    storage[0] = 16l
+    storage[1] = 16l
+    storage[2] = 1l
+    storage[3] = 2l
+    DirtyPlaced* item = bitcopy<DirtyPlaced*>(storage)
+    construct DirtyPlaced("corrupt") at item
+    output(item->name, " ", item->value, "\n")
+    item->destructor()
+    return 0
+}

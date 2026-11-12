@@ -1,0 +1,19 @@
+// lang__nomove__pass__006.glt
+// expect output
+// 5
+
+[nomove] struct N {
+    int x
+}
+
+N make_n(int v) {
+    N r
+    r.x = v
+    return r
+}
+
+int main() {
+    N arr[1] = {make_n(5)}
+    output(arr[0].x)
+    return 0
+}

@@ -1,4 +1,5 @@
 #include "generic_expander.hpp"
+#include "generic_expander_detail.hpp"
 #include "constant_folding.hpp"
 #include <algorithm>
 #include <cstdlib>
@@ -41,18 +42,22 @@ namespace gallt {
                 return 0;
             case AST::TypeKind::Uchar:
                 return 1;
-            case AST::TypeKind::Int:
+            case AST::TypeKind::Sint:
                 return 2;
-            case AST::TypeKind::Uint:
+            case AST::TypeKind::Suint:
                 return 3;
-            case AST::TypeKind::Lint:
+            case AST::TypeKind::Int:
                 return 4;
-            case AST::TypeKind::Luint:
+            case AST::TypeKind::Uint:
                 return 5;
-            case AST::TypeKind::Float:
+            case AST::TypeKind::Lint:
                 return 6;
-            case AST::TypeKind::Double:
+            case AST::TypeKind::Luint:
                 return 7;
+            case AST::TypeKind::Float:
+                return 8;
+            case AST::TypeKind::Double:
+                return 9;
             default:
                 return -1;
             }
@@ -84,7 +89,9 @@ namespace gallt {
             const bool small_integer =
                 source.kind == AST::TypeKind::Bool ||
                 source.kind == AST::TypeKind::Char ||
-                source.kind == AST::TypeKind::Uchar;
+                source.kind == AST::TypeKind::Uchar ||
+                source.kind == AST::TypeKind::Sint ||
+                source.kind == AST::TypeKind::Suint;
             const bool integral_promotion = small_integer &&
                 (target.kind == AST::TypeKind::Int ||
                     target.kind == AST::TypeKind::Uint);
@@ -567,15 +574,16 @@ namespace gallt {
             return true;
         case TypeKind::Float:
         case TypeKind::Double: {
-            char buffer[64];
-            std::snprintf(buffer, sizeof(buffer), "%g", value.float_value);
-            out += buffer;
+            out += generic_expander_detail::format_float_literal(
+                value.float_value);
             return true;
         }
         case TypeKind::Int:
         case TypeKind::Lint:
+        case TypeKind::Sint:
         case TypeKind::Uint:
         case TypeKind::Luint:
+        case TypeKind::Suint:
             out += std::to_string(value.int_value);
             return true;
         default:

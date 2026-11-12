@@ -11,7 +11,7 @@ int main() {
     output("[", strtrim("  text \n"), "]\n")
     output(strcharat("cat",0), " ", strcharat("cat",9), "\n")
     string text = "cat"
-    output(strsetchar(text,0,'b'), " ", text, " ", strsetchar(text,9,'z'), "\n")
+    output(strsetchar(&text,0,'b'), " ", text, " ", strsetchar(&text,9,'z'), "\n")
     output(strsplitcount("a,b,c",","), " ", strsplitcount("abc",""), " ", strsplitcount("",","), "\n")
     output("[", strsplitget("a,b,c",",",1), "]", " [", strsplitget("a,b,c",",",9), "]", " [", strsplitget("a,b,c",",",-1), "]\n")
     string a = "value"
@@ -19,7 +19,7 @@ int main() {
     b = strconcat(b, "!")
     output(a, " ", b, "\n")
     string source = "payload"
-    string target = strmove(source)
+    string target = strmove(&source)
     output("[", target, "][", source, "]\n")
     return 0
 }

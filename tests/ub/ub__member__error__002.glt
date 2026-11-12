@@ -1,0 +1,18 @@
+// ub__member__error__002.glt
+// expect exit 0
+
+struct Point {
+    int x
+    int y
+}
+
+int main() {
+    Point first = {1, 2}
+    Point second = {3, 4}
+    output((true ? first : second).x, " ")
+    output(cast<Point>(second).y, " ")
+    output(bitcopy<Point>(first).x, " ")
+    output(cast<Point>(false ? first : second).y, " ")
+    output(bitcopy<Point>(false ? first : second).y)
+    return 0
+}

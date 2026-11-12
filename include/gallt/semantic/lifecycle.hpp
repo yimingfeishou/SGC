@@ -127,6 +127,8 @@ namespace gallt {
             const std::unordered_set<std::string>& locals);
         AST::SpecialMemberFunction* select_constructor(const StructInfo& info,
             const std::vector<AST::Expression*>& args, bool* ambiguous);
+        void report_constructor_mismatch(const StructInfo& info,
+            std::size_t argument_count, SourceLocation loc);
         int argument_rank(const AST::Type& param, const AST::Expression* arg) const;
         bool type_matches_argument(const AST::Type& param, const AST::Expression* arg) const;
         AST::Type infer_literal_type(const AST::Expression* expr) const;
